@@ -80,3 +80,31 @@
 - [ ] OpenAPI client codegen → frontend types (`openapi-typescript`)
 - [ ] Replace ephemeral JWT keypair with stable Secrets Manager-backed RSA key
 - [ ] Sports-card data source (currently no clean API; eBay + manual catalog is the path)
+
+---
+
+## 🔌 Real-Data Provider Matrix
+
+Provider classes live in `app/integrations/`. All providers are
+env-gated and degrade gracefully — missing keys ⇒ empty results, never
+5xx. Status visible at `GET /v1/providers/status`.
+
+| Provider       | Env vars (required)                              | Capabilities                  |
+|----------------|--------------------------------------------------|-------------------------------|
+| `ebay`         | `EBAY_APP_ID`, `EBAY_CERT_ID` (or `EBAY_OAUTH_TOKEN`) | listings, sold comps          |
+| `psa`          | `PSA_API_TOKEN`                                  | population reports            |
+| `tcgplayer`    | `TCGPLAYER_PUBLIC_KEY`, `TCGPLAYER_PRIVATE_KEY` (or `TCGPLAYER_CLIENT_ID/SECRET`) | market price                  |
+| `pricecharting`| `PRICECHARTING_TOKEN` (or `PRICECHARTING_API_KEY`)  | market price                  |
+| `point130`     | _(none — public scraper, 1 req/sec, 24h cached)_ | sold comps                    |
+| `gocollect`    | `GOCOLLECT_API_KEY`                              | _stub — wire when needed_     |
+
+**Recommended priority for first keys:** eBay (`EBAY_APP_ID` +
+`EBAY_CERT_ID`) → unlocks both live listings and recent sold comps,
+which in turn light up `source: "real"` on the market snapshot rows.
+PSA next for population accuracy, then TCGplayer for canonical market
+prices on Pokémon/MTG.
+
+**Cache:** listings 60s, comps 300s, market 60s (unchanged), 130point
+HTML 24h. All caches are best-effort (Redis if reachable, in-memory
+fallback otherwise — `app/services/cache.py`).
+

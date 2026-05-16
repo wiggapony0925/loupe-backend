@@ -407,7 +407,12 @@ def _from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
     if prices_list:
         first = prices_list[0]
         numeric: list[float] = []
-        for key in ("tcgplayer_price", "cardmarket_price", "ebay_price", "amazon_price"):
+        for key in (
+            "tcgplayer_price",
+            "cardmarket_price",
+            "ebay_price",
+            "amazon_price",
+        ):
             raw = first.get(key)
             try:
                 v = float(raw)
@@ -430,7 +435,9 @@ def _from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
             }
 
     set_data = {
-        "id": f"ygoprodeck:{first_set.get('set_code')}" if first_set.get("set_code") else None,
+        "id": f"ygoprodeck:{first_set.get('set_code')}"
+        if first_set.get("set_code")
+        else None,
         "code": first_set.get("set_code"),
         "name": first_set.get("set_name"),
         "series": None,
@@ -629,7 +636,15 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
 # ----------------------------------------------------------- price history
 
 
-_RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "180d": 180, "1y": 365, "365d": 365, "all": 730}
+_RANGE_DAYS = {
+    "7d": 7,
+    "30d": 30,
+    "90d": 90,
+    "180d": 180,
+    "1y": 365,
+    "365d": 365,
+    "all": 730,
+}
 
 
 def _granularity(days: int) -> str:
@@ -733,9 +748,7 @@ async def get_price_history(card_id: str, range_: str = "30d") -> dict[str, Any]
     pmax = max(values)
     pavg = round(sum(values) / len(values), 2)
     change_pct = (
-        round(((values[-1] - values[0]) / values[0]) * 100.0, 2)
-        if values[0]
-        else None
+        round(((values[-1] - values[0]) / values[0]) * 100.0, 2) if values[0] else None
     )
 
     body = {

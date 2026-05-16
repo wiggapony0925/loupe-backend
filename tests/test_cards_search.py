@@ -195,7 +195,11 @@ async def test_live_search_all_interleaves_providers(client, monkeypatch):
                 {
                     "id": f"base1-{i}",
                     "name": f"Poke{i}",
-                    "set": {"id": "base1", "name": "Base Set", "releaseDate": "1999/01/09"},
+                    "set": {
+                        "id": "base1",
+                        "name": "Base Set",
+                        "releaseDate": "1999/01/09",
+                    },
                     "images": {"small": f"https://img/p{i}.png"},
                     "rarity": "Common",
                 }
@@ -263,9 +267,7 @@ async def test_live_search_all_interleaves_providers(client, monkeypatch):
 async def test_provider_not_configured(client):
     """One Piece / Lorcana / Sports return an empty success envelope."""
     for tcg in ("onepiece", "lorcana", "sports"):
-        resp = await client.get(
-            "/v1/cards/search", params={"q": "x", "tcg": tcg}
-        )
+        resp = await client.get("/v1/cards/search", params={"q": "x", "tcg": tcg})
         body = assert_envelope_ok(resp)
         assert body["results"] == []
         assert body["error"] == "provider_not_configured"
@@ -297,7 +299,10 @@ async def test_rich_attributes_pokemon(client, monkeypatch):
                             "symbol": "https://img/base1-sym.png",
                         },
                     },
-                    "images": {"small": "https://img/4s.png", "large": "https://img/4l.png"},
+                    "images": {
+                        "small": "https://img/4s.png",
+                        "large": "https://img/4l.png",
+                    },
                     "rarity": "Rare Holo",
                     "number": "4",
                     "artist": "Mitsuhiro Arita",
@@ -318,9 +323,7 @@ async def test_rich_attributes_pokemon(client, monkeypatch):
         }
 
     monkeypatch.setattr(card_search_service.pokemon_tcg, "search_cards", fake)
-    resp = await client.get(
-        "/v1/cards/search", params={"q": "char", "tcg": "pokemon"}
-    )
+    resp = await client.get("/v1/cards/search", params={"q": "char", "tcg": "pokemon"})
     body = assert_envelope_ok(resp)
     card = body["results"][0]
     attrs = card["attributes"]
@@ -375,9 +378,7 @@ async def test_rich_attributes_magic(client, monkeypatch):
         }
 
     monkeypatch.setattr(card_search_service.scryfall, "search_cards", fake)
-    resp = await client.get(
-        "/v1/cards/search", params={"q": "lotus", "tcg": "magic"}
-    )
+    resp = await client.get("/v1/cards/search", params={"q": "lotus", "tcg": "magic"})
     card = assert_envelope_ok(resp)["results"][0]
     assert card["attributes"]["type_line"] == "Artifact"
     assert card["attributes"]["reserved"] is True
@@ -430,9 +431,7 @@ async def test_rich_attributes_yugioh(client, monkeypatch):
         }
 
     monkeypatch.setattr(card_search_service.ygoprodeck, "search_cards", fake)
-    resp = await client.get(
-        "/v1/cards/search", params={"q": "blue", "tcg": "yugioh"}
-    )
+    resp = await client.get("/v1/cards/search", params={"q": "blue", "tcg": "yugioh"})
     card = assert_envelope_ok(resp)["results"][0]
     assert card["attributes"]["atk"] == 3000
     assert card["attributes"]["def"] == 2500
@@ -454,7 +453,9 @@ async def test_price_history_endpoint(client, monkeypatch):
             "number": "4",
             "tcgplayer": {
                 "updatedAt": "2024-01-01",
-                "prices": {"holofoil": {"market": 250.0, "low": 100, "high": 500, "mid": 200}},
+                "prices": {
+                    "holofoil": {"market": 250.0, "low": 100, "high": 500, "mid": 200}
+                },
             },
         }
 

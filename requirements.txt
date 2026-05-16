@@ -25,6 +25,10 @@ httpx>=0.28.0,<1.0.0
 aioboto3>=13.2.0,<14.0.0
 tenacity>=9.0.0,<10.0.0
 
+# --- HTML parsing (130point scraper) ---
+beautifulsoup4>=4.12,<5
+lxml>=5.3,<6
+
 # --- Auth / crypto ---
 PyJWT>=2.10.0,<3.0.0
 cryptography>=43.0.0,<46.0.0

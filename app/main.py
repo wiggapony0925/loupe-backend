@@ -17,6 +17,7 @@ from app.routers import (
     collections,
     grades,
     prices,
+    providers,
     scanners,
     scans,
     sets,
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(grades.router, prefix=api_prefix)
     app.include_router(prices.router, prefix=api_prefix)
     app.include_router(collections.router, prefix=api_prefix)
+    app.include_router(providers.router, prefix=api_prefix)
 
     # WebSockets mount at root.
     app.include_router(ws.router)

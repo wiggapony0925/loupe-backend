@@ -20,8 +20,12 @@ from typing import Any
 
 from app.cache_config import PRICE_HISTORY_TTL
 from app.clients.redis_client import get_redis
+from app.integrations import get_registry
 from app.services import card_search_service
 from app.utils.logger import get_logger
+
+# Real-data enrichment runs only for top tiers per house (10/9.5/9).
+_REAL_DATA_TOP_GRADES: tuple[float, ...] = (10, 9.5, 9)
 
 logger = get_logger("services.market")
 
@@ -128,6 +132,7 @@ def _house_grade_row(
         "change_pct": change_pct,
         "last_sale_at": last_sale.isoformat(),
         "listing_url": None,
+        "source": "synthesized",
     }
 
 
@@ -248,6 +253,10 @@ async def build_market_for_card(card: dict[str, Any]) -> dict[str, Any]:
         return snapshot
 
     houses = _build_houses(card_id, raw_amt, year)
+    try:
+        await _enrich_with_real_data(card, houses)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("market real-data enrichment failed: %s", exc)
     tiers_total = sum(len(b["grades"]) for b in houses)
     summary = _summary(houses, raw_amt, float(change_pct_1y))
     return {
@@ -256,6 +265,70 @@ async def build_market_for_card(card: dict[str, Any]) -> dict[str, Any]:
         "houses": houses,
         "tiers_total": tiers_total,
     }
+
+
+# ----------------------------------------------------------------- real data
+
+
+def _build_query(card: dict[str, Any]) -> str:
+    bits: list[str] = []
+    for key in ("name", "set_name", "number"):
+        v = card.get(key)
+        if v:
+            bits.append(str(v))
+    return " ".join(bits).strip()
+
+
+async def _enrich_with_real_data(
+    card: dict[str, Any], houses: list[dict[str, Any]]
+) -> None:
+    """Promote synthesized top-grade rows to ``source="real"`` when comps exist.
+
+    Only touches grades in :data:`_REAL_DATA_TOP_GRADES`. Average comp price
+    per ``(house, grade)`` overrides the synthesized market value.
+    """
+    query = _build_query(card)
+    if not query:
+        return
+    registry = get_registry()
+    try:
+        comps = await registry.fan_out_comps(query, days=90, limit=100)
+    except Exception as exc:
+        logger.debug("real-data fan_out_comps failed: %s", exc)
+        return
+    if not comps:
+        return
+
+    buckets: dict[tuple[str, str], list[Any]] = {}
+    for c in comps:
+        if not c.house or not c.grade:
+            continue
+        buckets.setdefault((c.house.lower(), str(c.grade)), []).append(c)
+
+    for block in houses:
+        for row in block["grades"]:
+            try:
+                grade = float(row["grade"])
+            except (TypeError, ValueError):
+                continue
+            if grade not in _REAL_DATA_TOP_GRADES:
+                continue
+            key = (
+                str(row["house"]).lower(),
+                str(int(grade) if grade == int(grade) else grade),
+            )
+            entries = buckets.get(key)
+            if not entries:
+                continue
+            try:
+                avg = sum(float(e.price) for e in entries) / len(entries)
+                latest = max(entries, key=lambda e: e.sold_at)
+                row["market"] = _money(avg)
+                row["last_sale_at"] = latest.sold_at
+                row["listing_url"] = getattr(latest, "url", None)
+                row["source"] = "real"
+            except Exception as exc:
+                logger.debug("row enrichment failed: %s", exc)
 
 
 # ----------------------------------------------------------------- caching

@@ -685,4 +685,115 @@ auth failure.
 
 ---
 
+## Real-Data Provider Endpoints
+
+These endpoints expose live data fan-out across configured upstream
+providers (eBay, PSA, TCGplayer, PriceCharting, 130point, GoCollect).
+All endpoints degrade gracefully — without API keys configured they
+return empty lists / synthesized data, never 5xx.
+
+### GET /v1/cards/{card_id}/listings
+
+Live (non-sold) marketplace listings. Currently fan-out includes eBay
+Browse API.
+
+Query params:
+* `limit` — int, 1..50 (default 20)
+
+Response `data`:
+```json
+{
+  "card_id": "pokemontcg:base1-4",
+  "query": "Charizard Base Set #4",
+  "listings": [
+    {
+      "source": "ebay",
+      "id": "v1|123|0",
+      "title": "1999 Pokemon Base Set Charizard #4 PSA 9",
+      "url": "https://www.ebay.com/itm/...",
+      "image_url": "https://i.ebayimg.com/...",
+      "price": { "amount": 749.99, "currency": "USD" },
+      "is_auction": false,
+      "time_left_seconds": 86400,
+      "grade": { "company": "PSA", "value": 9.0 },
+      "seller": "topseller_99",
+      "location": "US",
+      "extras": {}
+    }
+  ]
+}
+```
+
+### GET /v1/cards/{card_id}/comps
+
+Recent sold comparable sales across providers. Currently fan-out
+includes eBay Marketplace Insights and 130point.
+
+Query params:
+* `days` — int, 7..365 (default 90)
+* `grade` — float, optional (e.g. `10`, `9.5`)
+* `house` — string, optional (`psa`, `cgc`, `bgs`, `sgc`, `tag`)
+* `limit` — int, 1..200 (default 50)
+
+Response `data`:
+```json
+{
+  "card_id": "pokemontcg:base1-4",
+  "query": "Charizard Base Set #4",
+  "days": 90,
+  "filters": { "grade": 10, "house": "psa" },
+  "comps": [
+    {
+      "source": "ebay",
+      "id": "v1|sale|7",
+      "title": "Charizard Base Set #4 PSA 10",
+      "url": "https://www.ebay.com/itm/...",
+      "price": { "amount": 12500.00, "currency": "USD" },
+      "sold_at": "2025-01-12T00:00:00Z",
+      "grade": { "company": "PSA", "value": 10.0 },
+      "extras": {}
+    }
+  ]
+}
+```
+
+### GET /v1/providers/status
+
+Per-provider configuration + capability matrix. Useful to drive the
+"Data Sources" footer in the UI.
+
+Response `data`:
+```json
+{
+  "providers": [
+    {
+      "id": "ebay",
+      "configured": true,
+      "capabilities": {
+        "search_listings": true,
+        "search_sold_comps": true,
+        "get_population": false,
+        "get_market_price": false
+      }
+    }
+  ]
+}
+```
+
+### HouseGradeRow.source
+
+The existing `GET /v1/cards/{card_id}/market` response now includes a
+`source` field on each `houses[].grades[]` row:
+
+* `"real"` — at least one comp was returned by a configured provider
+  for that house/grade and used to override `market` / `last_sale_at`.
+* `"synthesized"` — algorithmic fallback (population + RNG seeded by
+  card id).
+
+Rows MAY freely mix sources within one response. UIs should render an
+"est" pill when `source === "synthesized"` and the original `last_sale_at`
+otherwise.
+
+---
+
 _End of contract._

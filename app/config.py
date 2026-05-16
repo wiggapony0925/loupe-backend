@@ -81,6 +81,19 @@ class Settings(BaseSettings):
     pricecharting_api_key: str = ""
     sci_api_key: str = ""
 
+    # --- Real Data Provider APIs (env-gated; graceful fallback when blank) ---
+    # eBay Browse / Marketplace Insights — https://developer.ebay.com
+    ebay_oauth_token: str | None = None  # optional pre-minted token
+    # PSA Public API — https://www.psacard.com/publicapi
+    psa_api_token: str | None = None
+    # TCGplayer API — https://docs.tcgplayer.com (mirrors of *_client_*)
+    tcgplayer_public_key: str | None = None
+    tcgplayer_private_key: str | None = None
+    # PriceCharting — https://www.pricecharting.com/api-documentation
+    pricecharting_token: str | None = None
+    # GoCollect (stub) — https://gocollect.com
+    gocollect_api_key: str | None = None
+
     # --- HTTP client tuning ---
     http_timeout_seconds: float = 15.0
     http_max_connections: int = 20

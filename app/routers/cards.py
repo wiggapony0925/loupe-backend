@@ -21,7 +21,13 @@ from app.db import get_db
 from app.models.enums import TcgEnum
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
-from app.services import card_catalog_service, card_search_service, market_service
+from app.services import (
+    card_catalog_service,
+    card_search_service,
+    comps_service,
+    listings_service,
+    market_service,
+)
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -103,6 +109,43 @@ async def get_prices(
     result["house"] = house
     if grade:
         result["grade"] = grade
+    return result
+
+
+@router.get("/{card_id}/listings", summary="Live for-sale listings (public)")
+async def get_listings(
+    card_id: str,
+    limit: int = Query(20, ge=1, le=50),
+) -> dict[str, Any]:
+    """Live listings fanned out across configured providers (eBay, ...).
+
+    Returns ``listings: []`` when no provider is configured, so the
+    client always renders successfully.
+    """
+    if ":" not in card_id:
+        raise HTTPException(status_code=400, detail="Composite card id required")
+    result = await listings_service.get_listings_for_card(card_id, limit=limit)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return result
+
+
+@router.get("/{card_id}/comps", summary="Recent sold comps (public)")
+async def get_comps(
+    card_id: str,
+    days: int = Query(90, ge=1, le=365),
+    grade: str | None = Query(None, max_length=8),
+    house: str | None = Query(None, max_length=8),
+    limit: int = Query(50, ge=1, le=100),
+) -> dict[str, Any]:
+    """Recent sold comps fanned out across configured providers."""
+    if ":" not in card_id:
+        raise HTTPException(status_code=400, detail="Composite card id required")
+    result = await comps_service.get_comps_for_card(
+        card_id, days=days, grade=grade, house=house, limit=limit
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
     return result
 
 

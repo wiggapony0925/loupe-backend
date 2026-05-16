@@ -79,6 +79,7 @@ class HouseGradeRow(BaseModel):
     change_pct: float
     last_sale_at: datetime | None = None
     listing_url: str | None = None
+    source: Literal["real", "synthesized"] = "synthesized"
 
 
 class HouseBlock(BaseModel):
