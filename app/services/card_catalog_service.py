@@ -6,6 +6,7 @@ import uuid
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.card import Card, CardSet
 from app.models.enums import TcgEnum
@@ -41,8 +42,15 @@ async def search_cards(
 
 
 async def get_card(db: AsyncSession, card_id: uuid.UUID) -> Card | None:
+    # Eager-load the parent set so callers can render set name/code without
+    # triggering a lazy-load (and to keep this safe to use in the async
+    # context manager pattern used by HTTP services).
     return (
-        await db.execute(select(Card).where(Card.id == card_id))
+        await db.execute(
+            select(Card)
+            .options(selectinload(Card.card_set))
+            .where(Card.id == card_id)
+        )
     ).scalar_one_or_none()
 
 

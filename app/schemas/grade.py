@@ -33,6 +33,9 @@ class GradedCardRead(BaseModel):
     card_name: str | None = None
     card_image_url: str | None = None
     card_number: str | None = None
+    card_set_name: str | None = None
+    card_year: int | None = None
+    card_tcg: str | None = None
 
 
 class GradedCardCreate(BaseModel):

@@ -619,16 +619,22 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             row = await card_catalog_service.get_card(session, as_uuid)
         if row is None:
             return None
+        card_set = getattr(row, "card_set", None)
+        set_name = card_set.name if card_set is not None else None
+        set_code = card_set.code if card_set is not None else None
+        year = row.year
+        if year is None and card_set is not None and card_set.release_date is not None:
+            year = card_set.release_date.year
         return {
             "id": card_id,
             "name": row.name,
             "tcg": row.tcg.value if hasattr(row.tcg, "value") else str(row.tcg),
-            "set_name": None,
-            "set_code": None,
+            "set_name": set_name,
+            "set_code": set_code,
             "number": row.number,
             "rarity": row.rarity,
             "image_url": row.image_url,
-            "year": row.year,
+            "year": year,
             "source": "loupe-db",
             "pricing_summary": None,
         }

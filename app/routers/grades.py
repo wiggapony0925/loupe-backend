@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_user
 from app.db import get_db
-from app.models.card import Card
+from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
@@ -19,12 +19,18 @@ from app.utils.time import utcnow
 router = APIRouter(prefix="/grades", tags=["grades"])
 
 
-def _to_read(row: GradedCard, card: Card | None) -> GradedCardRead:
+def _to_read(row: GradedCard, card: Card | None, card_set: CardSet | None) -> GradedCardRead:
     out = GradedCardRead.model_validate(row)
     if card is not None:
         out.card_name = card.name
         out.card_image_url = card.image_url
         out.card_number = card.number
+        out.card_year = card.year
+        out.card_tcg = card.tcg.value if hasattr(card.tcg, "value") else str(card.tcg)
+    if card_set is not None:
+        out.card_set_name = card_set.name
+        if out.card_year is None and card_set.release_date is not None:
+            out.card_year = card_set.release_date.year
     return out
 
 
@@ -32,15 +38,16 @@ def _to_read(row: GradedCard, card: Card | None) -> GradedCardRead:
 async def list_mine(
     user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
 ) -> list[GradedCardRead]:
-    pairs = (
+    rows = (
         await db.execute(
-            select(GradedCard, Card)
+            select(GradedCard, Card, CardSet)
             .outerjoin(Card, Card.id == GradedCard.card_id)
+            .outerjoin(CardSet, CardSet.id == Card.set_id)
             .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
             .order_by(GradedCard.graded_at.desc())
         )
     ).all()
-    return [_to_read(g, c) for (g, c) in pairs]
+    return [_to_read(g, c, s) for (g, c, s) in rows]
 
 
 @router.post(
@@ -79,8 +86,9 @@ async def get_one(
 ) -> GradedCardRead:
     pair = (
         await db.execute(
-            select(GradedCard, Card)
+            select(GradedCard, Card, CardSet)
             .outerjoin(Card, Card.id == GradedCard.card_id)
+            .outerjoin(CardSet, CardSet.id == Card.set_id)
             .where(
                 GradedCard.id == grade_id,
                 GradedCard.user_id == user.id,
@@ -90,7 +98,7 @@ async def get_one(
     ).first()
     if pair is None:
         raise HTTPException(status_code=404, detail="Graded card not found")
-    return _to_read(pair[0], pair[1])
+    return _to_read(pair[0], pair[1], pair[2])
 
 
 @router.patch(
