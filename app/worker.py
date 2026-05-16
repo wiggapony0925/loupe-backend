@@ -1,0 +1,84 @@
+"""arq worker configuration and scheduled tasks."""
+
+from __future__ import annotations
+
+from typing import Any
+
+try:
+    from arq.connections import RedisSettings
+    from arq.cron import cron
+except ImportError:  # pragma: no cover - arq optional at import time
+    RedisSettings = None  # type: ignore[assignment,misc]
+    cron = None  # type: ignore[assignment]
+
+from app.config import get_settings
+from app.utils.logger import get_logger
+
+_log = get_logger("worker")
+
+
+async def startup(ctx: dict[str, Any]) -> None:
+    """arq startup hook — eagerly construct DB engine."""
+    from app.db import get_engine
+
+    get_engine()
+    _log.info("arq worker ready")
+
+
+async def shutdown(ctx: dict[str, Any]) -> None:
+    """arq shutdown hook — close shared resources."""
+    from app.clients.redis_client import close_redis
+    from app.db import reset_engine
+
+    await reset_engine()
+    await close_redis()
+    _log.info("arq worker stopped")
+
+
+async def process_scan(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    """Process a finished scan-upload through the grading pipeline."""
+    from app.workers.scan_processor import process_scan as run_scan_processor
+
+    await run_scan_processor(payload)
+    return {"ok": True}
+
+
+async def catalog_sync(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Pull recent card data from upstream catalogs."""
+    from app.workers.catalog_sync import catalog_sync as run_catalog_sync
+
+    await run_catalog_sync(ctx)
+    return {"ok": True}
+
+
+def _redis_settings() -> Any:
+    if RedisSettings is None:  # pragma: no cover
+        return None
+    settings = get_settings()
+    return RedisSettings.from_dsn(settings.redis_url)
+
+
+class WorkerSettings:
+    """arq :class:`WorkerSettings` declarative class.
+
+    Launch with::
+
+        arq app.worker.WorkerSettings
+    """
+
+    functions = [process_scan, catalog_sync]
+    cron_jobs = [cron(catalog_sync, hour={3}, minute={0})] if cron is not None else []
+    on_startup = startup
+    on_shutdown = shutdown
+    redis_settings = _redis_settings()
+    max_jobs = 4
+    job_timeout = 300
+
+
+__all__ = [
+    "WorkerSettings",
+    "catalog_sync",
+    "process_scan",
+    "shutdown",
+    "startup",
+]

@@ -1,0 +1,62 @@
+[project]
+name = "loupe-backend"
+version = "0.1.0"
+description = "Loupe — production-grade FastAPI backend for hardware-scanner card grading."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Loupe" }]
+license = { text = "Proprietary" }
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = ["app/db/alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "UP", "B", "SIM", "C4", "RET", "PIE",
+    "ISC", "TCH", "PLC", "PLE", "PLW", "RUF",
+]
+ignore = [
+    "RUF001",
+    "RUF012",
+    "PLC0415",
+    "PLW0603",
+    "ISC001",
+    "E501",
+    "B008",   # FastAPI Depends() in defaults
+    "UP007",  # X | Y vs Optional[X] — both fine
+    "TCH001", "TCH002", "TCH003",  # pydantic needs runtime imports
+    "RET504",
+    "SIM108",
+    "PLC0414",  # re-exports
+    "B904",
+    "UP031",  # percent formatting in legacy upstream client
+    "UP042",  # str-based Enum subclasses (intentional for SQLAlchemy compat)
+    "UP046",  # Generic[T] pattern preferred for Pydantic compatibility
+    "SIM105", # try/except/pass intentional in hot relay path
+    "RUF002", # ambiguous unicode in human docstrings
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011", "PLW", "PLC", "B017", "SIM117"]
+"app/db/alembic/**" = ["E", "F", "I", "UP"]
+"documentation/**" = ["E"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_incomplete_defs = false
+disallow_untyped_defs = false
+exclude = "app/db/alembic/versions"
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "documentation.*"]
+ignore_errors = true

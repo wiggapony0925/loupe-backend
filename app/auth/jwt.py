@@ -1,0 +1,112 @@
+"""JWT issuance & verification (RS256).
+
+In development, if no private key is configured, a per-process ephemeral RSA
+key is generated so the API still works end-to-end without operator setup.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+import uuid
+from typing import Any, Literal
+
+import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
+from app.config import get_settings
+from app.utils.logger import get_logger
+
+logger = get_logger("auth.jwt")
+
+_lock = threading.Lock()
+_ephemeral_private_pem: bytes | None = None
+_ephemeral_public_pem: bytes | None = None
+
+TokenType = Literal["access", "refresh"]
+
+
+def _ensure_ephemeral_keys() -> tuple[bytes, bytes]:
+    """Lazily generate an in-process RSA key pair for dev/test use."""
+    global _ephemeral_private_pem, _ephemeral_public_pem
+    with _lock:
+        if _ephemeral_private_pem is None or _ephemeral_public_pem is None:
+            logger.warning(
+                "No JWT private key configured; generating ephemeral RSA key for this process"
+            )
+            key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+            _ephemeral_private_pem = key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+            _ephemeral_public_pem = key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+        return _ephemeral_private_pem, _ephemeral_public_pem
+
+
+def _private_key() -> bytes:
+    s = get_settings()
+    if s.jwt_private_key_pem:
+        return s.jwt_private_key_pem.encode("utf-8")
+    return _ensure_ephemeral_keys()[0]
+
+
+def _public_key() -> bytes:
+    s = get_settings()
+    if s.jwt_public_key_pem:
+        return s.jwt_public_key_pem.encode("utf-8")
+    return _ensure_ephemeral_keys()[1]
+
+
+def issue_token(
+    user_id: uuid.UUID | str,
+    token_type: TokenType = "access",
+    extra_claims: dict[str, Any] | None = None,
+) -> tuple[str, int]:
+    """Sign and return ``(jwt, ttl_seconds)`` for ``user_id``."""
+    s = get_settings()
+    ttl = (
+        s.jwt_access_ttl_seconds
+        if token_type == "access"
+        else s.jwt_refresh_ttl_seconds
+    )
+    now = int(time.time())
+    payload: dict[str, Any] = {
+        "iss": s.jwt_issuer,
+        "aud": s.jwt_audience,
+        "sub": str(user_id),
+        "iat": now,
+        "nbf": now,
+        "exp": now + ttl,
+        "jti": uuid.uuid4().hex,
+        "typ": token_type,
+    }
+    if extra_claims:
+        payload.update(extra_claims)
+    token = jwt.encode(payload, _private_key(), algorithm="RS256")
+    return token, ttl
+
+
+def verify_token(token: str, expected_type: TokenType | None = None) -> dict[str, Any]:
+    """Verify signature, audience, issuer, expiry.  Raise ``jwt.PyJWTError`` on failure."""
+    s = get_settings()
+    decoded: dict[str, Any] = jwt.decode(
+        token,
+        _public_key(),
+        algorithms=["RS256"],
+        audience=s.jwt_audience,
+        issuer=s.jwt_issuer,
+        options={"require": ["exp", "iat", "sub"]},
+    )
+    if expected_type and decoded.get("typ") != expected_type:
+        raise jwt.InvalidTokenError(
+            f"Expected token typ={expected_type}, got {decoded.get('typ')}"
+        )
+    return decoded
+
+
+__all__ = ["issue_token", "verify_token"]
