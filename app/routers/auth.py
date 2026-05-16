@@ -1,4 +1,4 @@
-"""Auth endpoints: Apple/Google sign-in + refresh."""
+"""Auth endpoints: email/password + Apple/Google sign-in + refresh."""
 
 from __future__ import annotations
 
@@ -9,15 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.apple import verify_apple_identity_token
 from app.auth.google import verify_google_id_token
 from app.auth.jwt import issue_token, verify_token
+from app.config import get_settings
 from app.db import get_db
 from app.schemas.auth import (
     AppleSignInRequest,
+    DevLoginRequest,
+    EmailSignInRequest,
+    EmailSignUpRequest,
     GoogleSignInRequest,
     RefreshRequest,
     TokenPair,
 )
 from app.schemas.user import UserRead
 from app.services import user_service
+from app.services.user_service import EmailAlreadyExistsError
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,6 +39,71 @@ def _build_pair(user_id, user_read: UserRead) -> TokenPair:
         expires_in=ttl,
         user=user_read,
     )
+
+
+@router.post(
+    "/register",
+    response_model=TokenPair,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create account with email + password",
+)
+async def register(
+    payload: EmailSignUpRequest, db: AsyncSession = Depends(get_db)
+) -> TokenPair:
+    try:
+        user = await user_service.create_with_password(
+            db,
+            email=payload.email,
+            password=payload.password,
+            display_name=payload.display_name,
+        )
+    except EmailAlreadyExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with that email already exists.",
+        ) from exc
+    return _build_pair(user.id, UserRead.model_validate(user))
+
+
+@router.post(
+    "/login",
+    response_model=TokenPair,
+    summary="Sign in with email + password",
+)
+async def login(
+    payload: EmailSignInRequest, db: AsyncSession = Depends(get_db)
+) -> TokenPair:
+    user = await user_service.authenticate_with_password(
+        db, email=payload.email, password=payload.password
+    )
+    if user is None or user.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password.",
+        )
+    return _build_pair(user.id, UserRead.model_validate(user))
+
+
+@router.post(
+    "/dev-login",
+    response_model=TokenPair,
+    summary="Dev-only: sign in by email without a password",
+)
+async def dev_login(
+    payload: DevLoginRequest, db: AsyncSession = Depends(get_db)
+) -> TokenPair:
+    """Find-or-create a user by email, no password required.
+
+    Gated by ``APP_ENV``: only available outside of ``production``.
+    """
+    if get_settings().app_env == "production":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not Found"
+        )
+    user = await user_service.find_or_create_dev_user(
+        db, email=payload.email, display_name=payload.display_name
+    )
+    return _build_pair(user.id, UserRead.model_validate(user))
 
 
 @router.post("/apple", response_model=TokenPair, summary="Sign in with Apple")

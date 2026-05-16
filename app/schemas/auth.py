@@ -1,10 +1,32 @@
-"""Auth schemas — Sign-in-with-Apple / Google + token pair."""
+"""Auth schemas — email/password + SSO (Apple / Google) + token pair."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.schemas.user import UserRead
+
+
+class EmailSignUpRequest(BaseModel):
+    """Body for ``POST /v1/auth/register`` (email + password)."""
+
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    display_name: str | None = Field(None, max_length=120)
+
+
+class EmailSignInRequest(BaseModel):
+    """Body for ``POST /v1/auth/login`` (email + password)."""
+
+    email: EmailStr
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class DevLoginRequest(BaseModel):
+    """Body for ``POST /v1/auth/dev-login`` (dev/test only, no password)."""
+
+    email: EmailStr
+    display_name: str | None = Field(None, max_length=120)
 
 
 class TokenPair(BaseModel):
@@ -20,6 +42,9 @@ class TokenPair(BaseModel):
 
 
 class AppleSignInRequest(BaseModel):
+    "DevLoginRequest",
+    "EmailSignInRequest",
+    "EmailSignUpRequest",
     """Body for ``POST /v1/auth/apple``."""
 
     identity_token: str = Field(..., min_length=10, description="JWT from Apple SDK.")

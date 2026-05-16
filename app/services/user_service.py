@@ -1,10 +1,19 @@
-"""User-account lifecycle: lookup, find-or-create, profile updates."""
+"""User-account lifecycle: lookup, find-or-create, profile updates.
+
+Supports four sign-in mechanisms:
+- Email + password (``create_with_password`` / ``authenticate_with_password``)
+- Sign in with Apple (``find_or_create_by_apple``)
+- Sign in with Google (``find_or_create_by_google``)
+- Dev login (``find_or_create_dev_user``) — gated by ``app_env`` at the router level.
+"""
 
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.passwords import hash_password, needs_rehash, verify_password
 from app.models.user import User, UserSettings
 from app.schemas.user import UserSettingsUpdate, UserUpdate
 from app.utils.logger import get_logger
@@ -15,6 +24,12 @@ logger = get_logger("services.user")
 async def get_by_id(db: AsyncSession, user_id) -> User | None:
     return (
         await db.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+
+
+async def get_by_email(db: AsyncSession, email: str) -> User | None:
+    return (
+        await db.execute(select(User).where(User.email == email.lower()))
     ).scalar_one_or_none()
 
 
@@ -41,6 +56,85 @@ async def _ensure_settings(db: AsyncSession, user: User) -> UserSettings:
     return settings
 
 
+# ── Email + password ──────────────────────────────────────────────────────
+
+
+class EmailAlreadyExistsError(Exception):
+    """Raised when ``create_with_password`` is called for an existing email."""
+
+
+async def create_with_password(
+    db: AsyncSession,
+    *,
+    email: str,
+    password: str,
+    display_name: str | None = None,
+) -> User:
+    """Create a new user authenticated by email + password."""
+    normalised = email.lower()
+    existing = await get_by_email(db, normalised)
+    if existing is not None:
+        raise EmailAlreadyExistsError(normalised)
+    user = User(
+        email=normalised,
+        display_name=display_name,
+        password_hash=hash_password(password),
+    )
+    db.add(user)
+    try:
+        await db.flush()
+    except IntegrityError as exc:  # race against another concurrent create
+        await db.rollback()
+        raise EmailAlreadyExistsError(normalised) from exc
+    await _ensure_settings(db, user)
+    await db.commit()
+    await db.refresh(user)
+    logger.info("Created new user via email/password: %s", user.id)
+    return user
+
+
+async def authenticate_with_password(
+    db: AsyncSession, *, email: str, password: str
+) -> User | None:
+    """Return the user if password matches; ``None`` otherwise (timing-safe)."""
+    user = await get_by_email(db, email)
+    # Hash a dummy value when the user is missing so attackers can't enumerate
+    # accounts by measuring response time.
+    if user is None or user.password_hash is None:
+        _ = verify_password(password, "$argon2id$v=19$m=65536,t=3,p=4$ZmFrZXNhbHQ$ZmFrZWhhc2g")
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
+    if needs_rehash(user.password_hash):
+        user.password_hash = hash_password(password)
+        await db.commit()
+    return user
+
+
+# ── Dev login (no password) ───────────────────────────────────────────────
+
+
+async def find_or_create_dev_user(
+    db: AsyncSession, *, email: str, display_name: str | None = None
+) -> User:
+    """Find-or-create a user by email; the router gates this on ``app_env``."""
+    normalised = email.lower()
+    user = await get_by_email(db, normalised)
+    if user is not None:
+        return user
+    user = User(email=normalised, display_name=display_name or normalised.split("@")[0])
+    db.add(user)
+    await db.flush()
+    await _ensure_settings(db, user)
+    await db.commit()
+    await db.refresh(user)
+    logger.info("Created new user via dev-login: %s", user.id)
+    return user
+
+
+# ── Apple ─────────────────────────────────────────────────────────────────
+
+
 async def find_or_create_by_apple(
     db: AsyncSession,
     *,
@@ -48,16 +142,13 @@ async def find_or_create_by_apple(
     email: str | None,
     display_name: str | None,
 ) -> User:
-    """Look up a user by Apple subject, creating one (and settings) if missing."""
     user = await get_by_apple_subject(db, apple_sub)
     if user is None and email:
-        user = (
-            await db.execute(select(User).where(User.email == email))
-        ).scalar_one_or_none()
+        user = await get_by_email(db, email)
         if user is not None and user.apple_subject is None:
             user.apple_subject = apple_sub
     if user is None:
-        effective_email = email or f"apple+{apple_sub}@users.loupe.app"
+        effective_email = (email or f"apple+{apple_sub}@users.loupe.app").lower()
         user = User(
             email=effective_email,
             display_name=display_name,
@@ -72,6 +163,9 @@ async def find_or_create_by_apple(
     return user
 
 
+# ── Google ────────────────────────────────────────────────────────────────
+
+
 async def find_or_create_by_google(
     db: AsyncSession,
     *,
@@ -80,16 +174,13 @@ async def find_or_create_by_google(
     display_name: str | None,
     avatar_url: str | None,
 ) -> User:
-    """Look up a user by Google subject, creating one (and settings) if missing."""
     user = await get_by_google_subject(db, google_sub)
     if user is None and email:
-        user = (
-            await db.execute(select(User).where(User.email == email))
-        ).scalar_one_or_none()
+        user = await get_by_email(db, email)
         if user is not None and user.google_subject is None:
             user.google_subject = google_sub
     if user is None:
-        effective_email = email or f"google+{google_sub}@users.loupe.app"
+        effective_email = (email or f"google+{google_sub}@users.loupe.app").lower()
         user = User(
             email=effective_email,
             display_name=display_name,
@@ -107,8 +198,10 @@ async def find_or_create_by_google(
     return user
 
 
+# ── Profile / settings ────────────────────────────────────────────────────
+
+
 async def update_profile(db: AsyncSession, user: User, patch: UserUpdate) -> User:
-    """Apply allowed mutations to a user record."""
     if patch.display_name is not None:
         user.display_name = patch.display_name
     if patch.avatar_url is not None:
@@ -121,7 +214,6 @@ async def update_profile(db: AsyncSession, user: User, patch: UserUpdate) -> Use
 async def update_settings(
     db: AsyncSession, user: User, patch: UserSettingsUpdate
 ) -> UserSettings:
-    """Apply allowed mutations to a user's settings."""
     settings = await _ensure_settings(db, user)
     if patch.currency is not None:
         settings.currency = patch.currency
@@ -137,9 +229,14 @@ async def update_settings(
 
 
 __all__ = [
+    "EmailAlreadyExistsError",
+    "authenticate_with_password",
+    "create_with_password",
     "find_or_create_by_apple",
     "find_or_create_by_google",
+    "find_or_create_dev_user",
     "get_by_apple_subject",
+    "get_by_email",
     "get_by_google_subject",
     "get_by_id",
     "update_profile",
