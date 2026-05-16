@@ -29,6 +29,10 @@ class GradedCardRead(BaseModel):
     graded_at: datetime
     created_at: datetime
     updated_at: datetime
+    # Joined card metadata so clients can render a row without an N+1 round-trip.
+    card_name: str | None = None
+    card_image_url: str | None = None
+    card_number: str | None = None
 
 
 class GradedCardCreate(BaseModel):

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_user
 from app.db import get_db
+from app.models.card import Card
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
@@ -18,22 +19,28 @@ from app.utils.time import utcnow
 router = APIRouter(prefix="/grades", tags=["grades"])
 
 
+def _to_read(row: GradedCard, card: Card | None) -> GradedCardRead:
+    out = GradedCardRead.model_validate(row)
+    if card is not None:
+        out.card_name = card.name
+        out.card_image_url = card.image_url
+        out.card_number = card.number
+    return out
+
+
 @router.get("", response_model=list[GradedCardRead], summary="List my graded cards")
 async def list_mine(
     user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
 ) -> list[GradedCardRead]:
-    rows = (
-        (
-            await db.execute(
-                select(GradedCard)
-                .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
-                .order_by(GradedCard.graded_at.desc())
-            )
+    pairs = (
+        await db.execute(
+            select(GradedCard, Card)
+            .outerjoin(Card, Card.id == GradedCard.card_id)
+            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+            .order_by(GradedCard.graded_at.desc())
         )
-        .scalars()
-        .all()
-    )
-    return [GradedCardRead.model_validate(r) for r in rows]
+    ).all()
+    return [_to_read(g, c) for (g, c) in pairs]
 
 
 @router.post(
@@ -70,18 +77,20 @@ async def get_one(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> GradedCardRead:
-    row = (
+    pair = (
         await db.execute(
-            select(GradedCard).where(
+            select(GradedCard, Card)
+            .outerjoin(Card, Card.id == GradedCard.card_id)
+            .where(
                 GradedCard.id == grade_id,
                 GradedCard.user_id == user.id,
                 GradedCard.deleted_at.is_(None),
             )
         )
-    ).scalar_one_or_none()
-    if row is None:
+    ).first()
+    if pair is None:
         raise HTTPException(status_code=404, detail="Graded card not found")
-    return GradedCardRead.model_validate(row)
+    return _to_read(pair[0], pair[1])
 
 
 @router.patch(

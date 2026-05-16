@@ -1,0 +1,107 @@
+name: Deploy
+
+# Auto-deploys the backend image + both Cloud Run services on every push to
+# `main`, but only after the CI workflow succeeds. Image tag is the commit
+# SHA (so rollbacks are trivial) and `:latest` is moved as a convenience.
+#
+# One-time setup is in DEPLOY.md (Workload Identity Federation + a deployer
+# service account). After that, this workflow needs zero maintenance.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write   # required for Workload Identity Federation
+
+env:
+  GCP_PROJECT: loupe-app-56235
+  GCP_REGION: us-central1
+  AR_REPO: loupe
+  IMAGE_NAME: backend
+  API_SERVICE: loupe-api
+  WORKER_SERVICE: loupe-worker
+
+jobs:
+  deploy:
+    # Only run if CI passed (or if manually dispatched).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          SHORT="${SHA:0:12}"
+          IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${AR_REPO}/${IMAGE_NAME}"
+          echo "image_sha=${IMAGE}:${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "image_latest=${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+
+      - name: Cloud Build (push image)
+        run: |
+          gcloud builds submit \
+            --tag "${{ steps.tag.outputs.image_sha }}" \
+            --project "${GCP_PROJECT}" \
+            --region "${GCP_REGION}" \
+            .
+
+      - name: Tag image as :latest
+        run: |
+          gcloud artifacts docker tags add \
+            "${{ steps.tag.outputs.image_sha }}" \
+            "${{ steps.tag.outputs.image_latest }}" \
+            --quiet
+
+      - name: Deploy loupe-api
+        run: |
+          gcloud run deploy "${API_SERVICE}" \
+            --image "${{ steps.tag.outputs.image_sha }}" \
+            --region "${GCP_REGION}" \
+            --project "${GCP_PROJECT}" \
+            --quiet
+
+      - name: Deploy loupe-worker
+        run: |
+          gcloud run deploy "${WORKER_SERVICE}" \
+            --image "${{ steps.tag.outputs.image_sha }}" \
+            --region "${GCP_REGION}" \
+            --project "${GCP_PROJECT}" \
+            --quiet
+
+      - name: Smoke test /healthz
+        run: |
+          URL=$(gcloud run services describe "${API_SERVICE}" \
+            --region "${GCP_REGION}" --project "${GCP_PROJECT}" \
+            --format='value(status.url)')
+          echo "API URL: $URL"
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$URL/healthz" >/dev/null; then
+              echo "healthz OK"; exit 0
+            fi
+            echo "healthz retry $i..."; sleep 3
+          done
+          echo "healthz never returned 200"; exit 1
