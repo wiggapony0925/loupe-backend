@@ -29,6 +29,33 @@ async def list_scanners(
     return [ScannerRead.model_validate(r) for r in rows]
 
 
+@router.get(
+    "/status",
+    summary="Most-recently-active scanner status",
+    description=(
+        "Returns the scanner with the most-recent `last_seen_at` for the "
+        "signed-in user, or `null` when the user has never paired one. "
+        "Frontend uses this to render the 'Scanner connection' widget on "
+        "the Command Center without requiring the user to pick a specific "
+        "device id."
+    ),
+)
+async def get_status(
+    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+) -> ScannerRead | None:
+    rows = await scanner_service.list_for_user(db, user)
+    if not rows:
+        return None
+    # Prefer rows with a heartbeat; fall back to most-recently-paired.
+    rows.sort(
+        key=lambda r: (
+            r.last_seen_at or r.created_at,
+        ),
+        reverse=True,
+    )
+    return ScannerRead.model_validate(rows[0])
+
+
 @router.post(
     "",
     response_model=ScannerRead,

@@ -17,6 +17,9 @@ _request_id: ContextVar[str | None] = ContextVar("loupe_request_id", default=Non
 _request_started_at: ContextVar[float | None] = ContextVar(
     "loupe_request_started_at", default=None
 )
+_request_user_id: ContextVar[str | None] = ContextVar(
+    "loupe_request_user_id", default=None
+)
 
 
 def new_request_id() -> str:
@@ -44,6 +47,16 @@ def get_request_started_at() -> float | None:
     return _request_started_at.get()
 
 
+def set_request_user_id(value: str | None) -> None:
+    """Bind the authenticated user-id for the current request, if any."""
+    _request_user_id.set(value)
+
+
+def get_request_user_id() -> str | None:
+    """Return the authenticated user-id for the current request, if any."""
+    return _request_user_id.get()
+
+
 def request_elapsed_ms() -> int | None:
     """Return the elapsed milliseconds since the current request started."""
     started = get_request_started_at()
@@ -55,8 +68,10 @@ def request_elapsed_ms() -> int | None:
 __all__ = [
     "get_request_id",
     "get_request_started_at",
+    "get_request_user_id",
     "new_request_id",
     "request_elapsed_ms",
     "set_request_id",
     "set_request_started_at",
+    "set_request_user_id",
 ]

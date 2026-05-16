@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +15,7 @@ from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
+from app.services import portfolio_service
 from app.utils.time import utcnow
 
 router = APIRouter(prefix="/grades", tags=["grades"])
@@ -76,6 +78,59 @@ async def create(
     await db.commit()
     await db.refresh(row)
     return GradedCardRead.model_validate(row)
+
+
+# NOTE: literal-path routes MUST be declared before `/{grade_id}` so they
+# aren't shadowed by the UUID-parsing path parameter.
+@router.get(
+    "/summary",
+    summary="Portfolio aggregates for the signed-in user",
+    description=(
+        "Returns `{ totalValueUsd, cardCount, avgGrade, avgAccuracy }`. "
+        "All values are computed from the user's real graded cards; "
+        "`avgAccuracy` is null until the scan pipeline reports per-job "
+        "accuracy."
+    ),
+)
+async def get_summary(
+    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    return await portfolio_service.summary(db, user)
+
+
+@router.get(
+    "/history",
+    summary="Portfolio value over time",
+    description=(
+        "Returns `{ range, points: [{date, priceUsd}], deltaUsd, deltaPct }`. "
+        "Computed from the per-card `price_history` populated by the daily "
+        "`price_backfill` worker. Empty array when the user has no graded "
+        "cards or no upstream price data has been backfilled yet."
+    ),
+)
+async def get_history(
+    range: Literal["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] = Query("1Y"),
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await portfolio_service.history(db, user, range)
+    return result.to_dict()
+
+
+@router.get(
+    "/sparklines",
+    summary="Per-card 14-point trend",
+    description=(
+        "Returns `[{cardId, points: number[14], deltaPct}, ...]`. Each entry "
+        "is the graded-card id (not the catalog card id) so the client can "
+        "map directly to vault rows. Cards with no upstream price history "
+        "yield a flat line at their current estimate."
+    ),
+)
+async def get_sparklines(
+    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+) -> list[dict[str, Any]]:
+    return await portfolio_service.sparklines(db, user)
 
 
 @router.get("/{grade_id}", response_model=GradedCardRead, summary="Get one graded card")

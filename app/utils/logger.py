@@ -42,7 +42,17 @@ class ColorFormatter(logging.Formatter):
 
 
 class JsonFormatter(logging.Formatter):
-    """Format a log record as a single JSON line."""
+    """Format a log record as a single JSON line.
+
+    Any caller may attach extra structured fields via the stdlib ``extra=``
+    kwarg (e.g. ``logger.info("msg", extra={"event": {...}})``); the keys
+    are merged into the top-level JSON payload, with reserved keys (``ts``,
+    ``level``, ``logger``, ``msg``, ``exc``) winning to keep the schema
+    stable. Request-scoped fields (request_id, user_id) are auto-injected
+    from :mod:`app.request_context` when set.
+    """
+
+    _RESERVED = {"ts", "level", "logger", "msg", "exc"}
 
     def format(self, record: logging.LogRecord) -> str:
         payload: dict[str, Any] = {
@@ -51,6 +61,53 @@ class JsonFormatter(logging.Formatter):
             "logger": record.name,
             "msg": record.getMessage(),
         }
+        # Pull request-scoped context lazily to avoid an import cycle at
+        # module load (request_context imports nothing from us).
+        try:
+            from app.request_context import get_request_id, get_request_user_id
+
+            req_id = get_request_id()
+            if req_id:
+                payload["request_id"] = req_id
+            uid = get_request_user_id()
+            if uid:
+                payload["user_id"] = uid
+        except Exception:  # pragma: no cover - context optional
+            pass
+        # Merge any extra=... fields supplied by the caller.
+        for key, value in record.__dict__.items():
+            if (
+                key in self._RESERVED
+                or key.startswith("_")
+                or key
+                in {
+                    "args",
+                    "asctime",
+                    "created",
+                    "exc_info",
+                    "exc_text",
+                    "filename",
+                    "funcName",
+                    "levelname",
+                    "levelno",
+                    "lineno",
+                    "message",
+                    "module",
+                    "msecs",
+                    "msg",
+                    "name",
+                    "pathname",
+                    "process",
+                    "processName",
+                    "relativeCreated",
+                    "stack_info",
+                    "thread",
+                    "threadName",
+                    "taskName",
+                }
+            ):
+                continue
+            payload[key] = value
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
         return json.dumps(payload, default=str)

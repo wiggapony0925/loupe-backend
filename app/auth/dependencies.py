@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.jwt import verify_token
 from app.db import get_db
 from app.models.user import User
+from app.request_context import set_request_user_id
 from app.utils.logger import get_logger
 
 logger = get_logger("auth.deps")
@@ -62,6 +63,11 @@ async def _resolve_user(
         if required:
             raise HTTPException(status_code=401, detail="User deactivated")
         return None
+    if user is not None:
+        # Stamp the user-id on the request context so structured logs
+        # downstream (and Sentry events) can attribute requests to a user
+        # without each handler having to thread it through manually.
+        set_request_user_id(str(user.id))
     return user
 
 
