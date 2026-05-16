@@ -13,6 +13,12 @@ logs/
 *.log
 .env
 .env.local
+.env.*
 *.sqlite
 *.sqlite3
 *.db
+secrets/
+*.md
+!documentation/**/*.md
+Makefile
+docker-compose.yml

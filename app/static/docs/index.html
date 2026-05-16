@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Loupe API — Documentation</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Open Graph / social sharing -->
+    <meta property="og:title" content="Loupe API — Documentation" />
+    <meta property="og:description" content="Card scanning, grading, valuation, and market intelligence for the Loupe iOS app." />
+    <meta property="og:type" content="website" />
+
+    <style>
+        /* ── Loading state ──────────────────────────────────── */
+        body { margin: 0; background: #0B0B0D; }
+
+        /* ── Dark mode — Loupe iOS dark palette ────────────── */
+        .dark-mode,
+        .scalar-app.dark-mode {
+            --scalar-background-1: #121214;       /* surface.base       */
+            --scalar-background-2: #1C1C1E;       /* surface.elevated   */
+            --scalar-background-3: #2A2A2E;       /* border.default     */
+            --scalar-background-accent: #00F59B14; /* accent tint        */
+
+            --scalar-color-1: #F5F5F7;            /* text.default       */
+            --scalar-color-2: #A1A1A6;            /* text.muted         */
+            --scalar-color-3: #6E6E73;            /* text.dim           */
+            --scalar-color-accent: #00F59B;       /* accent.mint        */
+            --scalar-color-green: #00F59B;        /* success            */
+            --scalar-color-red: #FF453A;          /* rose               */
+            --scalar-color-yellow: #FFB020;       /* amber              */
+            --scalar-color-blue: #0A84FF;         /* blue (POST badges) */
+
+            --scalar-border-color: rgba(161,161,166,0.12);
+            --scalar-scrollbar-color: rgba(161,161,166,0.18);
+            --scalar-scrollbar-color-active: rgba(161,161,166,0.36);
+
+            --scalar-sidebar-background-1: #0B0B0D;   /* sunken           */
+            --scalar-sidebar-color-1: #F5F5F7;
+            --scalar-sidebar-color-2: #A1A1A6;
+            --scalar-sidebar-color-active: #00F59B;
+            --scalar-sidebar-border-color: rgba(161,161,166,0.08);
+            --scalar-sidebar-search-background: #1C1C1E;
+            --scalar-sidebar-search-border-color: rgba(161,161,166,0.10);
+            --scalar-sidebar-search-color: #F5F5F7;
+
+            --scalar-button-1: #00F59B;
+            --scalar-button-1-color: #0B0B0D;
+            --scalar-button-1-hover: #2FFAB1;
+
+            color-scheme: dark;
+        }
+
+        /* ── Light mode — Loupe iOS light palette ──────────── */
+        .light-mode,
+        .scalar-app.light-mode {
+            --scalar-background-1: #F7F7F8;
+            --scalar-background-2: #FFFFFF;
+            --scalar-background-3: #EFEFF2;
+            --scalar-background-accent: #00A86E14;
+
+            --scalar-color-1: #0B0B0D;
+            --scalar-color-2: #48484A;
+            --scalar-color-3: #8E8E93;
+            --scalar-color-accent: #00A86E;
+            --scalar-color-green: #00A86E;
+            --scalar-color-red: #D63B30;
+            --scalar-color-yellow: #B8860B;
+            --scalar-color-blue: #0A84FF;
+
+            --scalar-border-color: rgba(11,11,13,0.08);
+            --scalar-scrollbar-color: rgba(11,11,13,0.18);
+            --scalar-scrollbar-color-active: rgba(11,11,13,0.36);
+
+            --scalar-sidebar-background-1: #FFFFFF;
+            --scalar-sidebar-color-1: #0B0B0D;
+            --scalar-sidebar-color-2: #48484A;
+            --scalar-sidebar-color-active: #00A86E;
+            --scalar-sidebar-border-color: rgba(11,11,13,0.06);
+            --scalar-sidebar-search-background: #EFEFF2;
+            --scalar-sidebar-search-border-color: rgba(11,11,13,0.06);
+            --scalar-sidebar-search-color: #0B0B0D;
+
+            --scalar-button-1: #00A86E;
+            --scalar-button-1-color: #FFFFFF;
+            --scalar-button-1-hover: #008F5C;
+
+            color-scheme: light;
+        }
+    </style>
+</head>
+<body>
+    <script id="api-reference" data-url="/openapi.json"></script>
+    <script>
+        var configuration = {
+            theme: 'none',
+            layout: 'modern',
+            withDefaultFonts: true,
+            darkMode: true,
+
+            defaultOpenAllTags: false,
+            tagsSorter: 'alpha',
+            searchHotKey: 'k',
+            showSidebar: true,
+
+            hiddenClients: [],
+            defaultHttpClient: {
+                targetKey: 'shell',
+                clientKey: 'curl',
+            },
+
+            metaData: {
+                title: 'Loupe API — Documentation',
+                description: 'Card scanning, grading, valuation, and market intelligence backend for the Loupe iOS app.',
+                ogDescription: 'Scan • Grade • Value • Track — single-source backend for the Loupe iOS app.',
+            },
+
+            hideDownloadButton: false,
+            hideModels: false,
+            hideClientButton: false,
+
+            servers: [
+                { url: 'https://loupe-api-714615078104.us-central1.run.app', description: 'Production (Cloud Run)' },
+                { url: 'http://localhost:8000', description: 'Local development' },
+            ],
+        };
+
+        document.getElementById('api-reference').dataset.configuration =
+            JSON.stringify(configuration);
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</body>
+</html>

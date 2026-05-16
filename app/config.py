@@ -94,6 +94,18 @@ class Settings(BaseSettings):
     # GoCollect (stub) — https://gocollect.com
     gocollect_api_key: str | None = None
 
+    # --- Google Cloud Platform (production infra) ---
+    # Path to service-account JSON. Standard env var the google-* SDKs read
+    # automatically; we surface it here for visibility/typing only.
+    google_application_credentials: str | None = None
+    gcp_project_id: str | None = None
+    gcp_region: str = "us-central1"
+    # Cloud Storage bucket for scan uploads (replaces S3 when set).
+    gcs_bucket: str | None = None
+    # Cloud SQL instance connection name, e.g. "loupe-app-56235:us-central1:loupe-pg".
+    # Used by the Cloud SQL Auth Proxy for local dev and by Cloud Run in prod.
+    cloud_sql_connection_name: str | None = None
+
     # --- HTTP client tuning ---
     http_timeout_seconds: float = 15.0
     http_max_connections: int = 20

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -50,9 +52,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description=description,
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        docs_url=None,       # disable Swagger UI — we serve Scalar at /api-docs
+        redoc_url=None,      # disable Redoc — redirected to /api-docs
+        openapi_url=None,    # disable built-in /openapi.json — re-served by docs_auth
     )
 
     # Middleware ordering note — Starlette executes the LAST-registered
@@ -74,6 +76,15 @@ def create_app() -> FastAPI:
         app
     )  # outermost: must run first on request to set request-id
     register_exception_handlers(app)
+
+    # Scalar-powered API documentation at /api-docs (replaces Swagger/Redoc).
+    # Also serves the openapi.json behind the same (optional) access gate.
+    try:
+        from documentation.docs_auth import register_docs_routes
+
+        register_docs_routes(app, static_dir=Path(__file__).parent / "static")
+    except Exception:  # pragma: no cover - docs are non-critical at boot
+        pass
 
     # System endpoints at root (no /v1 prefix).
     app.include_router(system.router)

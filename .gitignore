@@ -44,3 +44,6 @@ logs/
 
 # Alembic version backups
 app/db/alembic/versions/*.py.bak
+
+# GCP service account keys and local secrets
+secrets/
