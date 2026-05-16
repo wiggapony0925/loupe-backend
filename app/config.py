@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     http_max_connections: int = 20
     http_max_keepalive: int = 10
 
+    # --- Observability (optional; no-ops when DSN is missing) ---
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 0.1
+    sentry_profiles_sample_rate: float = 0.1
+
     # --- Convenience flags ---
     @property
     def is_production(self) -> bool:
