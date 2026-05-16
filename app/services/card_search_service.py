@@ -629,7 +629,7 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
 # ----------------------------------------------------------- price history
 
 
-_RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "180d": 180, "1y": 365, "365d": 365}
+_RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90, "180d": 180, "1y": 365, "365d": 365, "all": 730}
 
 
 def _granularity(days: int) -> str:

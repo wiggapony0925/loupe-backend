@@ -21,7 +21,7 @@ from app.db import get_db
 from app.models.enums import TcgEnum
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
-from app.services import card_catalog_service, card_search_service
+from app.services import card_catalog_service, card_search_service, market_service
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
@@ -63,6 +63,22 @@ async def search(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/{card_id}/market", summary="Card market snapshot (public)")
+async def get_market(card_id: str) -> dict[str, Any]:
+    """Return the full per-house × per-grade market view for a card.
+
+    Synthesizes the graded table deterministically from the live raw
+    market price (seeded by card id) so the page is stable across
+    refreshes — see :func:`app.services.market_service.build_market_for_card`.
+    """
+    if ":" not in card_id:
+        raise HTTPException(status_code=400, detail="Composite card id required")
+    result = await market_service.get_card_market(card_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return result
 
 
 @router.get("/{card_id}/prices", summary="Card price history (public)")
