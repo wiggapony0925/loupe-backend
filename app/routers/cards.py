@@ -29,7 +29,10 @@ router = APIRouter(prefix="/cards", tags=["cards"])
 @router.get("/search", summary="Live card search (public)")
 async def search_live(
     q: str = Query("", max_length=120),
-    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
+    tcg: str = Query(
+        "all",
+        pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$",
+    ),
     limit: int = Query(20, ge=1, le=50),
 ) -> dict[str, Any]:
     """Live search against Scryfall / Pokémon TCG / YGOPRODeck.
@@ -60,6 +63,31 @@ async def search(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/{card_id}/prices", summary="Card price history (public)")
+async def get_prices(
+    card_id: str,
+    range: str = Query("30d", pattern="^(7d|30d|90d|180d|1y|365d)$"),
+    house: str = Query("raw"),
+    grade: str | None = Query(None),
+) -> dict[str, Any]:
+    """Return a price history series for the given composite card id.
+
+    Currently synthesizes a deterministic walk around the live market
+    price (seeded by card id) so the chart is stable across refreshes.
+    """
+    if ":" not in card_id:
+        raise HTTPException(status_code=400, detail="Composite card id required")
+    result = await card_search_service.get_price_history(card_id, range_=range)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    # ``house``/``grade`` are accepted (and reserved) for forward-compat;
+    # current synthesizer treats every request as raw/ungraded.
+    result["house"] = house
+    if grade:
+        result["grade"] = grade
+    return result
 
 
 @router.get("/{card_id}", summary="Get one card (public)")
