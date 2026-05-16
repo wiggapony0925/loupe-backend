@@ -94,8 +94,6 @@ async def get_market(card_id: str) -> dict[str, Any]:
     market price (seeded by card id) so the page is stable across
     refreshes — see :func:`app.services.market_service.build_market_for_card`.
     """
-    if ":" not in card_id:
-        raise HTTPException(status_code=400, detail="Composite card id required")
     result = await market_service.get_card_market(card_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -114,8 +112,6 @@ async def get_prices(
     Currently synthesizes a deterministic walk around the live market
     price (seeded by card id) so the chart is stable across refreshes.
     """
-    if ":" not in card_id:
-        raise HTTPException(status_code=400, detail="Composite card id required")
     result = await card_search_service.get_price_history(card_id, range_=range)
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -137,8 +133,6 @@ async def get_listings(
     Returns ``listings: []`` when no provider is configured, so the
     client always renders successfully.
     """
-    if ":" not in card_id:
-        raise HTTPException(status_code=400, detail="Composite card id required")
     result = await listings_service.get_listings_for_card(card_id, limit=limit)
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -154,8 +148,6 @@ async def get_comps(
     limit: int = Query(50, ge=1, le=100),
 ) -> dict[str, Any]:
     """Recent sold comps fanned out across configured providers."""
-    if ":" not in card_id:
-        raise HTTPException(status_code=400, detail="Composite card id required")
     result = await comps_service.get_comps_for_card(
         card_id, days=days, grade=grade, house=house, limit=limit
     )

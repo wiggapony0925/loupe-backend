@@ -119,5 +119,6 @@ async def test_market_missing_price_is_graceful(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_market_requires_composite_id(client):
+    # Non-composite + non-UUID strings resolve to no card → 404.
     resp = await client.get("/v1/cards/not-a-composite/market")
-    assert resp.status_code == 400
+    assert resp.status_code == 404

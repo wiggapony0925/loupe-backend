@@ -596,9 +596,42 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
 
 
 async def get_card(card_id: str) -> dict[str, Any] | None:
-    """Look up a single card by composite ``<source>:<upstream_id>`` ID."""
+    """Look up a single card by composite ``<source>:<upstream_id>`` ID.
+
+    Falls back to a local-DB lookup when given a UUID, returning a minimal
+    card dict (no upstream ``pricing_summary``) so downstream services can
+    still degrade gracefully — listings/comps still work via name-based
+    fan-out, and market returns an empty snapshot instead of 400.
+    """
     if ":" not in card_id:
-        return None
+        # UUID fallback: resolve against the local catalog.
+        try:
+            import uuid as _uuid
+
+            as_uuid = _uuid.UUID(card_id)
+        except ValueError:
+            return None
+        from app.db.session import get_sessionmaker
+        from app.services import card_catalog_service
+
+        maker = get_sessionmaker()
+        async with maker() as session:
+            row = await card_catalog_service.get_card(session, as_uuid)
+        if row is None:
+            return None
+        return {
+            "id": card_id,
+            "name": row.name,
+            "tcg": row.tcg.value if hasattr(row.tcg, "value") else str(row.tcg),
+            "set_name": None,
+            "set_code": None,
+            "number": row.number,
+            "rarity": row.rarity,
+            "image_url": row.image_url,
+            "year": row.year,
+            "source": "loupe-db",
+            "pricing_summary": None,
+        }
     source, _, upstream_id = card_id.partition(":")
     source = source.lower()
     if not upstream_id:

@@ -62,5 +62,6 @@ async def test_listings_endpoint_shape(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_listings_invalid_card_id(client):
+    # Non-composite + non-UUID strings resolve to no card → 404.
     resp = await client.get("/v1/cards/not-a-composite/listings")
-    assert resp.status_code == 400
+    assert resp.status_code == 404
