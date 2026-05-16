@@ -5,6 +5,7 @@ from __future__ import annotations
 # --- TTLs (seconds) ---
 JWKS_CACHE_TTL = 3600  # Apple/Google JWKS rotate slowly
 CARD_SEARCH_TTL = 300  # 5 min for upstream search results
+TRENDING_TTL = 900  # 15 min for /cards/trending aggregations
 CARD_DETAIL_TTL = 86400  # 24 h for individual card metadata
 SET_LIST_TTL = 86400  # 24 h for set listings
 PRICE_HISTORY_TTL = 600  # 10 min for price snapshots

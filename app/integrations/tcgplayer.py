@@ -114,6 +114,7 @@ class TcgPlayerProvider(BaseProvider):
             (e for e in entries if e.get("subTypeName") == "Normal"),
             entries[0],
         )
+
         def _f(key: str) -> float | None:
             val = best.get(key)
             return float(val) if val is not None else None

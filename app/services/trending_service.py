@@ -1,0 +1,236 @@
+"""Trending card aggregation service.
+
+Mixes the three live catalogs (Pokémon TCG, Scryfall, YGOPRODeck) into a
+single round-robin "trending" feed for the public ``/cards/trending``
+endpoint.
+
+Strategy per provider:
+
+* **Pokémon TCG** — `name:charizard*` (a reliable, popular query that
+  always returns rich images + pricing). Cheaper than `rarity:"Rare
+  Holo*"` which needs escaping and is slower upstream.
+* **Scryfall** — `is:booster game:paper` with `order=edhrec` → the
+  EDHREC popularity ordering surfaces genuinely-trending Commander
+  staples.
+* **YGOPRODeck** — `/cardinfo.php?num={N}&offset=0&sort=new` (newest
+  releases). This is the closest thing the API exposes to "trending".
+
+All three responses run in parallel via :func:`asyncio.gather`; any
+single provider failure is logged and silently dropped. If everything
+fails we fall back to a small hardcoded list of well-known card ids and
+attempt a per-card ``get_card`` lookup; if even that fails we emit
+minimal stubs so the endpoint NEVER returns a 5xx.
+
+Responses are cached in Redis for :data:`~app.cache_config.TRENDING_TTL`
+seconds (15 min) under ``loupe:cards:trending:{tcg}:{limit}`` to keep
+the rail snappy and stay well under provider rate budgets.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+
+from app.cache_config import TRENDING_TTL
+from app.clients import pokemon_tcg
+from app.services import card_search_service
+from app.services.card_search_service import (
+    _cache_get,
+    _cache_set,
+    _from_pokemon,
+    _from_scryfall,
+    _from_yugioh,
+    _interleave,
+)
+
+logger = logging.getLogger(__name__)
+
+MAX_LIMIT = 48
+DEFAULT_LIMIT = 24
+
+# Per-provider trending queries. Chosen for: (a) always-popular cards
+# that yield rich image data, (b) low upstream cost, (c) stability.
+POKEMON_TRENDING_QUERY = "name:charizard*"
+SCRYFALL_TRENDING_QUERY = "is:booster game:paper"
+
+# Hardcoded fallback ids — must resolve via ``get_card`` if all live
+# providers are down. Drawn from cards we've verified are stable across
+# all three catalogs.
+FALLBACK_IDS: tuple[str, ...] = (
+    "pokemontcg:base1-4",  # Charizard, Base Set
+    "pokemontcg:swsh4-25",  # Pikachu V
+    "scryfall:e9d5aee0-5963-41db-a22b-cfea40a967a3",  # Black Lotus (alpha)
+    "scryfall:9fa3df85-0a45-4e15-9e30-3ff48be19310",  # Liliana of the Veil
+    "ygoprodeck:46986414",  # Dark Magician
+    "ygoprodeck:89631139",  # Blue-Eyes White Dragon
+)
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+async def _trending_pokemon(limit: int) -> list[dict[str, Any]]:
+    raw = await pokemon_tcg.search_cards(
+        POKEMON_TRENDING_QUERY, page=1, page_size=limit
+    )
+    return [_from_pokemon(c) for c in (raw.get("data") or [])][:limit]
+
+
+async def _trending_magic(limit: int) -> list[dict[str, Any]]:
+    # Scryfall accepts `order` via the search endpoint; the existing
+    # client only forwards `q` so we issue the request inline here.
+    from app.config import get_settings
+
+    s = get_settings()
+    async with httpx.AsyncClient(timeout=s.http_timeout_seconds) as client:
+        resp = await client.get(
+            "https://api.scryfall.com/cards/search",
+            params={
+                "q": SCRYFALL_TRENDING_QUERY,
+                "order": "edhrec",
+                "page": 1,
+            },
+            headers={"Accept": "application/json"},
+        )
+        if resp.status_code == 404:
+            return []
+        resp.raise_for_status()
+        data = resp.json()
+    return [_from_scryfall(c) for c in (data.get("data") or [])][:limit]
+
+
+async def _trending_yugioh(limit: int) -> list[dict[str, Any]]:
+    from app.config import get_settings
+
+    s = get_settings()
+    async with httpx.AsyncClient(timeout=s.http_timeout_seconds) as client:
+        resp = await client.get(
+            "https://db.ygoprodeck.com/api/v7/cardinfo.php",
+            params={"num": limit, "offset": 0, "sort": "new"},
+            headers={"Accept": "application/json"},
+        )
+        if resp.status_code in (400, 404):
+            return []
+        resp.raise_for_status()
+        data = resp.json()
+    return [_from_yugioh(c) for c in (data.get("data") or [])][:limit]
+
+
+async def _fallback_cards(limit: int) -> list[dict[str, Any]]:
+    """Last-resort: try resolving hardcoded ids individually."""
+    ids = FALLBACK_IDS[:limit] or FALLBACK_IDS
+    results = await asyncio.gather(
+        *(card_search_service.get_card(cid) for cid in ids),
+        return_exceptions=True,
+    )
+    out: list[dict[str, Any]] = []
+    for cid, res in zip(ids, results, strict=False):
+        if isinstance(res, BaseException) or res is None:
+            # Minimal stub so the UI can render *something*.
+            out.append(
+                {
+                    "id": cid,
+                    "name": "Unavailable",
+                    "tcg": cid.split(":", 1)[0],
+                    "images": None,
+                    "image_url": None,
+                    "set_name": None,
+                    "year": None,
+                    "number": None,
+                    "rarity": None,
+                    "pricing_summary": None,
+                    "source": "fallback",
+                    "attributes": None,
+                }
+            )
+        else:
+            out.append(res)
+    return out
+
+
+async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
+    """Return a trending feed envelope.
+
+    Parameters
+    ----------
+    tcg:
+        ``"pokemon"`` | ``"magic"`` | ``"yugioh"`` | ``"all"`` (default).
+    limit:
+        Max cards in the final list, 1–48. Defaults to 24.
+
+    Returns
+    -------
+    dict
+        ``{"cards": [...], "updated_at": iso8601, "source": "live"|"cached"|"fallback"}``.
+        Never raises and never returns 5xx upstream.
+    """
+    tcg = (tcg or "all").lower()
+    limit = max(1, min(MAX_LIMIT, int(limit)))
+
+    cache_key = f"loupe:cards:trending:{tcg}:{limit}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        cached_copy = dict(cached)
+        cached_copy["source"] = "cached"
+        return cached_copy
+
+    cards: list[dict[str, Any]] = []
+    try:
+        if tcg == "pokemon":
+            cards = (await _trending_pokemon(limit))[:limit]
+        elif tcg == "magic":
+            cards = (await _trending_magic(limit))[:limit]
+        elif tcg == "yugioh":
+            cards = (await _trending_yugioh(limit))[:limit]
+        else:
+            per = max(4, (limit // 3) + 2)
+            results = await asyncio.gather(
+                _trending_pokemon(per),
+                _trending_magic(per),
+                _trending_yugioh(per),
+                return_exceptions=True,
+            )
+            lists: list[list[dict[str, Any]]] = []
+            for label, res in zip(
+                ("pokemontcg", "scryfall", "ygoprodeck"),
+                results,
+                strict=False,
+            ):
+                if isinstance(res, BaseException):
+                    logger.warning("trending upstream %s failed: %s", label, res)
+                    continue
+                if isinstance(res, list) and res:
+                    lists.append(res)
+            cards = _interleave(lists, limit)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("trending unexpected error: %s", exc)
+        cards = []
+
+    source = "live"
+    if not cards:
+        try:
+            cards = await _fallback_cards(limit)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("trending fallback failed: %s", exc)
+            cards = []
+        source = "fallback"
+
+    envelope = {
+        "cards": cards,
+        "updated_at": _now_iso(),
+        "source": source,
+    }
+
+    # Cache live + fallback responses alike so we don't hammer providers
+    # while they're down. TTL is short enough that a recovery propagates
+    # within 15 min.
+    await _cache_set(cache_key, envelope, TRENDING_TTL)
+    return envelope
+
+
+__all__ = ["get_trending"]

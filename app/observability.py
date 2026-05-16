@@ -17,7 +17,7 @@ _initialized = False
 _log = logging.getLogger("loupe.observability")
 
 
-def init_sentry(settings: "Settings") -> bool:
+def init_sentry(settings: Settings) -> bool:
     """Initialize Sentry if a DSN is configured. Returns True on success."""
     global _initialized
     if _initialized:

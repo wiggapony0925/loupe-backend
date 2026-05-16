@@ -27,6 +27,7 @@ from app.services import (
     comps_service,
     listings_service,
     market_service,
+    trending_service,
 )
 
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -48,6 +49,20 @@ async def search_live(
     gracefully.
     """
     return await card_search_service.search_cards(q=q, tcg=tcg, limit=limit)
+
+
+@router.get("/trending", summary="Trending cards (public)")
+async def get_trending(
+    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
+    limit: int = Query(24, ge=1, le=48),
+) -> dict[str, Any]:
+    """Mixed trending feed across the three live catalogs.
+
+    Cached for 15 minutes. Falls back to a small hardcoded set of
+    well-known cards if every upstream is unreachable, so the endpoint
+    never returns a 5xx.
+    """
+    return await trending_service.get_trending(tcg=tcg, limit=limit)
 
 
 @router.get("", response_model=Pagination[CardRead], summary="Search cards (DB)")

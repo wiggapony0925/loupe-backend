@@ -8,9 +8,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from app.config import get_settings
 from app.exception_handlers import register_exception_handlers
-from app.observability import init_sentry
 from app.http_middleware import register_http_middleware
 from app.lifecycle import lifespan
+from app.observability import init_sentry
 from app.response_envelope import register_envelope_middleware
 from app.routers import (
     auth,
