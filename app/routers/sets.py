@@ -1,35 +1,25 @@
-"""Card-set browse endpoints (read-only)."""
+"""Card-set listing endpoint (public live proxy).
+
+``GET /sets?tcg=<pokemon|magic|yugioh|all>`` returns the upstream provider's
+set catalog through a 24-hour cache. Unauthenticated.
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any
 
-from app.db import get_db
-from app.models.enums import TcgEnum
-from app.schemas.card import CardSetRead
-from app.schemas.common import Pagination
-from app.services import card_catalog_service
+from fastapi import APIRouter, Query
+
+from app.services import card_search_service
 
 router = APIRouter(prefix="/sets", tags=["sets"])
 
 
-@router.get("", response_model=Pagination[CardSetRead], summary="List card sets")
+@router.get("", summary="List card sets (public)")
 async def list_sets(
-    tcg: TcgEnum | None = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
-) -> Pagination[CardSetRead]:
-    rows, total = await card_catalog_service.list_sets(
-        db, tcg=tcg, page=page, page_size=page_size
-    )
-    return Pagination[CardSetRead](
-        items=[CardSetRead.model_validate(r) for r in rows],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
+    tcg: str = Query("magic", pattern="^(pokemon|magic|yugioh|all)$"),
+) -> dict[str, Any]:
+    return await card_search_service.list_sets(tcg)
 
 
 __all__ = ["router"]

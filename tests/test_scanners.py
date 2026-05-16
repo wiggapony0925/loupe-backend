@@ -21,7 +21,9 @@ async def test_pair_and_list_scanner(client, auth_headers):
 @pytest.mark.asyncio
 async def test_heartbeat_updates_timestamp(client, auth_headers):
     pair_resp = await client.post(
-        "/v1/scanners", headers=auth_headers, json={"device_id": "loupe-hb", "name": "Heartbeat"}
+        "/v1/scanners",
+        headers=auth_headers,
+        json={"device_id": "loupe-hb", "name": "Heartbeat"},
     )
     scanner_id = pair_resp.json()["id"]
     hb = await client.post(
@@ -38,7 +40,9 @@ async def test_heartbeat_updates_timestamp(client, auth_headers):
 @pytest.mark.asyncio
 async def test_delete_scanner(client, auth_headers):
     pair_resp = await client.post(
-        "/v1/scanners", headers=auth_headers, json={"device_id": "loupe-del", "name": "Delete me"}
+        "/v1/scanners",
+        headers=auth_headers,
+        json={"device_id": "loupe-del", "name": "Delete me"},
     )
     scanner_id = pair_resp.json()["id"]
     resp = await client.delete(f"/v1/scanners/{scanner_id}", headers=auth_headers)

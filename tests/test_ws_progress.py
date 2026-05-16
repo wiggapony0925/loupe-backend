@@ -27,9 +27,7 @@ async def test_ws_hello_frame(created_user):
     app = create_app()
     token, _ = issue_token(created_user.id, "access")
 
-    with TestClient(app) as tc, tc.websocket_connect(
-        f"/ws/scans?token={token}"
-    ) as ws:
+    with TestClient(app) as tc, tc.websocket_connect(f"/ws/scans?token={token}") as ws:
         hello = ws.receive_json()
         assert hello["type"] == "hello"
         assert hello["user_id"] == str(created_user.id)

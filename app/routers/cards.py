@@ -1,8 +1,18 @@
-"""Card search + lookup endpoints (read-only)."""
+"""Card catalog endpoints.
+
+Public read-only endpoints (no auth required):
+
+* ``GET /cards/search`` — live upstream search proxy (unified shape).
+* ``GET /cards/{card_id}`` — single-card lookup; accepts either a local UUID
+  (DB-backed legacy lookup) or a composite ``<source>:<upstream_id>`` ID.
+* ``GET /cards`` — legacy paginated DB search (kept for the existing
+  local-catalog flow used by tests and the catalog-sync worker).
+"""
 
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,12 +21,27 @@ from app.db import get_db
 from app.models.enums import TcgEnum
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
-from app.services import card_catalog_service
+from app.services import card_catalog_service, card_search_service
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
 
-@router.get("", response_model=Pagination[CardRead], summary="Search cards")
+@router.get("/search", summary="Live card search (public)")
+async def search_live(
+    q: str = Query("", max_length=120),
+    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
+    limit: int = Query(20, ge=1, le=50),
+) -> dict[str, Any]:
+    """Live search against Scryfall / Pokémon TCG / YGOPRODeck.
+
+    Always returns 200; upstream errors are surfaced via an ``error`` field
+    on an otherwise-empty envelope so the mobile client can degrade
+    gracefully.
+    """
+    return await card_search_service.search_cards(q=q, tcg=tcg, limit=limit)
+
+
+@router.get("", response_model=Pagination[CardRead], summary="Search cards (DB)")
 async def search(
     q: str | None = Query(None, max_length=120),
     tcg: TcgEnum | None = None,
@@ -25,6 +50,7 @@ async def search(
     page_size: int = Query(25, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> Pagination[CardRead]:
+    """Legacy DB-backed paginated catalog search."""
     rows, total = await card_catalog_service.search_cards(
         db, q=q, tcg=tcg, set_code=set_code, page=page, page_size=page_size
     )
@@ -36,12 +62,38 @@ async def search(
     )
 
 
-@router.get("/{card_id}", response_model=CardRead, summary="Get one card")
-async def get_one(card_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> CardRead:
-    card = await card_catalog_service.get_card(db, card_id)
-    if card is None:
+@router.get("/{card_id}", summary="Get one card (public)")
+async def get_one(
+    card_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Lookup by composite ``<source>:<upstream_id>`` or local UUID."""
+    if ":" in card_id:
+        result = await card_search_service.get_card(card_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Card not found")
+        return result
+
+    try:
+        as_uuid = uuid.UUID(card_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid card id") from exc
+
+    row = await card_catalog_service.get_card(db, as_uuid)
+    if row is None:
         raise HTTPException(status_code=404, detail="Card not found")
-    return CardRead.model_validate(card)
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "tcg": row.tcg.value if hasattr(row.tcg, "value") else str(row.tcg),
+        "set_name": None,
+        "set_code": None,
+        "number": row.number,
+        "rarity": row.rarity,
+        "image_url": row.image_url,
+        "year": row.year,
+        "source": "loupe-db",
+    }
 
 
 __all__ = ["router"]
