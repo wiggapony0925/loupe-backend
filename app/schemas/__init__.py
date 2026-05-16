@@ -14,6 +14,18 @@ from app.schemas.collection import (
     CollectionUpdate,
 )
 from app.schemas.common import ErrorEnvelope, Pagination
+from app.schemas.envelope import (
+    API_VERSION,
+    Envelope,
+    ErrorDetail,
+    Meta,
+    build_meta,
+    build_pagination,
+    fail,
+    ok,
+    page,
+)
+from app.schemas.envelope import Pagination as EnvelopePagination
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
 from app.schemas.price import PriceQuery, PriceSnapshotRead
 from app.schemas.scan import (
@@ -36,6 +48,7 @@ from app.schemas.user import UserRead, UserSettingsRead, UserSettingsUpdate, Use
 
 __all__ = [
     "ALL_ANGLES",
+    "API_VERSION",
     "AppleSignInRequest",
     "CardRead",
     "CardSearchQuery",
@@ -44,11 +57,15 @@ __all__ = [
     "CollectionItemAdd",
     "CollectionRead",
     "CollectionUpdate",
+    "Envelope",
+    "EnvelopePagination",
+    "ErrorDetail",
     "ErrorEnvelope",
     "GoogleSignInRequest",
     "GradedCardCreate",
     "GradedCardRead",
     "GradedCardUpdate",
+    "Meta",
     "Pagination",
     "PresignedUpload",
     "PriceQuery",
@@ -69,4 +86,9 @@ __all__ = [
     "UserSettingsRead",
     "UserSettingsUpdate",
     "UserUpdate",
+    "build_meta",
+    "build_pagination",
+    "fail",
+    "ok",
+    "page",
 ]

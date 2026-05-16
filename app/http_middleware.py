@@ -1,14 +1,23 @@
-"""HTTP middleware: request logging + Cache-Control header injection."""
+"""HTTP middleware: request logging + Cache-Control header injection.
+
+The middleware also populates the request-scoped :mod:`app.request_context`
+ContextVars so the envelope/meta builder downstream can stamp every response
+with the same ``request_id`` and compute ``duration_ms``.
+"""
 
 from __future__ import annotations
 
 import time
-import uuid
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.request_context import (
+    new_request_id,
+    set_request_id,
+    set_request_started_at,
+)
 from app.utils.logger import get_logger
 
 _log = get_logger("http")
@@ -35,15 +44,17 @@ def resolve_cache_control(path: str) -> str | None:
 
 
 class RequestLogMiddleware(BaseHTTPMiddleware):
-    """Log every request with method, path, status, latency and request-id."""
+    """Log every request and stamp ``X-Request-Id`` on every response."""
 
     async def dispatch(
         self,
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        req_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        req_id = request.headers.get("x-request-id") or new_request_id()
         start = time.perf_counter()
+        set_request_id(req_id)
+        set_request_started_at(start)
         try:
             response = await call_next(request)
         except Exception:

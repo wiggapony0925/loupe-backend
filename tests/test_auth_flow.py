@@ -4,6 +4,7 @@ import pytest
 
 from app.auth.apple import AppleClaims
 from app.auth.google import GoogleClaims
+from tests.conftest import assert_envelope_error, assert_envelope_ok
 
 
 @pytest.mark.asyncio
@@ -19,8 +20,7 @@ async def test_apple_sign_in_creates_user(client, monkeypatch):
         "/v1/auth/apple",
         json={"identity_token": "fake-token-1234567890", "display_name": "Alice"},
     )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["token_type"] == "bearer"
     assert body["user"]["email"] == "alice@example.com"
     assert body["access_token"]
@@ -43,8 +43,8 @@ async def test_google_sign_in_creates_user(client, monkeypatch):
     resp = await client.post(
         "/v1/auth/google", json={"id_token": "fake-token-1234567890"}
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["user"]["email"] == "bob@example.com"
+    body = assert_envelope_ok(resp)
+    assert body["user"]["email"] == "bob@example.com"
 
 
 @pytest.mark.asyncio
@@ -59,14 +59,14 @@ async def test_refresh_token_rotation(client, monkeypatch):
     first = await client.post(
         "/v1/auth/apple", json={"identity_token": "fake-token-1234567890"}
     )
-    refresh = first.json()["refresh_token"]
+    refresh = assert_envelope_ok(first)["refresh_token"]
 
     resp = await client.post("/v1/auth/refresh", json={"refresh_token": refresh})
-    assert resp.status_code == 200
-    assert resp.json()["access_token"]
+    body = assert_envelope_ok(resp)
+    assert body["access_token"]
 
 
 @pytest.mark.asyncio
 async def test_refresh_rejects_invalid(client):
     resp = await client.post("/v1/auth/refresh", json={"refresh_token": "a" * 50})
-    assert resp.status_code == 401
+    assert_envelope_error(resp, expected_status=401)

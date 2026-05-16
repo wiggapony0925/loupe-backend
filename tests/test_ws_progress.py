@@ -1,4 +1,8 @@
-"""WebSocket progress smoke test (auth required)."""
+"""WebSocket progress smoke test (auth required).
+
+Every WS frame carries the universal ``{type, ts, request_id, data}``
+envelope so the frontend can validate frames against a single contract.
+"""
 
 import pytest
 
@@ -30,7 +34,11 @@ async def test_ws_hello_frame(created_user):
     with TestClient(app) as tc, tc.websocket_connect(f"/ws/scans?token={token}") as ws:
         hello = ws.receive_json()
         assert hello["type"] == "hello"
-        assert hello["user_id"] == str(created_user.id)
+        # universal WS envelope shape
+        assert "ts" in hello
+        assert "request_id" in hello
+        assert isinstance(hello["data"], dict)
+        assert hello["data"]["user_id"] == str(created_user.id)
 
 
 def test_pubsub_channel_format(created_user):

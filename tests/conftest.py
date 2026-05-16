@@ -107,3 +107,58 @@ def auth_headers(created_user) -> dict[str, str]:
 
     token, _ = issue_token(created_user.id, "access")
     return {"Authorization": f"Bearer {token}"}
+
+
+# ----------------------------------------------------------------- helpers
+
+
+def assert_envelope_ok(resp, expected_status: int = 200):
+    """Assert *resp* is an envelope success and return ``data``.
+
+    Validates the envelope shape (``data`` / ``meta`` / ``pagination`` /
+    ``error``) and the required meta fields.  Returns ``body["data"]`` for
+    convenient inline use::
+
+        body = assert_envelope_ok(await client.get("/v1/me", headers=h))
+        assert body["email"] == "..."
+    """
+    assert resp.status_code == expected_status, (
+        f"unexpected status {resp.status_code}: {resp.text}"
+    )
+    payload = resp.json()
+    assert isinstance(payload, dict), f"envelope must be an object, got {type(payload)}"
+    assert "data" in payload, f"envelope missing 'data': {payload}"
+    assert "meta" in payload, f"envelope missing 'meta': {payload}"
+    meta = payload["meta"]
+    assert isinstance(meta, dict)
+    for key in ("request_id", "timestamp", "version"):
+        assert key in meta, f"meta missing '{key}': {meta}"
+    assert payload.get("error") is None, f"expected no error, got {payload['error']}"
+    return payload["data"]
+
+
+def assert_envelope_error(
+    resp, *, expected_status: int, expected_code: str | None = None
+):
+    """Assert *resp* is an envelope error and return the ``error`` block."""
+    assert resp.status_code == expected_status, (
+        f"unexpected status {resp.status_code}: {resp.text}"
+    )
+    payload = resp.json()
+    assert isinstance(payload, dict)
+    assert "error" in payload and payload["error"] is not None, payload
+    assert "meta" in payload
+    err = payload["error"]
+    assert payload.get("data") is None
+    if expected_code is not None:
+        assert err.get("code") == expected_code, err
+    return err
+
+
+def envelope_pagination(resp) -> dict:
+    """Assert *resp* is a paginated envelope and return the ``pagination`` block."""
+    payload = resp.json()
+    assert payload.get("pagination") is not None, (
+        f"expected pagination block: {payload}"
+    )
+    return payload["pagination"]

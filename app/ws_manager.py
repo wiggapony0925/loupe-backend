@@ -1,4 +1,9 @@
-"""In-process WebSocket connection manager keyed by ``user_id``."""
+"""In-process WebSocket connection manager keyed by ``user_id``.
+
+Every frame is wrapped in the universal :func:`ws_envelope`
+``{type, ts, request_id, data}`` so the frontend can validate WS messages
+against a single shape — mirroring the HTTP response envelope.
+"""
 
 from __future__ import annotations
 
@@ -8,9 +13,22 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from app.request_context import get_request_id, new_request_id
 from app.utils.logger import get_logger
+from app.utils.time import utcnow
 
 _log = get_logger("ws")
+
+
+def ws_envelope(type_: str, data: Any) -> dict[str, Any]:
+    """Build the universal WS frame envelope ``{type, ts, request_id, data}``."""
+    ts = utcnow().isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return {
+        "type": type_,
+        "ts": ts,
+        "request_id": get_request_id() or new_request_id(),
+        "data": data,
+    }
 
 
 class ConnectionManager:
@@ -35,14 +53,31 @@ class ConnectionManager:
                 del self._conns[user_id]
         _log.info("ws disconnect user=%s", user_id)
 
-    async def broadcast(self, user_id: str, message: dict[str, Any]) -> int:
-        """Send *message* (JSON) to all sockets currently held for *user_id*."""
+    async def broadcast(
+        self,
+        user_id: str,
+        message: dict[str, Any],
+        *,
+        type_: str = "scan.progress",
+    ) -> int:
+        """Send *message* to all sockets currently held for *user_id*.
+
+        The payload is wrapped in :func:`ws_envelope` so every frame the
+        frontend receives shares the ``{type, ts, request_id, data}`` shape.
+        Callers may override the envelope ``type`` for non-progress events.
+        Pre-wrapped envelopes (containing both ``type`` and ``data``) are
+        forwarded as-is so worker code can emit precise event types.
+        """
+        if isinstance(message, dict) and "type" in message and "data" in message:
+            envelope = message
+        else:
+            envelope = ws_envelope(type_, message)
         async with self._lock:
             sockets = list(self._conns.get(user_id, ()))
         delivered = 0
         for ws in sockets:
             try:
-                await ws.send_json(message)
+                await ws.send_json(envelope)
                 delivered += 1
             except Exception as exc:
                 _log.warning("ws send failed user=%s: %s", user_id, exc)
@@ -61,4 +96,4 @@ def get_manager() -> ConnectionManager:
     return _manager
 
 
-__all__ = ["ConnectionManager", "get_manager"]
+__all__ = ["ConnectionManager", "get_manager", "ws_envelope"]

@@ -9,6 +9,11 @@ import pytest
 from app.models.card import Card, CardSet
 from app.models.enums import TcgEnum
 from app.services import card_search_service
+from tests.conftest import (
+    assert_envelope_error,
+    assert_envelope_ok,
+    envelope_pagination,
+)
 
 
 @pytest.mark.asyncio
@@ -21,10 +26,10 @@ async def test_search_cards_returns_pagination(client, db_session):
     await db_session.commit()
 
     resp = await client.get("/v1/cards", params={"q": "char", "tcg": "pokemon"})
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["total"] >= 1
-    assert any(item["name"].lower().startswith("char") for item in body["items"])
+    items = assert_envelope_ok(resp)
+    pagination = envelope_pagination(resp)
+    assert pagination["total"] >= 1
+    assert any(item["name"].lower().startswith("char") for item in items)
 
 
 # ---------------------------------------------------------------------- live
@@ -73,8 +78,7 @@ async def test_live_search_pokemon(client, monkeypatch):
     resp = await client.get(
         "/v1/cards/search", params={"q": "Charizard", "tcg": "pokemon", "limit": 5}
     )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["source"] == "pokemontcg"
     assert body["total"] == 1
     assert len(body["results"]) == 1
@@ -110,7 +114,7 @@ async def test_live_search_magic(client, monkeypatch):
 
     monkeypatch.setattr(card_search_service.scryfall, "search_cards", fake_search)
     resp = await client.get("/v1/cards/search", params={"q": "lotus", "tcg": "magic"})
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["source"] == "scryfall"
     assert body["results"][0]["id"] == "scryfall:abc-123"
     assert body["results"][0]["tcg"] == "magic"
@@ -144,7 +148,7 @@ async def test_live_search_yugioh(client, monkeypatch):
 
     monkeypatch.setattr(card_search_service.ygoprodeck, "search_cards", fake_search)
     resp = await client.get("/v1/cards/search", params={"q": "Blue", "tcg": "yugioh"})
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["source"] == "ygoprodeck"
     assert body["results"][0]["id"] == "ygoprodeck:89631139"
     assert body["results"][0]["set_code"] == "LOB-001"
@@ -153,9 +157,10 @@ async def test_live_search_yugioh(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_live_search_empty_query_returns_empty(client):
     resp = await client.get("/v1/cards/search", params={"q": "", "tcg": "pokemon"})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body == {"results": [], "total": 0, "source": "pokemontcg"}
+    body = assert_envelope_ok(resp)
+    assert body["results"] == []
+    assert body["total"] == 0
+    assert body["source"] == "pokemontcg"
 
 
 @pytest.mark.asyncio
@@ -167,11 +172,11 @@ async def test_live_search_upstream_error_graceful(client, monkeypatch):
 
     monkeypatch.setattr(card_search_service.scryfall, "search_cards", boom)
     resp = await client.get("/v1/cards/search", params={"q": "anything", "tcg": "all"})
-    assert resp.status_code == 200
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["results"] == []
     assert body["total"] == 0
     assert body["source"] == "scryfall"
+    # Upstream-degradation flag is a *data*-level field (200 success envelope).
     assert "error" in body
 
 
@@ -190,8 +195,7 @@ async def test_get_card_by_composite_id(client, monkeypatch):
 
     monkeypatch.setattr(card_search_service.pokemon_tcg, "get_card", fake_get)
     resp = await client.get("/v1/cards/pokemontcg:base1-4")
-    assert resp.status_code == 200
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["id"] == "pokemontcg:base1-4"
     assert body["tcg"] == "pokemon"
 
@@ -203,7 +207,7 @@ async def test_get_card_unknown_composite_id_404(client, monkeypatch):
 
     monkeypatch.setattr(card_search_service.pokemon_tcg, "get_card", fake_get)
     resp = await client.get("/v1/cards/pokemontcg:does-not-exist")
-    assert resp.status_code == 404
+    assert_envelope_error(resp, expected_status=404)
 
 
 @pytest.mark.asyncio
@@ -221,8 +225,7 @@ async def test_list_sets_live_pokemon(client, monkeypatch):
 
     monkeypatch.setattr(card_search_service.pokemon_tcg, "list_sets", fake_list)
     resp = await client.get("/v1/sets", params={"tcg": "pokemon"})
-    assert resp.status_code == 200
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["source"] == "pokemontcg"
     assert body["total"] == 1
     assert body["results"][0]["code"] == "base1"
@@ -243,8 +246,7 @@ async def test_list_sets_live_magic(client, monkeypatch):
 
     monkeypatch.setattr(card_search_service.scryfall, "list_sets", fake_list)
     resp = await client.get("/v1/sets", params={"tcg": "magic"})
-    assert resp.status_code == 200
-    body = resp.json()
+    body = assert_envelope_ok(resp)
     assert body["source"] == "scryfall"
     assert body["results"][0]["code"] == "lea"
 
@@ -253,5 +255,5 @@ async def test_list_sets_live_magic(client, monkeypatch):
 async def test_endpoints_are_public_no_auth_required(client):
     """No bearer token attached — must still be 200."""
     resp = await client.get("/v1/cards/search", params={"q": "", "tcg": "all"})
-    assert resp.status_code == 200
+    assert_envelope_ok(resp)
     assert "WWW-Authenticate" not in resp.headers

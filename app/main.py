@@ -7,8 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from app.config import get_settings
+from app.exception_handlers import register_exception_handlers
 from app.http_middleware import register_http_middleware
 from app.lifecycle import lifespan
+from app.response_envelope import register_envelope_middleware
 from app.routers import (
     auth,
     cards,
@@ -46,6 +48,13 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
+    # Middleware ordering note — Starlette executes the LAST-registered
+    # middleware as the OUTERMOST layer.  Response flow we want is:
+    #   router → envelope-wrap (innermost) → GZip → CORS → request-log (outer)
+    # so the envelope sees the raw router JSON, GZip compresses the wrapped
+    # body, and the request-log middleware stamps X-Request-Id on the final
+    # outgoing response.
+    register_envelope_middleware(app)  # innermost user middleware
     app.add_middleware(GZipMiddleware, minimum_size=1024)
     app.add_middleware(
         CORSMiddleware,
@@ -54,7 +63,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    register_http_middleware(app)
+    register_http_middleware(
+        app
+    )  # outermost: must run first on request to set request-id
+    register_exception_handlers(app)
 
     # System endpoints at root (no /v1 prefix).
     app.include_router(system.router)

@@ -16,7 +16,7 @@ from app.clients.redis_client import get_redis
 from app.db import get_sessionmaker
 from app.models.user import User
 from app.utils.logger import get_logger
-from app.ws_manager import get_manager
+from app.ws_manager import get_manager, ws_envelope
 
 router = APIRouter(tags=["ws"])
 logger = get_logger("routers.ws")
@@ -86,7 +86,7 @@ async def scan_progress_socket(
     await manager.connect(str(user.id), ws)
     relay_task = asyncio.create_task(_redis_relay(user.id, ws))
     try:
-        await ws.send_text(json.dumps({"type": "hello", "user_id": str(user.id)}))
+        await ws.send_text(json.dumps(ws_envelope("hello", {"user_id": str(user.id)})))
         while True:
             # Keep the connection alive; treat incoming frames as pings.
             await ws.receive_text()
