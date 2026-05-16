@@ -1,0 +1,97 @@
+"""Backfill ``Card.card_metadata['pricing_summary']`` from upstream catalogs.
+
+Locally-seeded cards (UUID ids, no ``source:id`` link) don't get pricing for
+free.  This worker iterates such rows and asks
+:func:`card_search_service.resolve_pricing_for_local` to look them up on
+Pokémon TCG / Scryfall / YGOPRODeck — the prices those APIs already embed for
+free — and persists the result so subsequent requests skip the upstream call.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+
+from app.db import get_sessionmaker
+from app.models.card import Card
+from app.services import card_search_service
+from app.utils.logger import get_logger
+
+logger = get_logger("workers.price_backfill")
+
+#: Max rows to touch per run — keeps each job bounded.
+DEFAULT_BATCH_SIZE = 200
+
+#: Small gap between upstream calls so we don't hammer the public APIs.
+_INTER_CALL_DELAY_SEC = 0.25
+
+
+async def backfill_prices(
+    ctx: dict[str, Any] | None = None,
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    force: bool = False,
+) -> dict[str, int]:
+    """Resolve and persist pricing for up to ``batch_size`` local cards.
+
+    Returns a counter dict: ``{"scanned": n, "updated": k, "missed": m}``.
+    """
+    scanned = 0
+    updated = 0
+    missed = 0
+
+    sm = get_sessionmaker()
+    async with sm() as session:
+        stmt = (
+            select(Card)
+            .options(selectinload(Card.card_set))
+            .order_by(Card.updated_at.asc())
+            .limit(batch_size)
+        )
+        rows = (await session.execute(stmt)).scalars().all()
+
+        for row in rows:
+            scanned += 1
+            meta = row.card_metadata if isinstance(row.card_metadata, dict) else {}
+            if not force and meta.get("pricing_summary"):
+                continue
+
+            card_set = getattr(row, "card_set", None)
+            set_code = card_set.code if card_set is not None else None
+            tcg_str = row.tcg.value if hasattr(row.tcg, "value") else str(row.tcg)
+
+            resolved = await card_search_service.resolve_pricing_for_local(
+                tcg=tcg_str,
+                name=row.name,
+                set_code=set_code,
+                number=row.number,
+            )
+            if resolved is None:
+                missed += 1
+            else:
+                new_meta = dict(meta)
+                pricing = resolved.get("pricing_summary")
+                if pricing:
+                    new_meta["pricing_summary"] = pricing
+                if resolved.get("image_url"):
+                    new_meta["image_url"] = resolved["image_url"]
+                if resolved.get("images"):
+                    new_meta["images"] = resolved["images"]
+                if new_meta != meta:
+                    row.card_metadata = new_meta
+                    updated += 1
+
+            await asyncio.sleep(_INTER_CALL_DELAY_SEC)
+
+        if updated:
+            await session.commit()
+
+    result = {"scanned": scanned, "updated": updated, "missed": missed}
+    logger.info("price_backfill complete: %s", result)
+    return result
+
+
+__all__ = ["backfill_prices"]

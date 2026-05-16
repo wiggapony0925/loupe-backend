@@ -51,6 +51,13 @@ async def catalog_sync(ctx: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True}
 
 
+async def price_backfill(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Backfill embedded upstream prices into local ``cards.metadata``."""
+    from app.workers.price_backfill import backfill_prices
+
+    return await backfill_prices(ctx)
+
+
 def _redis_settings() -> Any:
     if RedisSettings is None:  # pragma: no cover
         return None
@@ -66,8 +73,15 @@ class WorkerSettings:
         arq app.worker.WorkerSettings
     """
 
-    functions = [process_scan, catalog_sync]
-    cron_jobs = [cron(catalog_sync, hour={3}, minute={0})] if cron is not None else []
+    functions = [process_scan, catalog_sync, price_backfill]
+    cron_jobs = (
+        [
+            cron(catalog_sync, hour={3}, minute={0}),
+            cron(price_backfill, hour={4}, minute={0}),
+        ]
+        if cron is not None
+        else []
+    )
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = _redis_settings()
@@ -78,6 +92,7 @@ class WorkerSettings:
 __all__ = [
     "WorkerSettings",
     "catalog_sync",
+    "price_backfill",
     "process_scan",
     "shutdown",
     "startup",

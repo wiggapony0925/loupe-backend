@@ -595,13 +595,64 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
 # --------------------------------------------------------------------- single
 
 
+async def resolve_pricing_for_local(
+    *,
+    tcg: str,
+    name: str,
+    set_code: str | None,
+    number: str | None,
+) -> dict[str, Any] | None:
+    """Look up a locally-seeded card on the matching upstream provider and
+    return the unified card dict (including ``pricing_summary``), or ``None``
+    if no confident match is found.
+
+    Used to retroactively enrich UUID-only catalog rows with the free pricing
+    embedded in Pokémon TCG / Scryfall / YGOPRODeck responses.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None
+    try:
+        if tcg == "pokemon":
+            q_parts = [f'name:"{name}"']
+            if set_code:
+                q_parts.append(f"set.id:{set_code}")
+            if number:
+                q_parts.append(f"number:{number}")
+            body = await pokemon_tcg.search_cards(
+                " ".join(q_parts), page=1, page_size=1
+            )
+            data = (body.get("data") or []) if isinstance(body, dict) else []
+            if data:
+                return _from_pokemon(data[0])
+        elif tcg == "magic":
+            q_parts = [f'!"{name}"']
+            if set_code:
+                q_parts.append(f"set:{set_code}")
+            if number:
+                q_parts.append(f"cn:{number}")
+            body = await scryfall.search_cards(" ".join(q_parts), page=1)
+            data = (body.get("data") or []) if isinstance(body, dict) else []
+            if data:
+                return _from_scryfall(data[0])
+        elif tcg == "yugioh":
+            body = await ygoprodeck.search_cards(name)
+            data = (body.get("data") or []) if isinstance(body, dict) else []
+            if data:
+                return _from_yugioh(data[0])
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        logger.info("resolve_pricing_for_local(%s/%s) failed: %s", tcg, name, exc)
+        return None
+    return None
+
+
 async def get_card(card_id: str) -> dict[str, Any] | None:
     """Look up a single card by composite ``<source>:<upstream_id>`` ID.
 
-    Falls back to a local-DB lookup when given a UUID, returning a minimal
-    card dict (no upstream ``pricing_summary``) so downstream services can
-    still degrade gracefully — listings/comps still work via name-based
-    fan-out, and market returns an empty snapshot instead of 400.
+    Falls back to a local-DB lookup when given a UUID. On first view of a
+    locally-seeded card we transparently resolve it on the matching upstream
+    and persist the embedded pricing into ``Card.card_metadata`` so future
+    requests are served from the DB without re-hitting upstream.
     """
     if ":" not in card_id:
         # UUID fallback: resolve against the local catalog.
@@ -617,26 +668,65 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
         maker = get_sessionmaker()
         async with maker() as session:
             row = await card_catalog_service.get_card(session, as_uuid)
-        if row is None:
-            return None
-        card_set = getattr(row, "card_set", None)
-        set_name = card_set.name if card_set is not None else None
-        set_code = card_set.code if card_set is not None else None
-        year = row.year
-        if year is None and card_set is not None and card_set.release_date is not None:
-            year = card_set.release_date.year
+            if row is None:
+                return None
+            card_set = getattr(row, "card_set", None)
+            set_name = card_set.name if card_set is not None else None
+            set_code = card_set.code if card_set is not None else None
+            year = row.year
+            if (
+                year is None
+                and card_set is not None
+                and card_set.release_date is not None
+            ):
+                year = card_set.release_date.year
+            tcg_str = row.tcg.value if hasattr(row.tcg, "value") else str(row.tcg)
+
+            meta = row.card_metadata if isinstance(row.card_metadata, dict) else {}
+            cached_pricing = meta.get("pricing_summary") if meta else None
+            cached_image_url = meta.get("image_url") if meta else None
+            cached_images = meta.get("images") if meta else None
+
+            # If we have nothing cached, try once to resolve upstream and
+            # persist whatever we get back. Failures are non-fatal.
+            if not cached_pricing:
+                resolved = await resolve_pricing_for_local(
+                    tcg=tcg_str,
+                    name=row.name,
+                    set_code=set_code,
+                    number=row.number,
+                )
+                if resolved is not None:
+                    cached_pricing = resolved.get("pricing_summary")
+                    cached_image_url = resolved.get("image_url") or cached_image_url
+                    cached_images = resolved.get("images") or cached_images
+                    new_meta = dict(meta)
+                    if cached_pricing:
+                        new_meta["pricing_summary"] = cached_pricing
+                    if cached_image_url:
+                        new_meta["image_url"] = cached_image_url
+                    if cached_images:
+                        new_meta["images"] = cached_images
+                    row.card_metadata = new_meta
+                    try:
+                        await session.commit()
+                    except Exception as exc:  # pragma: no cover - best effort
+                        logger.debug("persist resolved pricing failed: %s", exc)
+                        await session.rollback()
+
         return {
             "id": card_id,
             "name": row.name,
-            "tcg": row.tcg.value if hasattr(row.tcg, "value") else str(row.tcg),
+            "tcg": tcg_str,
             "set_name": set_name,
             "set_code": set_code,
             "number": row.number,
             "rarity": row.rarity,
-            "image_url": row.image_url,
+            "image_url": cached_image_url or row.image_url,
+            "images": cached_images,
             "year": year,
             "source": "loupe-db",
-            "pricing_summary": None,
+            "pricing_summary": cached_pricing,
         }
     source, _, upstream_id = card_id.partition(":")
     source = source.lower()
