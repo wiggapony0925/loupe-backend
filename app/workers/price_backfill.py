@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_sessionmaker
 from app.models.card import Card
-from app.services import card_search_service
+from app.services import card_resolver_service, card_search_service
 from app.utils.logger import get_logger
 
 logger = get_logger("workers.price_backfill")
@@ -83,6 +83,18 @@ async def backfill_prices(
                 if new_meta != meta:
                     row.card_metadata = new_meta
                     updated += 1
+
+                # Persist the upstream link so future requests skip name search.
+                upstream_id = resolved.get("id")
+                if upstream_id and ":" in upstream_id:
+                    src, _, ext = upstream_id.partition(":")
+                    await card_resolver_service.link_external_ref(
+                        session,
+                        card_id=row.id,
+                        source=src,
+                        external_id=ext,
+                        confidence=0.9,
+                    )
 
             await asyncio.sleep(_INTER_CALL_DELAY_SEC)
 

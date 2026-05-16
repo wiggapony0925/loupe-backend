@@ -58,6 +58,13 @@ async def price_backfill(ctx: dict[str, Any]) -> dict[str, Any]:
     return await backfill_prices(ctx)
 
 
+async def image_index(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Compute perceptual hashes for catalog card images."""
+    from app.workers.image_index import index_card_images
+
+    return await index_card_images(ctx)
+
+
 def _redis_settings() -> Any:
     if RedisSettings is None:  # pragma: no cover
         return None
@@ -73,11 +80,12 @@ class WorkerSettings:
         arq app.worker.WorkerSettings
     """
 
-    functions = [process_scan, catalog_sync, price_backfill]
+    functions = [process_scan, catalog_sync, price_backfill, image_index]
     cron_jobs = (
         [
             cron(catalog_sync, hour={3}, minute={0}),
             cron(price_backfill, hour={4}, minute={0}),
+            cron(image_index, hour={5}, minute={0}),
         ]
         if cron is not None
         else []
@@ -92,6 +100,7 @@ class WorkerSettings:
 __all__ = [
     "WorkerSettings",
     "catalog_sync",
+    "image_index",
     "price_backfill",
     "process_scan",
     "shutdown",

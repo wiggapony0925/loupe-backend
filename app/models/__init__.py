@@ -3,6 +3,7 @@
 from app.models.api_key import ApiKey
 from app.models.audit import AuditLog
 from app.models.card import Card, CardSet
+from app.models.card_external_ref import CardExternalRef
 from app.models.collection import Collection, CollectionItem
 from app.models.enums import (
     GradeHouseEnum,
@@ -23,6 +24,7 @@ __all__ = [
     "ApiKey",
     "AuditLog",
     "Card",
+    "CardExternalRef",
     "CardSet",
     "Collection",
     "CollectionItem",

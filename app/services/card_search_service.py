@@ -663,7 +663,9 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
         except ValueError:
             return None
         from app.db.session import get_sessionmaker
+        from app.models.card_external_ref import CardExternalRef
         from app.services import card_catalog_service
+        from sqlalchemy import select as _select
 
         maker = get_sessionmaker()
         async with maker() as session:
@@ -690,12 +692,44 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             # If we have nothing cached, try once to resolve upstream and
             # persist whatever we get back. Failures are non-fatal.
             if not cached_pricing:
-                resolved = await resolve_pricing_for_local(
-                    tcg=tcg_str,
-                    name=row.name,
-                    set_code=set_code,
-                    number=row.number,
+                resolved = None
+                upstream_match: tuple[str, str] | None = None
+
+                # Cheap path: if we already linked an upstream ref, use it
+                # directly instead of searching by name.
+                ref_rows = (
+                    await session.execute(
+                        _select(CardExternalRef).where(
+                            CardExternalRef.card_id == as_uuid
+                        )
+                    )
+                ).scalars().all()
+                priority = {"pokemontcg": 0, "scryfall": 1, "ygoprodeck": 2}
+                preferred = sorted(
+                    ref_rows, key=lambda r: priority.get(r.source, 99)
                 )
+                for ref in preferred:
+                    if ref.source not in priority:
+                        continue
+                    resolved = await get_card(f"{ref.source}:{ref.external_id}")
+                    if resolved is not None and resolved.get("pricing_summary"):
+                        upstream_match = (ref.source, ref.external_id)
+                        break
+
+                # Expensive path: search upstream by name.
+                if resolved is None or not resolved.get("pricing_summary"):
+                    resolved = await resolve_pricing_for_local(
+                        tcg=tcg_str,
+                        name=row.name,
+                        set_code=set_code,
+                        number=row.number,
+                    )
+                    if resolved is not None and resolved.get("id"):
+                        rid = resolved["id"]
+                        if ":" in rid:
+                            src, _, ext = rid.partition(":")
+                            upstream_match = (src, ext)
+
                 if resolved is not None:
                     cached_pricing = resolved.get("pricing_summary")
                     cached_image_url = resolved.get("image_url") or cached_image_url
@@ -708,6 +742,19 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                     if cached_images:
                         new_meta["images"] = cached_images
                     row.card_metadata = new_meta
+
+                    # Persist the discovered upstream link so we never have to
+                    # search by name for this card again.
+                    if upstream_match is not None:
+                        from app.services import card_resolver_service
+
+                        await card_resolver_service.link_external_ref(
+                            session,
+                            card_id=as_uuid,
+                            source=upstream_match[0],
+                            external_id=upstream_match[1],
+                            confidence=0.9,
+                        )
                     try:
                         await session.commit()
                     except Exception as exc:  # pragma: no cover - best effort
