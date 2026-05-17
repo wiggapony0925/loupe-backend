@@ -63,11 +63,31 @@ jobs:
 
       - name: Cloud Build (push image)
         run: |
-          gcloud builds submit \
+          # Use --async to avoid the "can't stream logs" failure when the
+          # deployer SA lacks roles/logging.viewer. We poll the build
+          # ourselves and fail explicitly on a non-SUCCESS terminal state.
+          BUILD_ID=$(gcloud builds submit \
             --tag "${{ steps.tag.outputs.image_sha }}" \
             --project "${GCP_PROJECT}" \
             --region "${GCP_REGION}" \
-            .
+            --async \
+            --format='value(id)' \
+            .)
+          echo "Build ID: ${BUILD_ID}"
+          while :; do
+            STATUS=$(gcloud builds describe "${BUILD_ID}" \
+              --project "${GCP_PROJECT}" --region "${GCP_REGION}" \
+              --format='value(status)')
+            echo "status=${STATUS}"
+            case "${STATUS}" in
+              SUCCESS) break ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
+                echo "Cloud Build terminal failure: ${STATUS}" >&2
+                exit 1 ;;
+              QUEUED|WORKING|PENDING) sleep 10 ;;
+              *) echo "Unknown status '${STATUS}'" >&2; exit 1 ;;
+            esac
+          done
 
       - name: Tag image as :latest
         run: |
