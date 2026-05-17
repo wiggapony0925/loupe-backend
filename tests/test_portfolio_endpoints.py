@@ -14,7 +14,9 @@ from tests.factories import make_card, make_scanner
 
 @pytest.mark.asyncio
 async def test_summary_empty_for_new_user(client, auth_headers):
-    body = assert_envelope_ok(await client.get("/v1/grades/summary", headers=auth_headers))
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/summary", headers=auth_headers)
+    )
     assert body["totalValueUsd"] == 0
     assert body["cardCount"] == 0
     assert body["avgGrade"] is None
@@ -38,7 +40,9 @@ async def test_summary_aggregates_user_cards(
         )
     await db_session.commit()
 
-    body = assert_envelope_ok(await client.get("/v1/grades/summary", headers=auth_headers))
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/summary", headers=auth_headers)
+    )
     assert body["cardCount"] == 2
     assert float(body["totalValueUsd"]) == pytest.approx(350.0)
     assert float(body["avgGrade"]) == pytest.approx(9.75)
@@ -63,13 +67,17 @@ async def test_history_rejects_unknown_range(client, auth_headers):
 
 @pytest.mark.asyncio
 async def test_sparklines_shape(client, auth_headers):
-    body = assert_envelope_ok(await client.get("/v1/grades/sparklines", headers=auth_headers))
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/sparklines", headers=auth_headers)
+    )
     assert isinstance(body, list)
 
 
 @pytest.mark.asyncio
 async def test_scanner_status_none_when_no_scanner(client, auth_headers):
-    body = assert_envelope_ok(await client.get("/v1/scanners/status", headers=auth_headers))
+    body = assert_envelope_ok(
+        await client.get("/v1/scanners/status", headers=auth_headers)
+    )
     assert body is None
 
 
@@ -78,7 +86,9 @@ async def test_scanner_status_returns_most_recent(
     client, auth_headers, db_session, created_user
 ):
     await make_scanner(db_session, created_user)
-    body = assert_envelope_ok(await client.get("/v1/scanners/status", headers=auth_headers))
+    body = assert_envelope_ok(
+        await client.get("/v1/scanners/status", headers=auth_headers)
+    )
     assert body is not None
     assert body["name"] == "My Scanner"
 

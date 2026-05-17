@@ -47,9 +47,7 @@ async def get_card(db: AsyncSession, card_id: uuid.UUID) -> Card | None:
     # context manager pattern used by HTTP services).
     return (
         await db.execute(
-            select(Card)
-            .options(selectinload(Card.card_set))
-            .where(Card.id == card_id)
+            select(Card).options(selectinload(Card.card_set)).where(Card.id == card_id)
         )
     ).scalar_one_or_none()
 

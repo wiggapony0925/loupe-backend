@@ -42,9 +42,6 @@ class TokenPair(BaseModel):
 
 
 class AppleSignInRequest(BaseModel):
-    "DevLoginRequest",
-    "EmailSignInRequest",
-    "EmailSignUpRequest",
     """Body for ``POST /v1/auth/apple``."""
 
     identity_token: str = Field(..., min_length=10, description="JWT from Apple SDK.")
@@ -67,6 +64,9 @@ class RefreshRequest(BaseModel):
 
 __all__ = [
     "AppleSignInRequest",
+    "DevLoginRequest",
+    "EmailSignInRequest",
+    "EmailSignUpRequest",
     "GoogleSignInRequest",
     "RefreshRequest",
     "TokenPair",

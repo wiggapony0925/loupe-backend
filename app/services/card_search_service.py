@@ -662,10 +662,11 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             as_uuid = _uuid.UUID(card_id)
         except ValueError:
             return None
+        from sqlalchemy import select as _select
+
         from app.db.session import get_sessionmaker
         from app.models.card_external_ref import CardExternalRef
         from app.services import card_catalog_service
-        from sqlalchemy import select as _select
 
         maker = get_sessionmaker()
         async with maker() as session:
@@ -698,16 +699,18 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                 # Cheap path: if we already linked an upstream ref, use it
                 # directly instead of searching by name.
                 ref_rows = (
-                    await session.execute(
-                        _select(CardExternalRef).where(
-                            CardExternalRef.card_id == as_uuid
+                    (
+                        await session.execute(
+                            _select(CardExternalRef).where(
+                                CardExternalRef.card_id == as_uuid
+                            )
                         )
                     )
-                ).scalars().all()
-                priority = {"pokemontcg": 0, "scryfall": 1, "ygoprodeck": 2}
-                preferred = sorted(
-                    ref_rows, key=lambda r: priority.get(r.source, 99)
+                    .scalars()
+                    .all()
                 )
+                priority = {"pokemontcg": 0, "scryfall": 1, "ygoprodeck": 2}
+                preferred = sorted(ref_rows, key=lambda r: priority.get(r.source, 99))
                 for ref in preferred:
                     if ref.source not in priority:
                         continue

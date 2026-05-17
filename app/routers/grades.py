@@ -21,7 +21,9 @@ from app.utils.time import utcnow
 router = APIRouter(prefix="/grades", tags=["grades"])
 
 
-def _to_read(row: GradedCard, card: Card | None, card_set: CardSet | None) -> GradedCardRead:
+def _to_read(
+    row: GradedCard, card: Card | None, card_set: CardSet | None
+) -> GradedCardRead:
     out = GradedCardRead.model_validate(row)
     if card is not None:
         out.card_name = card.name

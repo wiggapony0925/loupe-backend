@@ -26,7 +26,6 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.models.card import Card
 from app.models.card_external_ref import CardExternalRef
@@ -113,9 +112,7 @@ async def resolve_by_text(
     tcg: str | None = None,
 ) -> ResolvedCard | None:
     """Best-effort resolution from a free-text query (scan OCR, search bar)."""
-    body = await card_search_service.search_cards(
-        query=query, tcg=tcg or "all", limit=1
-    )
+    body = await card_search_service.search_cards(q=query, tcg=tcg or "all", limit=1)
     results = body.get("results") or []
     if not results:
         return None
@@ -161,15 +158,17 @@ async def resolve_by_phash(
         return None
     prefix = phash[:8]
     candidates = (
-        await db.execute(
-            select(Fingerprint).where(Fingerprint.phash.startswith(prefix[:4]))
+        (
+            await db.execute(
+                select(Fingerprint).where(Fingerprint.phash.startswith(prefix[:4]))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not candidates:
         return None
-    best = min(
-        candidates, key=lambda f: _hamming(phash, f.phash or "ff" * 32)
-    )
+    best = min(candidates, key=lambda f: _hamming(phash, f.phash or "ff" * 32))
     distance = _hamming(phash, best.phash or "")
     if distance > max_distance:
         return None
@@ -179,9 +178,7 @@ async def resolve_by_phash(
     from app.models.grade import GradedCard
 
     gc = (
-        await db.execute(
-            select(GradedCard).where(GradedCard.id == best.graded_card_id)
-        )
+        await db.execute(select(GradedCard).where(GradedCard.id == best.graded_card_id))
     ).scalar_one_or_none()
     if gc is None or gc.card_id is None:
         return None
@@ -235,18 +232,20 @@ async def link_external_ref(
 # ------------------------------------------------------------------- helpers
 
 
-async def _preferred_external_ref(
-    db: AsyncSession, card_id: uuid.UUID
-) -> str | None:
+async def _preferred_external_ref(db: AsyncSession, card_id: uuid.UUID) -> str | None:
     """Pick the most useful upstream id for a card.
 
     Preference order favours providers we can use for live pricing.
     """
     rows = (
-        await db.execute(
-            select(CardExternalRef).where(CardExternalRef.card_id == card_id)
+        (
+            await db.execute(
+                select(CardExternalRef).where(CardExternalRef.card_id == card_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not rows:
         return None
     priority = {

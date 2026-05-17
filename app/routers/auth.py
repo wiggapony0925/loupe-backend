@@ -97,9 +97,7 @@ async def dev_login(
     Gated by ``APP_ENV``: only available outside of ``production``.
     """
     if get_settings().app_env == "production":
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Not Found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     user = await user_service.find_or_create_dev_user(
         db, email=payload.email, display_name=payload.display_name
     )

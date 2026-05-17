@@ -37,8 +37,10 @@ def register_docs_routes(app: FastAPI, *, static_dir: Path) -> None:
 
         response = HTMLResponse(docs_html_path.read_text())
         query_token = request.query_params.get("token", "")
-        if _DOCS_TOKEN and query_token and secrets.compare_digest(
-            query_token, _DOCS_TOKEN
+        if (
+            _DOCS_TOKEN
+            and query_token
+            and secrets.compare_digest(query_token, _DOCS_TOKEN)
         ):
             _set_session_cookie(response, _DOCS_TOKEN, request)
         return response

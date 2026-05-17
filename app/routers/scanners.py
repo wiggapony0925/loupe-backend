@@ -48,9 +48,7 @@ async def get_status(
         return None
     # Prefer rows with a heartbeat; fall back to most-recently-paired.
     rows.sort(
-        key=lambda r: (
-            r.last_seen_at or r.created_at,
-        ),
+        key=lambda r: (r.last_seen_at or r.created_at,),
         reverse=True,
     )
     return ScannerRead.model_validate(rows[0])

@@ -101,7 +101,9 @@ async def authenticate_with_password(
     # Hash a dummy value when the user is missing so attackers can't enumerate
     # accounts by measuring response time.
     if user is None or user.password_hash is None:
-        _ = verify_password(password, "$argon2id$v=19$m=65536,t=3,p=4$ZmFrZXNhbHQ$ZmFrZWhhc2g")
+        _ = verify_password(
+            password, "$argon2id$v=19$m=65536,t=3,p=4$ZmFrZXNhbHQ$ZmFrZWhhc2g"
+        )
         return None
     if not verify_password(password, user.password_hash):
         return None

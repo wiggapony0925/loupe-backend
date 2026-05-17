@@ -9,10 +9,8 @@ values; the UI is expected to render an empty state.
 
 from __future__ import annotations
 
-import uuid
-from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -108,7 +106,7 @@ async def summary(db: AsyncSession, user: User) -> dict:
     return {
         "totalValueUsd": float(total),
         "cardCount": len(rows),
-        # Average grade (0–10) is the most honest "quality" signal we have
+        # Average grade (0-10) is the most honest "quality" signal we have
         # until the scan pipeline reports per-job accuracy. Frontend shows
         # null as "—" rather than fabricating an accuracy percentage.
         "avgGrade": avg_grade,
@@ -146,7 +144,7 @@ def _extract_price_history(card: Card | None) -> list[tuple[date, float]]:
             continue
         try:
             d = date.fromisoformat(str(raw_date)[:10])
-            p = float(raw_price)
+            p = float(raw_price)  # type: ignore[arg-type]
         except (ValueError, TypeError):
             continue
         out.append((d, p))
@@ -177,7 +175,7 @@ def _value_on(
 
 def _bucket_dates(range_: PortfolioRange, earliest: date) -> list[date]:
     """Return the bucket end-dates for *range_*, oldest → newest."""
-    now = datetime.now(timezone.utc).date()
+    now = datetime.now(UTC).date()
     delta, granularity = _RANGE_BUCKETS[range_]
     if range_ == "YTD":
         start = date(now.year, 1, 1)
@@ -231,7 +229,7 @@ async def history(
     earliest = (
         min(earliest_dates)
         if earliest_dates
-        else datetime.now(timezone.utc).date() - timedelta(days=30)
+        else datetime.now(UTC).date() - timedelta(days=30)
     )
 
     buckets = _bucket_dates(range_, earliest)
@@ -263,9 +261,7 @@ async def sparklines(db: AsyncSession, user: User, points: int = 14) -> list[dic
             current = float(g.estimated_value_usd or 0)
             pts = [current] * points
             out.append(
-                CardSparkline(
-                    card_id=str(g.id), points=pts, delta_pct=0.0
-                ).to_dict()
+                CardSparkline(card_id=str(g.id), points=pts, delta_pct=0.0).to_dict()
             )
             continue
         # Down-sample the real history to exactly `points` points.

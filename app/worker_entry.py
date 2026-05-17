@@ -22,7 +22,7 @@ from app.worker import WorkerSettings
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler API)
+    def do_GET(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
@@ -34,13 +34,13 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
 def _serve_health() -> None:
     port = int(os.environ.get("PORT", "8080"))
-    server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)  # noqa: S104
+    server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)
     server.serve_forever()
 
 
 def main() -> None:
     threading.Thread(target=_serve_health, daemon=True).start()
-    run_worker(WorkerSettings)
+    run_worker(WorkerSettings)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

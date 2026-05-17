@@ -52,9 +52,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description=description,
         lifespan=lifespan,
-        docs_url=None,       # disable Swagger UI — we serve Scalar at /api-docs
-        redoc_url=None,      # disable Redoc — redirected to /api-docs
-        openapi_url=None,    # disable built-in /openapi.json — re-served by docs_auth
+        docs_url=None,  # disable Swagger UI — we serve Scalar at /api-docs
+        redoc_url=None,  # disable Redoc — redirected to /api-docs
+        openapi_url=None,  # disable built-in /openapi.json — re-served by docs_auth
     )
 
     # Middleware ordering note — Starlette executes the LAST-registered

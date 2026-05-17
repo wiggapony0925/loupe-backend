@@ -54,7 +54,9 @@ async def index_card_images(
             meta = row.card_metadata if isinstance(row.card_metadata, dict) else {}
             if not force and meta.get("image_hash"):
                 continue
-            image_url = (meta.get("image_url") or row.image_url) if meta else row.image_url
+            image_url = (
+                (meta.get("image_url") or row.image_url) if meta else row.image_url
+            )
             if not image_url:
                 continue
 

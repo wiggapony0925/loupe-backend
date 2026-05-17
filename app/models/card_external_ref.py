@@ -11,7 +11,15 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -37,7 +45,7 @@ class CardExternalRef(Base):
     source: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     #: Provider-native identifier (e.g. ``base1-15``, ``abc-uuid``, ``12345``).
     external_id: Mapped[str] = mapped_column(String(200), nullable=False)
-    #: Optional 0.0–1.0 confidence score from the resolver that created the link.
+    #: Optional 0.0-1.0 confidence score from the resolver that created the link.
     confidence: Mapped[float | None] = mapped_column(Numeric(3, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

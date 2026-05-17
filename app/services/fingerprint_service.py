@@ -41,8 +41,8 @@ class FingerprintResult:
 def fingerprint_from_image_bytes(data: bytes) -> FingerprintResult | None:
     """Compute a real pHash/dHash from raw JPEG/PNG bytes."""
     try:
-        from PIL import Image  # type: ignore[import-not-found]
         import imagehash  # type: ignore[import-not-found]
+        from PIL import Image  # type: ignore[import-not-found]
     except ImportError:
         logger.warning(
             "fingerprint: Pillow/ImageHash not installed — falling back to stub"
@@ -50,14 +50,13 @@ def fingerprint_from_image_bytes(data: bytes) -> FingerprintResult | None:
         return None
     try:
         with Image.open(io.BytesIO(data)) as im:
-            im = im.convert("RGB")
-            phash = str(imagehash.phash(im, hash_size=16))
-            dhash = str(imagehash.dhash(im, hash_size=16))
+            rgb = im.convert("RGB")
+            phash = str(imagehash.phash(rgb, hash_size=16))
+            dhash = str(imagehash.dhash(rgb, hash_size=16))
             gray = im.convert("L").resize((32, 32))
             hist = gray.histogram()
             buckets = [
-                sum(hist[i * 16 : (i + 1) * 16]) / float(32 * 32)
-                for i in range(16)
+                sum(hist[i * 16 : (i + 1) * 16]) / float(32 * 32) for i in range(16)
             ]
             vector = [round(b, 4) for b in buckets]
     except Exception as exc:
