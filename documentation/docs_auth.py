@@ -63,6 +63,11 @@ def register_docs_routes(app: FastAPI, *, static_dir: Path) -> None:
             return JSONResponse({"detail": "Access token required"}, status_code=403)
         return JSONResponse(original_openapi())
 
+    # Companion page: persona registry for the QA / demo team.
+    from documentation.test_users_page import register_test_users_route
+
+    register_test_users_route(app)
+
 
 def _sign_cookie(token: str) -> str:
     return hmac.new(token.encode(), b"loupe-docs-session", hashlib.sha256).hexdigest()

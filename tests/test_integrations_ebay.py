@@ -19,9 +19,11 @@ async def _client_lifecycle():
 
 @pytest.mark.asyncio
 async def test_ebay_not_configured_returns_empty(monkeypatch):
-    monkeypatch.delenv("EBAY_OAUTH_TOKEN", raising=False)
-    monkeypatch.delenv("EBAY_APP_ID", raising=False)
-    monkeypatch.delenv("EBAY_CERT_ID", raising=False)
+    # Set to "" rather than delenv so empty values override the developer's
+    # local `.env` when pydantic-settings re-reads it on reload_settings().
+    monkeypatch.setenv("EBAY_OAUTH_TOKEN", "")
+    monkeypatch.setenv("EBAY_APP_ID", "")
+    monkeypatch.setenv("EBAY_CERT_ID", "")
     reload_settings()
     p = EbayProvider()
     assert p.is_configured() is False

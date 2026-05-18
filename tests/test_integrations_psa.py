@@ -19,7 +19,10 @@ async def _close():
 
 @pytest.mark.asyncio
 async def test_psa_no_token(monkeypatch):
-    monkeypatch.delenv("PSA_API_TOKEN", raising=False)
+    # Setting to "" (rather than delenv) ensures the empty value beats any
+    # PSA_API_TOKEN that pydantic-settings would otherwise re-read from the
+    # developer's local `.env` file on `reload_settings()`.
+    monkeypatch.setenv("PSA_API_TOKEN", "")
     reload_settings()
     p = PsaProvider()
     assert p.is_configured() is False
