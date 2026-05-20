@@ -1,20 +1,28 @@
-"""PSA Public API provider — population reports.
+"""PSA Public API provider — single-cert verification with Redis caching.
 
-API docs: https://www.psacard.com/publicapi. Token is bearer-style.
+The free PSA Public API (https://www.psacard.com/publicapi) ONLY supports
+cert verification by cert number — it does NOT expose bulk population data.
+Free tier is **100 requests/day**, so every call is cached in Redis for 24h.
+
+Population reports are intentionally not implemented (the API doesn't
+support them); fan-out callers will get ``None`` and skip PSA cleanly.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
-from urllib.parse import quote
 
+from app.clients.redis_client import get_redis
 from app.config import get_settings
-from app.integrations.base import BaseProvider, PopulationReport
+from app.integrations.base import BaseProvider
 from app.utils.logger import get_logger
 
 logger = get_logger("integrations.psa")
 
 _BASE = "https://api.psacard.com/publicapi"
+_CACHE_TTL_SECONDS = 24 * 60 * 60
+_CACHE_PREFIX = "psa:cert:"
 
 
 class PsaProvider(BaseProvider):
@@ -24,63 +32,88 @@ class PsaProvider(BaseProvider):
     def is_configured(self) -> bool:
         return bool(get_settings().psa_api_token)
 
-    async def get_population(self, spec_or_query: str) -> list[PopulationReport] | None:
-        if not self.is_configured() or not spec_or_query:
+    # Population deliberately NOT overridden — the public API doesn't support
+    # it, so we keep the BaseProvider no-op so registry capabilities stay
+    # honest.
+
+    async def verify_cert(self, cert_no: str | int) -> dict[str, Any] | None:
+        """Look up a PSA cert. Cached in Redis for 24h to stay under 100/day.
+
+        Returns ``None`` when the cert is invalid, not found, or PSA is
+        unreachable. Otherwise returns the ``PSACert`` payload PSA returns
+        (subject, year, brand, category, grade, etc.).
+        """
+        if not self.is_configured():
             return None
+        cert = "".join(c for c in str(cert_no) if c.isdigit())
+        if not cert:
+            return None
+
+        cache_key = f"{_CACHE_PREFIX}{cert}"
+        redis = None
+        try:
+            redis = await get_redis()
+            cached = await redis.get(cache_key)
+            if cached:
+                payload = json.loads(cached)
+                return None if payload == {"_miss": True} else payload
+        except Exception as exc:
+            logger.debug("psa cache get failed: %s", exc)
+            redis = None
+
         token = get_settings().psa_api_token
         headers = {
             "Authorization": f"Bearer {token}",
             "Accept": "application/json",
         }
-        # Best-effort: try by spec id, then fall back to None.
-        url = f"{_BASE}/pop/GetPSASpecPopulation/{quote(spec_or_query)}"
+        url = f"{_BASE}/cert/GetByCertNumber/{cert}"
         try:
             resp = await self._call_with_retry("GET", url, headers=headers)
-            if resp is None or resp.status_code >= 400:
+            if resp is None:
                 return None
+            if resp.status_code >= 500:
+                return None  # don't cache infrastructure failures
             data = resp.json() or {}
-            return self._parse(data)
         except Exception as exc:
-            logger.warning("psa get_population failed: %s", exc)
+            logger.warning("psa verify_cert failed: %s", exc)
             return None
 
-    @staticmethod
-    def _parse(data: dict[str, Any]) -> list[PopulationReport] | None:
-        # PSA response varies by endpoint; handle common shapes defensively.
-        raw = (
-            data.get("PSASpecPopulation")
-            or data.get("Population")
-            or data.get("Pop")
-            or {}
-        )
-        if not isinstance(raw, dict):
-            return None
-        # Common keys: pop10, pop9, ..., totalPop
-        out: list[PopulationReport] = []
-        grade_keys = [
-            ("pop10", "10"),
-            ("pop9", "9"),
-            ("pop8", "8"),
-            ("pop7", "7"),
-            ("pop6", "6"),
-            ("pop5", "5"),
-        ]
-        for key, grade in grade_keys:
-            val = raw.get(key) or raw.get(key.upper())
+        cert_info = _extract_cert(data)
+
+        # Cache hits AND well-formed misses so we don't burn the 100/day quota.
+        if redis is not None:
             try:
-                pop = int(val) if val is not None else 0
-            except (TypeError, ValueError):
-                pop = 0
-            if pop:
-                out.append(
-                    PopulationReport(
-                        source="psa",
-                        house="psa",
-                        grade=grade,
-                        population=pop,
-                    )
+                to_cache = cert_info if cert_info is not None else {"_miss": True}
+                await redis.setex(
+                    cache_key, _CACHE_TTL_SECONDS, json.dumps(to_cache)
                 )
-        return out or None
+            except Exception as exc:
+                logger.debug("psa cache set failed: %s", exc)
+
+        return cert_info
+
+
+def _extract_cert(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Reduce PSA's response to a clean dict, or None if the lookup failed."""
+    if not isinstance(data, dict):
+        return None
+    msg = (data.get("ServerMessage") or "").lower()
+    if "no data" in msg or "invalid" in msg:
+        return None
+    cert = (
+        data.get("PSACert")
+        or data.get("Cert")
+        or data.get("Item")
+        or data
+    )
+    if not isinstance(cert, dict):
+        return None
+    cert = {
+        k: v
+        for k, v in cert.items()
+        if k not in {"IsValidRequest", "ServerMessage"}
+    }
+    return cert or None
 
 
 __all__ = ["PsaProvider"]

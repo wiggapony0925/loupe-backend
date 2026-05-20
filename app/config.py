@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     pricecharting_token: str | None = None
     # GoCollect (stub) — https://gocollect.com
     gocollect_api_key: str | None = None
+    # JustTCG — https://justtcg.com/api (aggregated TCG prices, free tier)
+    justtcg_api_key: str | None = None
+    # TCGCSV — https://tcgcsv.com (free daily TCGplayer mirror, no key needed).
+    # Set to false to disable the background download.
+    tcgcsv_enabled: bool = True
 
     # --- Google Cloud Platform (production infra) ---
     # Path to service-account JSON. Standard env var the google-* SDKs read

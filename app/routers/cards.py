@@ -22,6 +22,7 @@ from app.models.enums import TcgEnum
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
 from app.services import (
+    canonical_card_service,
     card_catalog_service,
     card_search_service,
     comps_service,
@@ -154,6 +155,22 @@ async def get_comps(
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
     return result
+
+
+@router.get("/{card_id}/canonical", summary="Canonical unified card (public)")
+async def get_canonical(card_id: str) -> dict[str, Any]:
+    """Return the single "holy grail" :class:`CanonicalCard` document.
+
+    Composes catalog identity, set, images, attributes, multi-source
+    pricing, population, listings, comps, and (for ``psa:<cert>`` ids)
+    a verified cert into one object the frontend can render directly.
+    Section provenance is included so the UI can flag real vs
+    synthesized data.
+    """
+    card = await canonical_card_service.compose_canonical_card(card_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return card.model_dump(mode="json")
 
 
 @router.get("/{card_id}", summary="Get one card (public)")
