@@ -42,7 +42,7 @@ async def test_progress_uses_total_cards_when_available(
     db_session.add_all(cards)
     await db_session.flush()
     # User owns 2 of 4.
-    for c, val in zip(cards[:2], ["10.00", "25.00"]):
+    for c, val in zip(cards[:2], ["10.00", "25.00"], strict=False):
         db_session.add(
             GradedCard(
                 user_id=created_user.id,

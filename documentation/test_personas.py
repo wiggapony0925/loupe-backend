@@ -549,11 +549,11 @@ BANDS: list[tuple[str, str, range]] = [
 
 
 __all__ = [
-    "Archetype",
-    "AuthMethod",
     "BANDS",
     "DEFAULT_PASSWORD",
     "PERSONAS",
+    "Archetype",
+    "AuthMethod",
     "Persona",
     "ScannerProfile",
 ]

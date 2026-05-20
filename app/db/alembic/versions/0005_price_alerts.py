@@ -25,10 +25,15 @@ depends_on: str | Sequence[str] | None = None
 
 
 _condition = sa.Enum("above", "below", name="price_alert_condition")
+# Column-level reference that must NOT try to recreate the type — we pre-create
+# it once with `checkfirst=True` below. Without `create_type=False`, alembic
+# emits a second `CREATE TYPE` inside `create_table` which fails on re-runs.
+_condition_col = sa.Enum(
+    "above", "below", name="price_alert_condition", create_type=False
+)
 
 
 def upgrade() -> None:
-    _condition.create(op.get_bind(), checkfirst=True)
     op.create_table(
         "price_alerts",
         sa.Column("id", UuidCol(), primary_key=True),
@@ -44,7 +49,7 @@ def upgrade() -> None:
             sa.ForeignKey("cards.id", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("condition", _condition, nullable=False),
+        sa.Column("condition", _condition_col, nullable=False),
         sa.Column("threshold_usd", sa.Numeric(10, 2), nullable=False),
         sa.Column("note", sa.String(length=280), nullable=True),
         sa.Column(

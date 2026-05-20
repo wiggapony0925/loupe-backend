@@ -32,7 +32,7 @@ class SetProgress:
     image_url: str | None
     owned: int
     total: int
-    percent: float  # 0.0–100.0
+    percent: float  # 0.0 to 100.0
     estimated_value_usd: float
     missing_top: list[dict[str, Any]]  # up to 5 missing cards (id/name/number/image)
 
@@ -166,4 +166,4 @@ async def list_progress(
     return [s.to_dict() for s in out]
 
 
-__all__ = ["list_progress", "SetProgress"]
+__all__ = ["SetProgress", "list_progress"]

@@ -10,7 +10,7 @@ import pytest
 from app.models.enums import GradeHouseEnum
 from app.models.grade import GradedCard
 from tests.conftest import assert_envelope_ok
-from tests.factories import make_card, make_card_with_price_history
+from tests.factories import make_card_with_price_history
 
 
 @pytest.mark.asyncio
