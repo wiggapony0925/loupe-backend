@@ -272,9 +272,7 @@ async def test_history_delta_math_matches_first_and_last(
     first = body["points"][0]["priceUsd"]
     last = body["points"][-1]["priceUsd"]
     expected_delta = round(last - first, 2)
-    expected_pct = (
-        round((expected_delta / first * 100), 2) if first > 0 else 0.0
-    )
+    expected_pct = round((expected_delta / first * 100), 2) if first > 0 else 0.0
     assert body["deltaUsd"] == pytest.approx(expected_delta)
     assert body["deltaPct"] == pytest.approx(expected_pct)
 

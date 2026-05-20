@@ -114,9 +114,7 @@ async def summary(db: AsyncSession, user: User) -> dict:
     # "+$0.00 (+0%)", which would mislead a brand-new collector.
     if cost_count > 0:
         pnl_usd: float | None = float(total - cost)
-        pnl_pct: float | None = (
-            float((total - cost) / cost * 100) if cost > 0 else 0.0
-        )
+        pnl_pct: float | None = float((total - cost) / cost * 100) if cost > 0 else 0.0
         total_cost: float | None = float(cost)
     else:
         pnl_usd = None

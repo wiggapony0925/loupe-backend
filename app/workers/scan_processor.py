@@ -56,19 +56,23 @@ async def _ensure_placeholder_card(db: AsyncSession) -> Card:
     """
     placeholder_name = "Unidentified Loupe Capture"
     existing = (
-        await db.execute(
-            select(Card).where(Card.name == placeholder_name).limit(1)
-        )
-    ).scalars().first()
+        (await db.execute(select(Card).where(Card.name == placeholder_name).limit(1)))
+        .scalars()
+        .first()
+    )
     if existing is not None:
         return existing
     from app.models.card import CardSet
 
     placeholder_set = (
-        await db.execute(
-            select(CardSet).where(CardSet.name == "Unidentified Set").limit(1)
+        (
+            await db.execute(
+                select(CardSet).where(CardSet.name == "Unidentified Set").limit(1)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if placeholder_set is None:
         placeholder_set = CardSet(tcg=TcgEnum.pokemon, name="Unidentified Set")
         db.add(placeholder_set)

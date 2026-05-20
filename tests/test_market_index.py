@@ -30,14 +30,10 @@ async def test_unknown_index_404(client):
 
 
 @pytest.mark.asyncio
-async def test_psa10_index_normalizes_to_100(
-    client, db_session, created_user
-):
+async def test_psa10_index_normalizes_to_100(client, db_session, created_user):
     """Cohort of 1 card with linear price growth → last index value > 100."""
     today = datetime.now(UTC).date()
-    history = [
-        (today - timedelta(days=29 - i), 100.0 + i * 5.0) for i in range(30)
-    ]
+    history = [(today - timedelta(days=29 - i), 100.0 + i * 5.0) for i in range(30)]
     card = await make_card_with_price_history(db_session, history)
     # User owns a PSA-10 graded card of this catalog card → cohort hit.
     db_session.add(
@@ -64,9 +60,7 @@ async def test_psa10_index_normalizes_to_100(
 
 
 @pytest.mark.asyncio
-async def test_psa10_index_excludes_psa9_only_cards(
-    client, db_session, created_user
-):
+async def test_psa10_index_excludes_psa9_only_cards(client, db_session, created_user):
     """A card held only as PSA 9 must NOT count toward the PSA-10 cohort."""
     today = datetime.now(UTC).date()
     history = [(today - timedelta(days=i), 200.0) for i in range(10)]

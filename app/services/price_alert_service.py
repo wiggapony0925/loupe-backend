@@ -85,7 +85,9 @@ async def delete(db: AsyncSession, user: User, alert_id: uuid.UUID) -> bool:
     return True
 
 
-def _satisfies(condition: PriceAlertCondition, price: Decimal, threshold: Decimal) -> bool:
+def _satisfies(
+    condition: PriceAlertCondition, price: Decimal, threshold: Decimal
+) -> bool:
     if condition == PriceAlertCondition.above:
         return price >= threshold
     if condition == PriceAlertCondition.below:
@@ -103,13 +105,17 @@ async def evaluate_for_card(
     the transaction so this is composable with the worker's batch.
     """
     pending = (
-        await db.execute(
-            select(PriceAlert).where(
-                PriceAlert.card_id == card_id,
-                PriceAlert.triggered_at.is_(None),
+        (
+            await db.execute(
+                select(PriceAlert).where(
+                    PriceAlert.card_id == card_id,
+                    PriceAlert.triggered_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     now = datetime.now(UTC)
     fired: list[PriceAlert] = []
     for alert in pending:
@@ -120,9 +126,7 @@ async def evaluate_for_card(
     return fired
 
 
-def serialize_for_wire(
-    alert: PriceAlert, card: Card | None = None
-) -> dict[str, Any]:
+def serialize_for_wire(alert: PriceAlert, card: Card | None = None) -> dict[str, Any]:
     """Mirror the `PriceAlertRead` shape without a Pydantic round-trip."""
     return _to_read(alert, card).model_dump(mode="json")
 

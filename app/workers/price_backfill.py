@@ -100,9 +100,7 @@ async def backfill_prices(
                     pricing.get("market") if isinstance(pricing, dict) else None
                 )
                 market_amt = (
-                    market_obj.get("amount")
-                    if isinstance(market_obj, dict)
-                    else None
+                    market_obj.get("amount") if isinstance(market_obj, dict) else None
                 )
                 if market_amt is not None:
                     try:

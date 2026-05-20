@@ -30,9 +30,7 @@ async def test_progress_requires_auth(client):
 async def test_progress_uses_total_cards_when_available(
     client, auth_headers, db_session, created_user
 ):
-    cset = CardSet(
-        tcg=TcgEnum.pokemon, name="Test Set", code="TS1", total_cards=4
-    )
+    cset = CardSet(tcg=TcgEnum.pokemon, name="Test Set", code="TS1", total_cards=4)
     db_session.add(cset)
     await db_session.flush()
     cards = [

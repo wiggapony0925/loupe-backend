@@ -48,9 +48,7 @@ async def test_create_list_delete_alert_roundtrip(
 
 @pytest.mark.asyncio
 async def test_delete_unknown_alert_returns_404(client, auth_headers):
-    resp = await client.delete(
-        f"/v1/alerts/{uuid.uuid4()}", headers=auth_headers
-    )
+    resp = await client.delete(f"/v1/alerts/{uuid.uuid4()}", headers=auth_headers)
     assert_envelope_error(resp, expected_status=404)
 
 

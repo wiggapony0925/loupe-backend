@@ -63,18 +63,48 @@ CATALOG: dict[str, dict] = {
             "total": 102,
         },
         "cards": [
-            ("Charizard", "4/102", "Holo Rare", 1999,
-             "https://images.pokemontcg.io/base1/4_hires.png"),
-            ("Blastoise", "2/102", "Holo Rare", 1999,
-             "https://images.pokemontcg.io/base1/2_hires.png"),
-            ("Venusaur", "15/102", "Holo Rare", 1999,
-             "https://images.pokemontcg.io/base1/15_hires.png"),
-            ("Pikachu", "58/102", "Common", 1999,
-             "https://images.pokemontcg.io/base1/58_hires.png"),
-            ("Machamp", "8/102", "Holo Rare", 1999,
-             "https://images.pokemontcg.io/base1/8_hires.png"),
-            ("Alakazam", "1/102", "Holo Rare", 1999,
-             "https://images.pokemontcg.io/base1/1_hires.png"),
+            (
+                "Charizard",
+                "4/102",
+                "Holo Rare",
+                1999,
+                "https://images.pokemontcg.io/base1/4_hires.png",
+            ),
+            (
+                "Blastoise",
+                "2/102",
+                "Holo Rare",
+                1999,
+                "https://images.pokemontcg.io/base1/2_hires.png",
+            ),
+            (
+                "Venusaur",
+                "15/102",
+                "Holo Rare",
+                1999,
+                "https://images.pokemontcg.io/base1/15_hires.png",
+            ),
+            (
+                "Pikachu",
+                "58/102",
+                "Common",
+                1999,
+                "https://images.pokemontcg.io/base1/58_hires.png",
+            ),
+            (
+                "Machamp",
+                "8/102",
+                "Holo Rare",
+                1999,
+                "https://images.pokemontcg.io/base1/8_hires.png",
+            ),
+            (
+                "Alakazam",
+                "1/102",
+                "Holo Rare",
+                1999,
+                "https://images.pokemontcg.io/base1/1_hires.png",
+            ),
         ],
     },
     "modern_pokemon": {
@@ -86,16 +116,41 @@ CATALOG: dict[str, dict] = {
             "total": 230,
         },
         "cards": [
-            ("Charizard VSTAR", "GG44/GG70", "Trainer Gallery", 2023,
-             "https://images.pokemontcg.io/swsh12pt5gg/GG44_hires.png"),
-            ("Mew VMAX", "GG39/GG70", "Trainer Gallery", 2023,
-             "https://images.pokemontcg.io/swsh12pt5gg/GG39_hires.png"),
-            ("Lugia VSTAR", "139/159", "Ultra Rare", 2023,
-             "https://images.pokemontcg.io/swsh12pt5/139_hires.png"),
-            ("Giratina VSTAR", "131/159", "Ultra Rare", 2023,
-             "https://images.pokemontcg.io/swsh12pt5/131_hires.png"),
-            ("Arceus VSTAR", "184/159", "Hyper Rare", 2023,
-             "https://images.pokemontcg.io/swsh12pt5/184_hires.png"),
+            (
+                "Charizard VSTAR",
+                "GG44/GG70",
+                "Trainer Gallery",
+                2023,
+                "https://images.pokemontcg.io/swsh12pt5gg/GG44_hires.png",
+            ),
+            (
+                "Mew VMAX",
+                "GG39/GG70",
+                "Trainer Gallery",
+                2023,
+                "https://images.pokemontcg.io/swsh12pt5gg/GG39_hires.png",
+            ),
+            (
+                "Lugia VSTAR",
+                "139/159",
+                "Ultra Rare",
+                2023,
+                "https://images.pokemontcg.io/swsh12pt5/139_hires.png",
+            ),
+            (
+                "Giratina VSTAR",
+                "131/159",
+                "Ultra Rare",
+                2023,
+                "https://images.pokemontcg.io/swsh12pt5/131_hires.png",
+            ),
+            (
+                "Arceus VSTAR",
+                "184/159",
+                "Hyper Rare",
+                2023,
+                "https://images.pokemontcg.io/swsh12pt5/184_hires.png",
+            ),
         ],
     },
     "magic_reserved": {
@@ -423,7 +478,9 @@ def _scanner_specs(persona: Persona) -> list[dict]:
     ) -> dict:
         return {
             "device_id": f"loupe-{base_id:02d}-{idx}",
-            "name": f"{first_name}'s Loupe {idx}" if idx > 1 else f"{first_name}'s Loupe",
+            "name": f"{first_name}'s Loupe {idx}"
+            if idx > 1
+            else f"{first_name}'s Loupe",
             "firmware_version": fw,
             "last_seen_at": now - timedelta(minutes=age_minutes),
             "transport": transport,
@@ -435,7 +492,9 @@ def _scanner_specs(persona: Persona) -> list[dict]:
     if profile == "active":
         return [_spec(1, ScannerTransportEnum.ble, age_minutes=5)]
     if profile == "offline":
-        return [_spec(1, ScannerTransportEnum.offline, age_minutes=60 * 24 * 30, fw="1.2.0")]
+        return [
+            _spec(1, ScannerTransportEnum.offline, age_minutes=60 * 24 * 30, fw="1.2.0")
+        ]
     if profile == "dual":
         return [
             _spec(1, ScannerTransportEnum.ble, age_minutes=5),
@@ -445,7 +504,9 @@ def _scanner_specs(persona: Persona) -> list[dict]:
         return [
             _spec(1, ScannerTransportEnum.ble, age_minutes=5),
             _spec(2, ScannerTransportEnum.wifi, age_minutes=30),
-            _spec(3, ScannerTransportEnum.offline, age_minutes=60 * 24 * 14, fw="1.3.0"),
+            _spec(
+                3, ScannerTransportEnum.offline, age_minutes=60 * 24 * 14, fw="1.3.0"
+            ),
         ]
     if profile == "fleet":
         return [

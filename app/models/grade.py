@@ -58,9 +58,7 @@ class GradedCard(Base):
     purchase_price_usd: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2), nullable=True
     )
-    purchase_date: Mapped[date | None] = mapped_column(
-        Date(), nullable=True
-    )
+    purchase_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
     fingerprint_hash: Mapped[str | None] = mapped_column(
         String(128), index=True, nullable=True
     )

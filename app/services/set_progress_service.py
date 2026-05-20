@@ -62,9 +62,9 @@ async def list_progress(
             select(
                 Card.set_id,
                 func.count(distinct(Card.id)).label("owned"),
-                func.coalesce(
-                    func.sum(GradedCard.estimated_value_usd), 0
-                ).label("value"),
+                func.coalesce(func.sum(GradedCard.estimated_value_usd), 0).label(
+                    "value"
+                ),
             )
             .join(GradedCard, GradedCard.card_id == Card.id)
             .where(

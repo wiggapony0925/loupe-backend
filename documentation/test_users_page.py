@@ -117,20 +117,28 @@ def _pill(spec: tuple[str, str]) -> str:
 
 def _row(p: Persona) -> str:
     auth = _pill(_AUTH_PILL.get(p.auth, ("pill alt", p.auth)))
-    scanner = _pill(_SCANNER_PILL.get(p.scanner_profile, ("pill alt", p.scanner_profile)))
+    scanner = _pill(
+        _SCANNER_PILL.get(p.scanner_profile, ("pill alt", p.scanner_profile))
+    )
     avg = f"{p.avg_grade:.1f}" if p.vault_size > 0 else "—"
     vault = f"{p.vault_size:,}" if p.vault_size > 0 else "—"
-    tenure = "today" if p.tenure_days == 0 else (
-        f"{p.tenure_days}d" if p.tenure_days < 365 else f"{p.tenure_days / 365:.1f}y"
+    tenure = (
+        "today"
+        if p.tenure_days == 0
+        else (
+            f"{p.tenure_days}d"
+            if p.tenure_days < 365
+            else f"{p.tenure_days / 365:.1f}y"
+        )
     )
     tags = "".join(f"<span>{escape(t)}</span>" for t in p.tags)
     pw_cell = (
-        f'<code>{escape(DEFAULT_PASSWORD)}</code>' if p.auth == "password" else "—"
+        f"<code>{escape(DEFAULT_PASSWORD)}</code>" if p.auth == "password" else "—"
     )
     return (
         "<tr>"
         f'<td class="id">#{p.id:02d}</td>'
-        f"<td class=\"headline\">{escape(p.name)}<div class=\"why\">{escape(p.headline)}</div></td>"
+        f'<td class="headline">{escape(p.name)}<div class="why">{escape(p.headline)}</div></td>'
         f'<td class="email">{escape(p.email)}</td>'
         f"<td>{pw_cell}</td>"
         f'<td class="num">{vault}</td>'
@@ -157,9 +165,9 @@ def _band(name: str, desc: str, ids: range) -> str:
         "<table>"
         "<thead><tr>"
         "<th>#</th><th>Name</th><th>Email</th><th>Password</th>"
-        "<th class=\"num\">Vault</th><th class=\"num\">Avg</th>"
+        '<th class="num">Vault</th><th class="num">Avg</th>'
         "<th>Scanners</th><th>Auth</th>"
-        "<th class=\"num\">Tenure</th><th>Why unique</th><th>Tags</th>"
+        '<th class="num">Tenure</th><th>Why unique</th><th>Tags</th>'
         "</tr></thead>"
         f"<tbody>{body}</tbody>"
         "</table>"
