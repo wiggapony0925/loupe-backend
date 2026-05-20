@@ -90,13 +90,6 @@ jobs:
             esac
           done
 
-      - name: Tag image as :latest
-        run: |
-          gcloud artifacts docker tags add \
-            "${{ steps.tag.outputs.image_sha }}" \
-            "${{ steps.tag.outputs.image_latest }}" \
-            --quiet
-
       - name: Run database migrations
         # MUST run before the API/worker pick up the new image, otherwise
         # new code that references unmigrated tables/columns will blow up
@@ -143,3 +136,15 @@ jobs:
             echo "healthz retry $i..."; sleep 3
           done
           echo "healthz never returned 200"; exit 1
+
+      - name: Tag image as :latest
+        # Convenience tag only — failures here must not block the deploy.
+        # (Past failure mode: missing artifactregistry.tags.delete perm
+        # caused the whole pipeline to fail AFTER Cloud Build but BEFORE
+        # migrations + service deploy, leaving prod on stale code.)
+        continue-on-error: true
+        run: |
+          gcloud artifacts docker tags add \
+            "${{ steps.tag.outputs.image_sha }}" \
+            "${{ steps.tag.outputs.image_latest }}" \
+            --quiet || echo "tag-as-latest skipped (non-fatal)"
