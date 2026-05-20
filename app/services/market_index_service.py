@@ -81,9 +81,11 @@ class MarketIndex:
 
 async def _load_psa10_cohort(db: AsyncSession) -> list[Card]:
     """Distinct catalog cards held by at least one user as PSA-10."""
-    stmt = (
-        select(Card)
-        .join(GradedCard, GradedCard.card_id == Card.id)
+    # Two-step: first pull the distinct id set (Postgres can't apply
+    # SELECT DISTINCT directly to rows that include JSON columns), then
+    # load the Card rows by id.
+    id_stmt = (
+        select(GradedCard.card_id)
         .where(
             GradedCard.house.in_(_PSA10_HOUSES),
             GradedCard.grade >= _PSA10_MIN_GRADE,
@@ -91,7 +93,10 @@ async def _load_psa10_cohort(db: AsyncSession) -> list[Card]:
         )
         .distinct()
     )
-    rows = (await db.execute(stmt)).scalars().all()
+    card_ids = (await db.execute(id_stmt)).scalars().all()
+    if not card_ids:
+        return []
+    rows = (await db.execute(select(Card).where(Card.id.in_(card_ids)))).scalars().all()
     return list(rows)
 
 

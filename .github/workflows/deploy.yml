@@ -123,19 +123,19 @@ jobs:
             --project "${GCP_PROJECT}" \
             --quiet
 
-      - name: Smoke test /healthz
+      - name: Smoke test /health
         run: |
           URL=$(gcloud run services describe "${API_SERVICE}" \
             --region "${GCP_REGION}" --project "${GCP_PROJECT}" \
             --format='value(status.url)')
           echo "API URL: $URL"
           for i in 1 2 3 4 5; do
-            if curl -fsS "$URL/healthz" >/dev/null; then
-              echo "healthz OK"; exit 0
+            if curl -fsS "$URL/health" >/dev/null; then
+              echo "health OK"; exit 0
             fi
-            echo "healthz retry $i..."; sleep 3
+            echo "health retry $i..."; sleep 3
           done
-          echo "healthz never returned 200"; exit 1
+          echo "health never returned 200"; exit 1
 
       - name: Tag image as :latest
         # Convenience tag only — failures here must not block the deploy.
