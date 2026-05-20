@@ -5,11 +5,18 @@ free.  This worker iterates such rows and asks
 :func:`card_search_service.resolve_pricing_for_local` to look them up on
 Pokémon TCG / Scryfall / YGOPRODeck — the prices those APIs already embed for
 free — and persists the result so subsequent requests skip the upstream call.
+
+Side-effect: whenever a fresh latest price lands for a card, we also
+evaluate any pending :class:`~app.models.price_alert.PriceAlert` rows
+for that card. The alert evaluator atomically flips matching rows and
+returns the ones that just fired — callers can fan out push
+notifications from the returned list.
 """
 
 from __future__ import annotations
 
 import asyncio
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -17,7 +24,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_sessionmaker
 from app.models.card import Card
-from app.services import card_resolver_service, card_search_service
+from app.services import card_resolver_service, card_search_service, price_alert_service
 from app.utils.logger import get_logger
 
 logger = get_logger("workers.price_backfill")
@@ -42,6 +49,7 @@ async def backfill_prices(
     scanned = 0
     updated = 0
     missed = 0
+    alerts_fired = 0
 
     sm = get_sessionmaker()
     async with sm() as session:
@@ -84,6 +92,29 @@ async def backfill_prices(
                     row.card_metadata = new_meta
                     updated += 1
 
+                # Evaluate any pending price alerts against the newly
+                # observed market price. Skipped if upstream didn't
+                # return a numeric market value (we won't fire on
+                # missing data).
+                market_obj = (
+                    pricing.get("market") if isinstance(pricing, dict) else None
+                )
+                market_amt = (
+                    market_obj.get("amount")
+                    if isinstance(market_obj, dict)
+                    else None
+                )
+                if market_amt is not None:
+                    try:
+                        latest = Decimal(str(market_amt))
+                    except (ArithmeticError, ValueError):
+                        latest = None
+                    if latest is not None:
+                        fired = await price_alert_service.evaluate_for_card(
+                            session, row.id, latest
+                        )
+                        alerts_fired += len(fired)
+
                 # Persist the upstream link so future requests skip name search.
                 upstream_id = resolved.get("id")
                 if upstream_id and ":" in upstream_id:
@@ -98,10 +129,15 @@ async def backfill_prices(
 
             await asyncio.sleep(_INTER_CALL_DELAY_SEC)
 
-        if updated:
+        if updated or alerts_fired:
             await session.commit()
 
-    result = {"scanned": scanned, "updated": updated, "missed": missed}
+    result = {
+        "scanned": scanned,
+        "updated": updated,
+        "missed": missed,
+        "alerts_fired": alerts_fired,
+    }
     logger.info("price_backfill complete: %s", result)
     return result
 

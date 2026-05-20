@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, Numeric, String, func
+from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -49,6 +49,17 @@ class GradedCard(Base):
     subgrades: Mapped[dict | None] = mapped_column(JsonCol, nullable=True)
     estimated_value_usd: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2), nullable=True
+    )
+    # ── Cost basis (user-supplied) ─────────────────────────────────────────
+    # What the user paid for the card. Drives true P/L on the portfolio
+    # chart: `unrealizedPnlUsd = estimated_value_usd - purchase_price_usd`.
+    # Both columns are nullable so legacy / scanned-only rows stay valid;
+    # the UI treats `null` as "no cost recorded" rather than zero.
+    purchase_price_usd: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2), nullable=True
+    )
+    purchase_date: Mapped[date | None] = mapped_column(
+        Date(), nullable=True
     )
     fingerprint_hash: Mapped[str | None] = mapped_column(
         String(128), index=True, nullable=True

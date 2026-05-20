@@ -73,6 +73,8 @@ async def create(
         house=payload.house,
         subgrades=payload.subgrades,
         estimated_value_usd=payload.estimated_value_usd,
+        purchase_price_usd=payload.purchase_price_usd,
+        purchase_date=payload.purchase_date,
         notes=payload.notes,
         fingerprint_hash=payload.fingerprint_hash,
     )
@@ -88,10 +90,13 @@ async def create(
     "/summary",
     summary="Portfolio aggregates for the signed-in user",
     description=(
-        "Returns `{ totalValueUsd, cardCount, avgGrade, avgAccuracy }`. "
-        "All values are computed from the user's real graded cards; "
-        "`avgAccuracy` is null until the scan pipeline reports per-job "
-        "accuracy."
+        "Returns `{ totalValueUsd, cardCount, avgGrade, avgAccuracy, "
+        "totalCostUsd, costBasisCardCount, unrealizedPnlUsd, "
+        "unrealizedPnlPct }`. All values are computed from the user's real "
+        "graded cards; `avgAccuracy` is null until the scan pipeline "
+        "reports per-job accuracy. The cost-basis fields are null when no "
+        "card has a recorded purchase price (so the UI can hide P/L "
+        "rather than display a misleading `$0`)."
     ),
 )
 async def get_summary(
@@ -182,6 +187,10 @@ async def update(
         row.notes = payload.notes
     if payload.estimated_value_usd is not None:
         row.estimated_value_usd = payload.estimated_value_usd
+    if payload.purchase_price_usd is not None:
+        row.purchase_price_usd = payload.purchase_price_usd
+    if payload.purchase_date is not None:
+        row.purchase_date = payload.purchase_date
     await db.commit()
     await db.refresh(row)
     return GradedCardRead.model_validate(row)

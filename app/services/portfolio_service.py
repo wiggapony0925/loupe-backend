@@ -94,15 +94,34 @@ async def summary(db: AsyncSession, user: User) -> dict:
     """Aggregate the user's vault into a single hero card payload."""
     rows = await _load_grades_with_cards(db, user)
     total = Decimal("0")
+    cost = Decimal("0")
+    cost_count = 0
     grade_sum = Decimal("0")
     grade_count = 0
     for g, _card in rows:
         if g.estimated_value_usd is not None:
             total += g.estimated_value_usd
+        if g.purchase_price_usd is not None:
+            cost += g.purchase_price_usd
+            cost_count += 1
         if g.grade is not None:
             grade_sum += g.grade
             grade_count += 1
     avg_grade = float(grade_sum / grade_count) if grade_count else None
+    # Unrealized P/L is `value - cost`, but only meaningful when the user
+    # has recorded a cost on at least one card. We report `null` (not 0)
+    # in that case so the UI can hide the P/L chip instead of showing
+    # "+$0.00 (+0%)", which would mislead a brand-new collector.
+    if cost_count > 0:
+        pnl_usd: float | None = float(total - cost)
+        pnl_pct: float | None = (
+            float((total - cost) / cost * 100) if cost > 0 else 0.0
+        )
+        total_cost: float | None = float(cost)
+    else:
+        pnl_usd = None
+        pnl_pct = None
+        total_cost = None
     return {
         "totalValueUsd": float(total),
         "cardCount": len(rows),
@@ -111,6 +130,12 @@ async def summary(db: AsyncSession, user: User) -> dict:
         # null as "—" rather than fabricating an accuracy percentage.
         "avgGrade": avg_grade,
         "avgAccuracy": None,
+        # Cost basis & unrealized P/L. `null` means the user has not
+        # recorded a purchase price on any card yet.
+        "totalCostUsd": total_cost,
+        "costBasisCardCount": cost_count,
+        "unrealizedPnlUsd": pnl_usd,
+        "unrealizedPnlPct": pnl_pct,
     }
 
 

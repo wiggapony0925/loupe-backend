@@ -62,8 +62,16 @@ class PriceSourceEnum(str, enum.Enum):
     manual = "manual"
 
 
+class PriceAlertCondition(str, enum.Enum):
+    """Trigger condition for a :class:`~app.models.price_alert.PriceAlert`."""
+
+    above = "above"
+    below = "below"
+
+
 __all__ = [
     "GradeHouseEnum",
+    "PriceAlertCondition",
     "PriceSourceEnum",
     "ScanSourceEnum",
     "ScanStatusEnum",

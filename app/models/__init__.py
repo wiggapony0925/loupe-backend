@@ -7,6 +7,7 @@ from app.models.card_external_ref import CardExternalRef
 from app.models.collection import Collection, CollectionItem
 from app.models.enums import (
     GradeHouseEnum,
+    PriceAlertCondition,
     PriceSourceEnum,
     ScannerTransportEnum,
     ScanSourceEnum,
@@ -16,6 +17,7 @@ from app.models.enums import (
 from app.models.fingerprint import Fingerprint
 from app.models.grade import GradedCard
 from app.models.price import PriceSnapshot
+from app.models.price_alert import PriceAlert
 from app.models.scan import ScanJob
 from app.models.scanner import Scanner
 from app.models.user import User, UserSettings
@@ -31,6 +33,8 @@ __all__ = [
     "Fingerprint",
     "GradeHouseEnum",
     "GradedCard",
+    "PriceAlert",
+    "PriceAlertCondition",
     "PriceSnapshot",
     "PriceSourceEnum",
     "ScanJob",

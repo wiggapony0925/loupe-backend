@@ -47,18 +47,28 @@ async def _publish(user_id: uuid.UUID, event: ScanProgressEvent) -> None:
 
 
 async def _ensure_placeholder_card(db: AsyncSession) -> Card:
-    """Best-effort placeholder card used when the grader can't identify the card."""
+    """Best-effort placeholder card used when the grader can't identify the card.
+
+    Neither `Card.name` nor `CardSet.name` is unique, so two concurrent
+    scan jobs can race and each insert their own "Unidentified" row.
+    We use `LIMIT 1` (and `.first()`) so the next lookup deterministically
+    picks one survivor instead of crashing with `MultipleResultsFound`.
+    """
     placeholder_name = "Unidentified Loupe Capture"
     existing = (
-        await db.execute(select(Card).where(Card.name == placeholder_name))
-    ).scalar_one_or_none()
+        await db.execute(
+            select(Card).where(Card.name == placeholder_name).limit(1)
+        )
+    ).scalars().first()
     if existing is not None:
         return existing
     from app.models.card import CardSet
 
     placeholder_set = (
-        await db.execute(select(CardSet).where(CardSet.name == "Unidentified Set"))
-    ).scalar_one_or_none()
+        await db.execute(
+            select(CardSet).where(CardSet.name == "Unidentified Set").limit(1)
+        )
+    ).scalars().first()
     if placeholder_set is None:
         placeholder_set = CardSet(tcg=TcgEnum.pokemon, name="Unidentified Set")
         db.add(placeholder_set)

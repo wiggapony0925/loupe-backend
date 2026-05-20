@@ -15,10 +15,12 @@ from app.lifecycle import lifespan
 from app.observability import init_sentry
 from app.response_envelope import register_envelope_middleware
 from app.routers import (
+    alerts,
     auth,
     cards,
     collections,
     grades,
+    market,
     prices,
     providers,
     scanners,
@@ -99,7 +101,9 @@ def create_app() -> FastAPI:
     app.include_router(sets.router, prefix=api_prefix)
     app.include_router(grades.router, prefix=api_prefix)
     app.include_router(prices.router, prefix=api_prefix)
+    app.include_router(alerts.router, prefix=api_prefix)
     app.include_router(collections.router, prefix=api_prefix)
+    app.include_router(market.router, prefix=api_prefix)
     app.include_router(providers.router, prefix=api_prefix)
 
     # WebSockets mount at root.

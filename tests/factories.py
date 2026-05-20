@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,37 @@ async def make_card(db: AsyncSession, *, set_id: uuid.UUID | None = None) -> Car
         cset = await make_card_set(db)
         set_id = cset.id
     card = Card(set_id=set_id, tcg=TcgEnum.pokemon, name="Test Card")
+    db.add(card)
+    await db.commit()
+    await db.refresh(card)
+    return card
+
+
+async def make_card_with_price_history(
+    db: AsyncSession,
+    history: list[tuple[date, float]],
+    *,
+    set_id: uuid.UUID | None = None,
+    name: str = "Test Card",
+) -> Card:
+    """Create a card whose `card_metadata['price_history']` is pre-populated.
+
+    `history` is a list of `(date, priceUsd)` pairs that will be stored in
+    the canonical list-of-dicts shape the portfolio service consumes.
+    """
+    if set_id is None:
+        cset = await make_card_set(db)
+        set_id = cset.id
+    card = Card(
+        set_id=set_id,
+        tcg=TcgEnum.pokemon,
+        name=name,
+        card_metadata={
+            "price_history": [
+                {"date": d.isoformat(), "priceUsd": float(p)} for d, p in history
+            ],
+        },
+    )
     db.add(card)
     await db.commit()
     await db.refresh(card)

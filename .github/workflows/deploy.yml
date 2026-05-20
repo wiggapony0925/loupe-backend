@@ -29,6 +29,7 @@ env:
   IMAGE_NAME: backend
   API_SERVICE: loupe-api
   WORKER_SERVICE: loupe-worker
+  MIGRATE_JOB: loupe-migrate
 
 jobs:
   deploy:
@@ -95,6 +96,23 @@ jobs:
             "${{ steps.tag.outputs.image_sha }}" \
             "${{ steps.tag.outputs.image_latest }}" \
             --quiet
+
+      - name: Run database migrations
+        # MUST run before the API/worker pick up the new image, otherwise
+        # new code that references unmigrated tables/columns will blow up
+        # in prod (this is exactly what caused the card_external_refs
+        # outage). Migrations are additive and idempotent — re-running
+        # already-applied revisions is a no-op.
+        run: |
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --image "${{ steps.tag.outputs.image_sha }}" \
+            --region "${GCP_REGION}" \
+            --project "${GCP_PROJECT}" \
+            --quiet
+          gcloud run jobs execute "${MIGRATE_JOB}" \
+            --region "${GCP_REGION}" \
+            --project "${GCP_PROJECT}" \
+            --wait
 
       - name: Deploy loupe-api
         run: |

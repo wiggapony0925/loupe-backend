@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +24,10 @@ class GradedCardRead(BaseModel):
     house: GradeHouseEnum
     subgrades: dict | None = None
     estimated_value_usd: Decimal | None = None
+    # Cost basis (user-supplied). `null` means "no cost recorded" —
+    # the UI hides P/L for that row rather than treating it as \$0.
+    purchase_price_usd: Decimal | None = None
+    purchase_date: date | None = None
     fingerprint_hash: str | None = None
     notes: str | None = None
     graded_at: datetime
@@ -46,6 +50,8 @@ class GradedCardCreate(BaseModel):
     house: GradeHouseEnum = GradeHouseEnum.loupe
     subgrades: dict | None = None
     estimated_value_usd: Decimal | None = Field(None, ge=Decimal("0"))
+    purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"))
+    purchase_date: date | None = None
     notes: str | None = Field(None, max_length=2000)
     scan_job_id: uuid.UUID | None = None
     fingerprint_hash: str | None = Field(None, max_length=128)
@@ -56,6 +62,8 @@ class GradedCardUpdate(BaseModel):
 
     notes: str | None = Field(None, max_length=2000)
     estimated_value_usd: Decimal | None = Field(None, ge=Decimal("0"))
+    purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"))
+    purchase_date: date | None = None
 
 
 __all__ = ["GradedCardCreate", "GradedCardRead", "GradedCardUpdate"]
