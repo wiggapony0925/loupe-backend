@@ -82,6 +82,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         _log.warning("db engine init deferred: %s", exc)
 
+    # Auto-generate monthly + yearly portfolio statements (Amex-style).
+    # No-op when ``reports_scheduler_enabled`` is false or in tests.
+    try:
+        from app.config import get_settings
+        from app.services.reports import scheduler_loop
+
+        s = get_settings()
+        if s.reports_scheduler_enabled and not s.is_test:
+            _spawn("reports-scheduler", scheduler_loop)
+    except Exception as exc:
+        _log.warning("reports scheduler not spawned: %s", exc)
+
     _app_state.warmup_complete = True
     _log.info("loupe-backend ready")
 

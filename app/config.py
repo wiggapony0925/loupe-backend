@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     # work zero-config; production should always set this to a separate
     # bucket with stricter lifecycle / IAM (reports may contain PII).
     reports_bucket: str | None = None
+    # Whether the background scheduler should auto-close monthly /
+    # yearly statement cycles. Defaults to enabled; tests and the
+    # ``test`` environment turn it off automatically.
+    reports_scheduler_enabled: bool = True
 
     # --- Upstream card catalog APIs ---
     pokemon_tcg_base_url: str = "https://api.pokemontcg.io/v2"

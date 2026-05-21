@@ -17,6 +17,7 @@ The router is intentionally small — all heavy lifting lives in
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,11 +31,14 @@ from app.schemas.report import (
     ReportDownloadResponse,
     ReportGenerateRequest,
     ReportRead,
+    UpcomingReportRead,
 )
 from app.services.reports import (
     generate_report,
     get_report,
     list_reports,
+    next_monthly_close,
+    next_yearly_close,
 )
 from app.services.reports.storage import (
     download_report_bytes,
@@ -51,6 +55,46 @@ async def list_mine(
 ) -> list[ReportRead]:
     rows = await list_reports(db, user)
     return [ReportRead.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/upcoming",
+    response_model=list[UpcomingReportRead],
+    summary="When my next statements will auto-close",
+)
+async def upcoming(
+    user: User = Depends(require_user),  # noqa: ARG001 — auth-only
+) -> list[UpcomingReportRead]:
+    """Return the next monthly and yearly close datetimes.
+
+    Statements are generated automatically — the client uses this to
+    render "Your next statement closes on …" instead of asking the
+    user to tap a button. The endpoint is pure date math (no DB hit
+    beyond auth) so it stays cheap even when polled.
+    """
+    import calendar as _cal
+    from datetime import UTC, datetime
+
+    from app.models.enums import ReportPeriodEnum as _P
+
+    now = datetime.now(UTC)
+    last_day = _cal.monthrange(now.year, now.month)[1]
+    return [
+        UpcomingReportRead(
+            period=_P.monthly,
+            period_start=date(now.year, now.month, 1),
+            period_end=date(now.year, now.month, last_day),
+            closes_at=next_monthly_close(now),
+            label=f"{_cal.month_name[now.month]} {now.year}",
+        ),
+        UpcomingReportRead(
+            period=_P.yearly,
+            period_start=date(now.year, 1, 1),
+            period_end=date(now.year, 12, 31),
+            closes_at=next_yearly_close(now),
+            label=f"{now.year}",
+        ),
+    ]
 
 
 @router.post(

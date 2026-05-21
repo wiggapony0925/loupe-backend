@@ -52,8 +52,27 @@ class ReportDownloadResponse(BaseModel):
     expires_in_seconds: int
 
 
+class UpcomingReportRead(BaseModel):
+    """When the next monthly / yearly statement will auto-materialise.
+
+    Returned by ``GET /v1/reports/upcoming`` so the UI can render an
+    Amex-style "Your next statement closes on Jun 1" line without the
+    client doing date math against the user's timezone.
+    """
+
+    period: ReportPeriodEnum
+    # Inclusive period currently in progress (the one that will close).
+    period_start: date
+    period_end: date
+    # UTC datetime when the statement will become available.
+    closes_at: datetime
+    # Human-readable label for the in-progress period, e.g. "May 2026".
+    label: str
+
+
 __all__ = [
     "ReportDownloadResponse",
     "ReportGenerateRequest",
     "ReportRead",
+    "UpcomingReportRead",
 ]
