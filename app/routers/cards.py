@@ -15,6 +15,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -24,6 +25,7 @@ from app.schemas.common import Pagination
 from app.services import (
     canonical_card_service,
     card_catalog_service,
+    card_resolver_service,
     card_search_service,
     comps_service,
     listings_service,
@@ -85,6 +87,100 @@ async def search(
         page=page,
         page_size=page_size,
     )
+
+
+class ResolveCardRequest(BaseModel):
+    """Body for ``POST /v1/cards/resolve``.
+
+    Provide any combination — first non-empty resolves wins (order:
+    ``uuid`` → ``upstream_id`` → ``phash`` → ``query``).
+    """
+
+    upstream_id: str | None = Field(
+        None,
+        description="Composite catalog id like 'pokemontcg:base1-4' or 'psa:12345'.",
+    )
+    query: str | None = Field(
+        None, max_length=200, description="Free-text (name + set + #number)."
+    )
+    phash: str | None = Field(
+        None, max_length=128, description="Perceptual image hash from a scan."
+    )
+    uuid: str | None = Field(None, description="Existing local Card UUID.")
+    tcg: str | None = Field(
+        None,
+        pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$",
+        description="Optional tcg hint to narrow free-text matches.",
+    )
+    materialize: bool = Field(
+        True,
+        description=(
+            "When true (default), upstream-only hits are persisted as local "
+            "Card + CardExternalRef rows so the user can attach grades / "
+            "collection items / alerts to a stable UUID."
+        ),
+    )
+
+
+@router.post(
+    "/resolve",
+    summary="Resolve any card hint to a canonical Loupe id (public)",
+)
+async def resolve_card(
+    payload: ResolveCardRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    """Single funnel: scan / search / deep-link / manual entry all land here.
+
+    Returns ``{card_id, upstream_id, source, confidence, canonical}``
+    where ``canonical`` is the same shape as
+    ``GET /v1/cards/{id}/canonical`` — i.e. the user can render the
+    full card from this one response. Returns 404 when no path resolves.
+    """
+    uuid_: uuid.UUID | None = None
+    if payload.uuid:
+        try:
+            uuid_ = uuid.UUID(payload.uuid)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid uuid") from exc
+
+    resolved = await card_resolver_service.resolve(
+        db,
+        upstream_id=payload.upstream_id,
+        query=payload.query,
+        phash=payload.phash,
+        uuid_=uuid_,
+        tcg=payload.tcg,
+        materialize=payload.materialize,
+    )
+    if resolved is None:
+        raise HTTPException(status_code=404, detail="No card matched")
+    # Commit any newly-materialized rows so the next call sees them.
+    try:
+        await db.commit()
+    except Exception:  # pragma: no cover - best effort
+        await db.rollback()
+
+    # Compose the full canonical document so the client has one response
+    # to render everything from.
+    canonical = None
+    lookup_id = (
+        str(resolved.card_id)
+        if resolved.card_id is not None
+        else resolved.upstream_id
+    )
+    if lookup_id:
+        composed = await canonical_card_service.compose_canonical_card(lookup_id)
+        if composed is not None:
+            canonical = composed.model_dump(mode="json")
+
+    return {
+        "card_id": str(resolved.card_id) if resolved.card_id else None,
+        "upstream_id": resolved.upstream_id,
+        "source": resolved.source,
+        "confidence": resolved.confidence,
+        "canonical": canonical,
+    }
 
 
 @router.get("/{card_id}/market", summary="Card market snapshot (public)")

@@ -43,9 +43,22 @@ class GradedCardRead(BaseModel):
 
 
 class GradedCardCreate(BaseModel):
-    """Body for manually creating a graded card (admin / import flows)."""
+    """Body for manually creating a graded card (admin / import flows).
 
-    card_id: uuid.UUID
+    Either ``card_id`` (an existing local UUID) or ``upstream_id`` (a
+    composite ``<source>:<external_id>`` from a catalog hit / scan /
+    deep link) must be supplied. When ``upstream_id`` is used, the
+    server materializes the local :class:`Card` + :class:`CardExternalRef`
+    via :func:`card_resolver_service.ensure_local_card` before inserting
+    the grade — so the user never has to think about ids.
+    """
+
+    card_id: uuid.UUID | None = None
+    upstream_id: str | None = Field(
+        None,
+        max_length=240,
+        description="Composite catalog id like 'pokemontcg:base1-4'.",
+    )
     grade: Decimal = Field(..., ge=Decimal("0"), le=Decimal("10"))
     house: GradeHouseEnum = GradeHouseEnum.loupe
     subgrades: dict | None = None

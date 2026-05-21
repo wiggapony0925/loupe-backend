@@ -15,7 +15,7 @@ from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
-from app.services import portfolio_service
+from app.services import card_resolver_service, portfolio_service
 from app.utils.time import utcnow
 
 router = APIRouter(prefix="/grades", tags=["grades"])
@@ -65,9 +65,30 @@ async def create(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> GradedCardRead:
+    # Resolve / materialize the card identity first so users can submit a
+    # composite upstream id (e.g. "pokemontcg:base1-4") without pre-creating
+    # a local Card.
+    card_id = payload.card_id
+    if card_id is None:
+        if not payload.upstream_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Either card_id or upstream_id is required",
+            )
+        local = await card_resolver_service.ensure_local_card(
+            db, upstream_id=payload.upstream_id
+        )
+        if local is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not resolve upstream_id={payload.upstream_id!r}",
+            )
+        await db.flush()
+        card_id = local.id
+
     row = GradedCard(
         user_id=user.id,
-        card_id=payload.card_id,
+        card_id=card_id,
         scan_job_id=payload.scan_job_id,
         grade=payload.grade,
         house=payload.house,

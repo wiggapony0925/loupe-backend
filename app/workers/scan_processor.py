@@ -25,6 +25,7 @@ from app.models.scan import ScanJob
 from app.schemas.scan import ScanProgressEvent
 from app.services.fingerprint_service import fingerprint_from_images
 from app.services.grading_service import grade_from_images
+from app.services import card_resolver_service
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 from app.ws_manager import get_manager
@@ -133,10 +134,30 @@ async def _process(db: AsyncSession, job_id: uuid.UUID, user_id: uuid.UUID) -> N
     )
     fingerprint = fingerprint_from_images(image_keys)
 
-    placeholder = await _ensure_placeholder_card(db)
+    # Try to identify the scanned card before falling back to placeholder.
+    # Order: pHash match against the existing catalog → text from the
+    # grading pipeline if it surfaced an identification → placeholder.
+    resolved_card: Card | None = None
+    try:
+        match = await card_resolver_service.resolve(
+            db,
+            phash=fingerprint.phash,
+            query=getattr(grading, "identified_name", None),
+            materialize=True,
+        )
+        if match and match.card_id is not None:
+            from sqlalchemy import select as _select
+
+            resolved_card = (
+                await db.execute(_select(Card).where(Card.id == match.card_id))
+            ).scalar_one_or_none()
+    except Exception as exc:  # pragma: no cover - never fail a scan on resolve
+        logger.info("scan %s resolve failed: %s", job.id, exc)
+
+    card_for_grade = resolved_card or await _ensure_placeholder_card(db)
     graded = GradedCard(
         user_id=user_id,
-        card_id=placeholder.id,
+        card_id=card_for_grade.id,
         scan_job_id=job.id,
         grade=grading.overall,
         house=GradeHouseEnum.loupe,
