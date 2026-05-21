@@ -22,8 +22,8 @@ for _k in ("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS
 os.environ["S3_ACCESS_KEY_ID"] = ""
 os.environ["S3_SECRET_ACCESS_KEY"] = ""
 
-from app.config import reload_settings
-from app.db import Base, get_db, reset_engine
+from app.config import reload_settings  # noqa: E402
+from app.db import Base, get_db, reset_engine  # noqa: E402
 
 reload_settings()
 

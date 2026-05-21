@@ -23,9 +23,9 @@ from app.models.fingerprint import Fingerprint
 from app.models.grade import GradedCard
 from app.models.scan import ScanJob
 from app.schemas.scan import ScanProgressEvent
+from app.services import card_resolver_service
 from app.services.fingerprint_service import fingerprint_from_images
 from app.services.grading_service import grade_from_images
-from app.services import card_resolver_service
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 from app.ws_manager import get_manager

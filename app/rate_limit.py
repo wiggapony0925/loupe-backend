@@ -24,7 +24,6 @@ from __future__ import annotations
 import time
 from collections import deque
 from threading import Lock
-from typing import Deque
 
 from fastapi import HTTPException, Request, status
 
@@ -32,14 +31,14 @@ from fastapi import HTTPException, Request, status
 class _SlidingWindow:
     """Per-key sliding window counter."""
 
-    __slots__ = ("limit", "window_s", "_buckets", "_lock")
+    __slots__ = ("_buckets", "_lock", "limit", "window_s")
 
     def __init__(self, *, limit: int, window_s: float) -> None:
         self.limit = limit
         self.window_s = window_s
         # Map of key (e.g. client IP) → deque of request timestamps.
         # Bounded eviction below keeps this from growing unboundedly.
-        self._buckets: dict[str, Deque[float]] = {}
+        self._buckets: dict[str, deque[float]] = {}
         self._lock = Lock()
 
     def hit(self, key: str) -> bool:
@@ -119,6 +118,6 @@ scan_create_limit = rate_limit(limit=30, window_seconds=60, name="scans.create")
 __all__ = [
     "rate_limit",
     "resolve_limit",
-    "search_live_limit",
     "scan_create_limit",
+    "search_live_limit",
 ]

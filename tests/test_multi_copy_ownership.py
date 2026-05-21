@@ -37,7 +37,6 @@ from app.workers import scan_processor
 from tests.conftest import assert_envelope_ok
 from tests.factories import make_card
 
-
 # ----------------------------------------------------------------- vault list
 
 
@@ -95,7 +94,7 @@ async def test_vault_list_returns_copies_owned(
 async def test_summary_sums_value_across_duplicate_copies(
     client, auth_headers, db_session, created_user
 ):
-    """Three copies × \$100 each must total \$300, not \$100."""
+    r"""Three copies × \$100 each must total \$300, not \$100."""
     card = await make_card(db_session)
     db_session.add_all(
         [

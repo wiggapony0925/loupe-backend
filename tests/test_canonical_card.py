@@ -29,7 +29,6 @@ from app.schemas.canonical_card import (
 )
 from app.services import canonical_card_service
 
-
 # --------------------------------------------------------------------- schema
 
 
@@ -239,7 +238,7 @@ async def test_compose_psa_cert_id_triggers_cert_lookup(monkeypatch) -> None:
         id = "psa"
         is_configured = staticmethod(lambda: True)
 
-        async def verify_cert(self, cert_no):  # noqa: D401
+        async def verify_cert(self, cert_no):
             assert cert_no == "12345"
             return dict(psa_payload)
 

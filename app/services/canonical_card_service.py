@@ -447,7 +447,7 @@ async def compose_canonical_card(card_id: str) -> CanonicalCard | None:
         image_source=str(catalog_source),
         pricing_sources=sorted({q.source for q in quotes}),
         population_sources=sorted({r.source for r in pop_rows}),
-        listings_sources=sorted({l.source for l in canonical_listings}),
+        listings_sources=sorted({listing.source for listing in canonical_listings}),
         comps_sources=sorted({c.source for c in canonical_comps}),
         cert_sources=sorted({c.house for c in certs}),
         composed_at=utcnow().isoformat(),

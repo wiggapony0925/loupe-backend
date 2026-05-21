@@ -20,11 +20,10 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
 from app.models.card_external_ref import CardExternalRef
 from app.services import card_resolver_service
-from sqlalchemy import select
-
 
 # ----------------------------------------------------------- shared fixtures
 

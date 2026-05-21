@@ -55,8 +55,8 @@ class _Cache:
         hit = self._by_name.get(q)
         if hit:
             return hit
-        # Cheap contains-fallback — return the first row containing every
-        # token of the query. Keeps lookup O(n) per call; n ~ 50–150k rows.
+        # Cheap contains-fallback - return the first row containing every
+        # token of the query. Keeps lookup O(n) per call; n ~ 50k-150k rows.
         tokens = [t for t in q.split() if t]
         if not tokens:
             return None

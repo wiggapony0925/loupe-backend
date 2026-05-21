@@ -154,7 +154,7 @@ async def test_every_provider_handles_empty_query_safely(monkeypatch) -> None:
                 p.get_market_price(""),
             ):
                 await asyncio.wait_for(coro, timeout=1.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # An unconfigured provider returning quickly is the success path;
             # a configured one timing out is OK because it means it tried.
             pass

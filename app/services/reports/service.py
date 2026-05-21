@@ -166,7 +166,7 @@ async def generate_report(
         row.status = ReportStatusEnum.ready
         row.generated_at = datetime.now(UTC)
         row.error_message = None
-    except Exception as exc:  # noqa: BLE001 — we want to capture every failure
+    except Exception as exc:
         _log.exception("report generation failed for user=%s period=%s", user.id, label)
         row.status = ReportStatusEnum.failed
         row.error_message = str(exc)[:500]
