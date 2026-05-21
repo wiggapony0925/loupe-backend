@@ -157,8 +157,17 @@ class GradedCardCreate(BaseModel):
 
 
 class GradedCardUpdate(BaseModel):
-    """Body for ``PATCH /v1/grades/{id}``."""
+    """Body for ``PATCH /v1/grades/{id}``.
 
+    Every field is optional — send only the ones you want to change. We
+    accept ``grade`` / ``house`` / ``subgrades`` here (and not just the
+    cost-basis trio) so the same form can be used to correct manually
+    entered holdings, e.g. after the user gets a slab back from PSA.
+    """
+
+    grade: Decimal | None = Field(None, ge=Decimal("0"), le=Decimal("10"))
+    house: GradeHouseEnum | None = None
+    subgrades: dict | None = None
     notes: str | None = Field(None, max_length=2000)
     estimated_value_usd: Decimal | None = Field(
         None, ge=Decimal("0"), le=_MAX_VALUE_USD
@@ -180,6 +189,23 @@ class GradedCardUpdate(BaseModel):
             raise ValueError("purchase_date cannot be in the future")
         if v.year < _MIN_CARD_YEAR:
             raise ValueError(f"purchase_date year must be >= {_MIN_CARD_YEAR}")
+        return v
+
+    @field_validator("subgrades")
+    @classmethod
+    def _validate_subgrades(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError("subgrades must be an object")
+        for key, value in v.items():
+            if not isinstance(key, str) or len(key) > 32:
+                raise ValueError(f"subgrade key invalid: {key!r}")
+            if not isinstance(value, (int, float, Decimal)):
+                raise ValueError(f"subgrade {key} must be a number")
+            f = float(value)
+            if not (0.0 <= f <= 10.0):
+                raise ValueError(f"subgrade {key}={f} must be in [0, 10]")
         return v
 
 

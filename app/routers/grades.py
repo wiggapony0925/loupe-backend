@@ -237,6 +237,12 @@ async def update(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Graded card not found")
+    if payload.grade is not None:
+        row.grade = payload.grade
+    if payload.house is not None:
+        row.house = payload.house
+    if payload.subgrades is not None:
+        row.subgrades = payload.subgrades
     if payload.notes is not None:
         row.notes = payload.notes
     if payload.estimated_value_usd is not None:
