@@ -237,7 +237,10 @@ def _graded_rows_from_market(snapshot: dict[str, Any] | None) -> list[GradedPric
             if money is None:
                 continue
             try:
-                grade_val = float(r.get("grade"))
+                grade_raw = r.get("grade")
+                if grade_raw is None:
+                    continue
+                grade_val = float(grade_raw)
             except (TypeError, ValueError):
                 continue
             rows.append(

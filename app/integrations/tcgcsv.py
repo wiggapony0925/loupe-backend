@@ -45,7 +45,9 @@ class _Cache:
         self._lock = asyncio.Lock()
 
     def fresh(self) -> bool:
-        return self._by_name and (time.time() - self._loaded_at) < _CACHE_TTL_SECONDS
+        return (
+            bool(self._by_name) and (time.time() - self._loaded_at) < _CACHE_TTL_SECONDS
+        )
 
     def lookup(self, query: str) -> dict[str, Any] | None:
         if not query:

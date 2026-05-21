@@ -19,9 +19,11 @@ is responsible for rendering an honest "no data" panel.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -262,7 +264,7 @@ def _eod_dt(d: date):
 
 
 def _build_series(
-    rows: list[tuple[GradedCard, Card | None, CardSet | None]],
+    rows: Sequence[Any],
     start: date,
     end: date,
 ) -> list[SeriesPoint]:
