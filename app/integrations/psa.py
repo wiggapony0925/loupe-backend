@@ -84,9 +84,7 @@ class PsaProvider(BaseProvider):
         if redis is not None:
             try:
                 to_cache = cert_info if cert_info is not None else {"_miss": True}
-                await redis.setex(
-                    cache_key, _CACHE_TTL_SECONDS, json.dumps(to_cache)
-                )
+                await redis.setex(cache_key, _CACHE_TTL_SECONDS, json.dumps(to_cache))
             except Exception as exc:
                 logger.debug("psa cache set failed: %s", exc)
 
@@ -100,18 +98,11 @@ def _extract_cert(data: dict[str, Any]) -> dict[str, Any] | None:
     msg = (data.get("ServerMessage") or "").lower()
     if "no data" in msg or "invalid" in msg:
         return None
-    cert = (
-        data.get("PSACert")
-        or data.get("Cert")
-        or data.get("Item")
-        or data
-    )
+    cert = data.get("PSACert") or data.get("Cert") or data.get("Item") or data
     if not isinstance(cert, dict):
         return None
     cert = {
-        k: v
-        for k, v in cert.items()
-        if k not in {"IsValidRequest", "ServerMessage"}
+        k: v for k, v in cert.items() if k not in {"IsValidRequest", "ServerMessage"}
     }
     return cert or None
 

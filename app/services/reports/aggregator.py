@@ -158,9 +158,7 @@ async def build_snapshot(
         bucket = _grade_bucket(float(g.grade))
         grade_buckets[bucket] = grade_buckets.get(bucket, 0) + 1
         if card is not None:
-            tcg_key = (
-                card.tcg.value if hasattr(card.tcg, "value") else str(card.tcg)
-            )
+            tcg_key = card.tcg.value if hasattr(card.tcg, "value") else str(card.tcg)
             tcg_totals[tcg_key] = tcg_totals.get(tcg_key, 0.0) + v_close
 
         delta_usd = v_close - v_open
@@ -202,9 +200,7 @@ async def build_snapshot(
     series = _build_series(rows, period_start, period_end)
 
     delta_usd_total = close_total - open_total
-    delta_pct_total = (
-        (delta_usd_total / open_total * 100.0) if open_total > 0 else 0.0
-    )
+    delta_pct_total = (delta_usd_total / open_total * 100.0) if open_total > 0 else 0.0
 
     if cost_count > 0:
         pnl_usd: float | None = float(Decimal(str(close_total)) - cost_total)

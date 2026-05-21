@@ -174,14 +174,17 @@ async def test_resolve_text_then_upstream_produces_same_card_id(db_session) -> N
         "total": 1,
         "source": "pokemontcg",
     }
-    with patch.object(
-        card_resolver_service.card_search_service,
-        "search_cards",
-        new=AsyncMock(return_value=search_body),
-    ), patch.object(
-        card_resolver_service.card_search_service,
-        "get_card",
-        new=AsyncMock(return_value=dict(_UNIFIED_POKEMON)),
+    with (
+        patch.object(
+            card_resolver_service.card_search_service,
+            "search_cards",
+            new=AsyncMock(return_value=search_body),
+        ),
+        patch.object(
+            card_resolver_service.card_search_service,
+            "get_card",
+            new=AsyncMock(return_value=dict(_UNIFIED_POKEMON)),
+        ),
     ):
         first = await card_resolver_service.resolve(
             db_session, query="Charizard Base Set 4", materialize=True
@@ -200,14 +203,17 @@ async def test_resolve_text_then_upstream_produces_same_card_id(db_session) -> N
 
 @pytest.mark.asyncio
 async def test_resolve_endpoint_returns_canonical(client) -> None:
-    with patch.object(
-        card_resolver_service.card_search_service,
-        "get_card",
-        new=AsyncMock(return_value=dict(_UNIFIED_POKEMON)),
-    ), patch.object(
-        card_resolver_service.card_search_service,
-        "search_cards",
-        new=AsyncMock(return_value={"results": [], "total": 0, "source": "mixed"}),
+    with (
+        patch.object(
+            card_resolver_service.card_search_service,
+            "get_card",
+            new=AsyncMock(return_value=dict(_UNIFIED_POKEMON)),
+        ),
+        patch.object(
+            card_resolver_service.card_search_service,
+            "search_cards",
+            new=AsyncMock(return_value={"results": [], "total": 0, "source": "mixed"}),
+        ),
     ):
         resp = await client.post(
             "/v1/cards/resolve",

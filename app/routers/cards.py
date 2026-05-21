@@ -171,9 +171,7 @@ async def resolve_card(
     # to render everything from.
     canonical = None
     lookup_id = (
-        str(resolved.card_id)
-        if resolved.card_id is not None
-        else resolved.upstream_id
+        str(resolved.card_id) if resolved.card_id is not None else resolved.upstream_id
     )
     if lookup_id:
         composed = await canonical_card_service.compose_canonical_card(lookup_id)

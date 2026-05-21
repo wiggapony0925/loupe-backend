@@ -187,9 +187,7 @@ def _summary_table(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> Table
     return t
 
 
-def _section_performance(
-    snap: ReportSnapshot, st: dict[str, ParagraphStyle]
-) -> list:
+def _section_performance(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
     if len(snap.series) < 2:
         return [
             Paragraph("Performance", st["h2"]),
@@ -254,9 +252,7 @@ def _line_chart(snap: ReportSnapshot) -> Drawing:
     return d
 
 
-def _section_allocation(
-    snap: ReportSnapshot, st: dict[str, ParagraphStyle]
-) -> list:
+def _section_allocation(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
     flow = [Paragraph("Allocation", st["h2"])]
     if not snap.tcg_breakdown:
         flow.append(
@@ -341,9 +337,7 @@ def _section_movers(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list
     flow = [Paragraph("Top movers", st["h2"])]
     if not snap.top_gainers and not snap.top_losers:
         flow.append(
-            Paragraph(
-                "No measurable price movement during this window.", st["dim"]
-            )
+            Paragraph("No measurable price movement during this window.", st["dim"])
         )
         return flow
     flow.append(Paragraph("Gainers", st["eyebrow"]))
@@ -388,9 +382,7 @@ def _movers_table(rows, *, is_gain: bool) -> Table:
     return t
 
 
-def _section_holdings(
-    snap: ReportSnapshot, st: dict[str, ParagraphStyle]
-) -> list:
+def _section_holdings(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
     flow = [Paragraph("Holdings", st["h2"])]
     if not snap.holdings:
         flow.append(

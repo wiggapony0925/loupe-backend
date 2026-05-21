@@ -71,7 +71,9 @@ class CanonicalIdentity(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(..., description="Composite id, e.g. 'pokemontcg:base1-4' or UUID")
     name: str
-    tcg: str = Field(..., description="pokemon | magic | yugioh | onepiece | lorcana | sports")
+    tcg: str = Field(
+        ..., description="pokemon | magic | yugioh | onepiece | lorcana | sports"
+    )
     number: str | None = None
     rarity: str | None = None
     year: int | None = None

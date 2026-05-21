@@ -39,7 +39,9 @@ def test_schema_version_constant() -> None:
 
 def test_canonical_card_minimum_fields() -> None:
     card = CanonicalCard(
-        identity=CanonicalIdentity(id="pokemontcg:base1-4", name="Charizard", tcg="pokemon"),
+        identity=CanonicalIdentity(
+            id="pokemontcg:base1-4", name="Charizard", tcg="pokemon"
+        ),
         provenance=CanonicalProvenance(composed_at="2026-01-01T00:00:00+00:00"),
     )
     assert card.schema_version == CANONICAL_CARD_VERSION
@@ -114,18 +116,22 @@ async def test_compose_card_not_found() -> None:
 @pytest.mark.asyncio
 async def test_compose_catalog_only_all_providers_empty() -> None:
     """Every provider down → still returns a valid CanonicalCard from catalog."""
-    with patch.object(
-        canonical_card_service.card_search_service,
-        "get_card",
-        new=AsyncMock(return_value=_stub_catalog_card()),
-    ), patch.object(
-        canonical_card_service.market_service,
-        "get_card_market",
-        new=AsyncMock(return_value=None),
-    ), patch.object(
-        canonical_card_service,
-        "get_registry",
-    ) as gr:
+    with (
+        patch.object(
+            canonical_card_service.card_search_service,
+            "get_card",
+            new=AsyncMock(return_value=_stub_catalog_card()),
+        ),
+        patch.object(
+            canonical_card_service.market_service,
+            "get_card_market",
+            new=AsyncMock(return_value=None),
+        ),
+        patch.object(
+            canonical_card_service,
+            "get_registry",
+        ) as gr,
+    ):
         registry = gr.return_value
         registry.fan_out_listings = AsyncMock(return_value=[])
         registry.fan_out_comps = AsyncMock(return_value=[])
@@ -177,18 +183,22 @@ async def test_compose_merges_provider_fanout() -> None:
         )
     ]
 
-    with patch.object(
-        canonical_card_service.card_search_service,
-        "get_card",
-        new=AsyncMock(return_value=_stub_catalog_card()),
-    ), patch.object(
-        canonical_card_service.market_service,
-        "get_card_market",
-        new=AsyncMock(return_value=None),
-    ), patch.object(
-        canonical_card_service,
-        "get_registry",
-    ) as gr:
+    with (
+        patch.object(
+            canonical_card_service.card_search_service,
+            "get_card",
+            new=AsyncMock(return_value=_stub_catalog_card()),
+        ),
+        patch.object(
+            canonical_card_service.market_service,
+            "get_card_market",
+            new=AsyncMock(return_value=None),
+        ),
+        patch.object(
+            canonical_card_service,
+            "get_registry",
+        ) as gr,
+    ):
         registry = gr.return_value
         registry.fan_out_listings = AsyncMock(return_value=listings)
         registry.fan_out_comps = AsyncMock(return_value=comps)
@@ -242,18 +252,22 @@ async def test_compose_psa_cert_id_triggers_cert_lookup(monkeypatch) -> None:
             assert cert_no == "12345"
             return dict(psa_payload)
 
-    with patch.object(
-        canonical_card_service.card_search_service,
-        "get_card",
-        new=AsyncMock(return_value=_stub_catalog_card()),
-    ), patch.object(
-        canonical_card_service.market_service,
-        "get_card_market",
-        new=AsyncMock(return_value=None),
-    ), patch.object(
-        canonical_card_service,
-        "get_registry",
-    ) as gr:
+    with (
+        patch.object(
+            canonical_card_service.card_search_service,
+            "get_card",
+            new=AsyncMock(return_value=_stub_catalog_card()),
+        ),
+        patch.object(
+            canonical_card_service.market_service,
+            "get_card_market",
+            new=AsyncMock(return_value=None),
+        ),
+        patch.object(
+            canonical_card_service,
+            "get_registry",
+        ) as gr,
+    ):
         registry = gr.return_value
         registry.fan_out_listings = AsyncMock(return_value=[])
         registry.fan_out_comps = AsyncMock(return_value=[])
@@ -279,18 +293,22 @@ async def test_compose_swallows_provider_exception() -> None:
     async def boom(*_a, **_k):
         raise RuntimeError("ebay down")
 
-    with patch.object(
-        canonical_card_service.card_search_service,
-        "get_card",
-        new=AsyncMock(return_value=_stub_catalog_card()),
-    ), patch.object(
-        canonical_card_service.market_service,
-        "get_card_market",
-        new=AsyncMock(return_value=None),
-    ), patch.object(
-        canonical_card_service,
-        "get_registry",
-    ) as gr:
+    with (
+        patch.object(
+            canonical_card_service.card_search_service,
+            "get_card",
+            new=AsyncMock(return_value=_stub_catalog_card()),
+        ),
+        patch.object(
+            canonical_card_service.market_service,
+            "get_card_market",
+            new=AsyncMock(return_value=None),
+        ),
+        patch.object(
+            canonical_card_service,
+            "get_registry",
+        ) as gr,
+    ):
         registry = gr.return_value
         registry.fan_out_listings = boom
         registry.fan_out_comps = AsyncMock(return_value=[])

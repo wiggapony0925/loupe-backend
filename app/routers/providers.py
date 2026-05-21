@@ -33,9 +33,7 @@ async def verify_psa_cert(
     results are cached in Redis for 24h. Auth required so anonymous traffic
     can't burn the quota.
     """
-    provider = next(
-        (p for p in get_registry().all if isinstance(p, PsaProvider)), None
-    )
+    provider = next((p for p in get_registry().all if isinstance(p, PsaProvider)), None)
     if provider is None or not provider.is_configured():
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

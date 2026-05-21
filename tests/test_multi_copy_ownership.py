@@ -137,7 +137,9 @@ async def test_set_progress_counts_distinct_cards_only(
     )
     await db_session.commit()
 
-    body = assert_envelope_ok(await client.get("/v1/sets/progress", headers=auth_headers))
+    body = assert_envelope_ok(
+        await client.get("/v1/sets/progress", headers=auth_headers)
+    )
     assert isinstance(body, list) and len(body) >= 1
     target = next(row for row in body if row["setId"] == str(card.set_id))
     assert target["owned"] == 1  # distinct card count, not row count
@@ -214,14 +216,17 @@ async def test_scan_dedup_within_window(db_session, created_user):
             confidence=0.99,
         )
 
-    with patch.object(
-        scan_processor, "fingerprint_from_images", return_value=fixed_fp
-    ), patch.object(
-        scan_processor, "grade_from_images", new=MagicMock(return_value=_Grading())
-    ), patch.object(
-        scan_processor.card_resolver_service, "resolve", new=AsyncMock(side_effect=_fake_resolve)
-    ), patch.object(
-        scan_processor, "_publish", new=AsyncMock(return_value=None)
+    with (
+        patch.object(scan_processor, "fingerprint_from_images", return_value=fixed_fp),
+        patch.object(
+            scan_processor, "grade_from_images", new=MagicMock(return_value=_Grading())
+        ),
+        patch.object(
+            scan_processor.card_resolver_service,
+            "resolve",
+            new=AsyncMock(side_effect=_fake_resolve),
+        ),
+        patch.object(scan_processor, "_publish", new=AsyncMock(return_value=None)),
     ):
         await scan_processor._process(db_session, job_a.id, created_user.id)
         await scan_processor._process(db_session, job_b.id, created_user.id)
@@ -229,20 +234,22 @@ async def test_scan_dedup_within_window(db_session, created_user):
     from sqlalchemy import select
 
     rows = (
-        await db_session.execute(
-            select(GradedCard).where(
-                GradedCard.user_id == created_user.id,
-                GradedCard.card_id == card.id,
+        (
+            await db_session.execute(
+                select(GradedCard).where(
+                    GradedCard.user_id == created_user.id,
+                    GradedCard.card_id == card.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1, f"expected dedup to 1 row, got {len(rows)}"
 
 
 @pytest.mark.asyncio
-async def test_scan_dedup_does_not_apply_after_window(
-    db_session, created_user
-):
+async def test_scan_dedup_does_not_apply_after_window(db_session, created_user):
     """Older than 5 minutes → separate row (user genuinely owns another copy)."""
     card = await make_card(db_session)
 
@@ -291,25 +298,32 @@ async def test_scan_dedup_does_not_apply_after_window(
             confidence=0.99,
         )
 
-    with patch.object(
-        scan_processor, "fingerprint_from_images", return_value=fixed_fp
-    ), patch.object(
-        scan_processor, "grade_from_images", new=MagicMock(return_value=_Grading())
-    ), patch.object(
-        scan_processor.card_resolver_service, "resolve", new=AsyncMock(side_effect=_fake_resolve)
-    ), patch.object(
-        scan_processor, "_publish", new=AsyncMock(return_value=None)
+    with (
+        patch.object(scan_processor, "fingerprint_from_images", return_value=fixed_fp),
+        patch.object(
+            scan_processor, "grade_from_images", new=MagicMock(return_value=_Grading())
+        ),
+        patch.object(
+            scan_processor.card_resolver_service,
+            "resolve",
+            new=AsyncMock(side_effect=_fake_resolve),
+        ),
+        patch.object(scan_processor, "_publish", new=AsyncMock(return_value=None)),
     ):
         await scan_processor._process(db_session, job.id, created_user.id)
 
     from sqlalchemy import select
 
     rows = (
-        await db_session.execute(
-            select(GradedCard).where(
-                GradedCard.user_id == created_user.id,
-                GradedCard.card_id == card.id,
+        (
+            await db_session.execute(
+                select(GradedCard).where(
+                    GradedCard.user_id == created_user.id,
+                    GradedCard.card_id == card.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 2, f"expected two rows after 10m gap, got {len(rows)}"

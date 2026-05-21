@@ -17,7 +17,12 @@ os.environ.setdefault("S3_ENDPOINT_URL", "")
 os.environ.setdefault("S3_BUCKET", "loupe-test")
 # Force the S3 stub during tests: empty creds make get_s3_client() pick
 # the in-memory backend regardless of what the dev shell or .env exports.
-for _k in ("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+for _k in (
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+):
     os.environ.pop(_k, None)
 os.environ["S3_ACCESS_KEY_ID"] = ""
 os.environ["S3_SECRET_ACCESS_KEY"] = ""

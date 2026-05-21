@@ -85,9 +85,7 @@ class GradedCardCreate(BaseModel):
     estimated_value_usd: Decimal | None = Field(
         None, ge=Decimal("0"), le=_MAX_VALUE_USD
     )
-    purchase_price_usd: Decimal | None = Field(
-        None, ge=Decimal("0"), le=_MAX_VALUE_USD
-    )
+    purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"), le=_MAX_VALUE_USD)
     purchase_date: date | None = None
     notes: str | None = Field(None, max_length=2000)
     scan_job_id: uuid.UUID | None = None
@@ -165,9 +163,7 @@ class GradedCardUpdate(BaseModel):
     estimated_value_usd: Decimal | None = Field(
         None, ge=Decimal("0"), le=_MAX_VALUE_USD
     )
-    purchase_price_usd: Decimal | None = Field(
-        None, ge=Decimal("0"), le=_MAX_VALUE_USD
-    )
+    purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"), le=_MAX_VALUE_USD)
     purchase_date: date | None = None
 
     @field_validator("notes")

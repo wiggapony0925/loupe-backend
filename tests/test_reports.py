@@ -146,9 +146,7 @@ async def test_other_user_cannot_see_my_report(client, auth_headers, db_session)
 
     resp = await client.get(f"/v1/reports/{report_id}", headers=other_headers)
     assert_envelope_error(resp, expected_status=404)
-    resp = await client.get(
-        f"/v1/reports/{report_id}/download", headers=other_headers
-    )
+    resp = await client.get(f"/v1/reports/{report_id}/download", headers=other_headers)
     assert_envelope_error(resp, expected_status=404)
 
 

@@ -136,9 +136,7 @@ class TcgCsvProvider(BaseProvider):
                             continue
                         _merge_group(by_name, prod_csv.text, price_csv.text)
                     except Exception as exc:
-                        logger.debug(
-                            "tcgcsv group %s/%s failed: %s", cat_id, gid, exc
-                        )
+                        logger.debug("tcgcsv group %s/%s failed: %s", cat_id, gid, exc)
                         continue
 
             _cache._by_name = by_name

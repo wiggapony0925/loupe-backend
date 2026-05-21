@@ -156,7 +156,9 @@ def _pricing_summary_to_quote(card: dict[str, Any]) -> PriceQuote | None:
         return None
     sources = summary.get("sources")
     source = (
-        sources[0] if isinstance(sources, list) and sources else card.get("source") or "catalog"
+        sources[0]
+        if isinstance(sources, list) and sources
+        else card.get("source") or "catalog"
     )
     market = _money_from_dict(summary.get("market"))
     low = _money_from_dict(summary.get("low"))
@@ -317,7 +319,13 @@ async def compose_canonical_card(card_id: str) -> CanonicalCard | None:
     population_task = _safe(
         registry.fan_out_population(query), label="population", errors=errors
     )
-    market_snapshot, raw_listings, raw_comps, raw_quotes, raw_pops = await asyncio.gather(
+    (
+        market_snapshot,
+        raw_listings,
+        raw_comps,
+        raw_quotes,
+        raw_pops,
+    ) = await asyncio.gather(
         market_task, listings_task, comps_task, quotes_task, population_task
     )
 
@@ -332,7 +340,9 @@ async def compose_canonical_card(card_id: str) -> CanonicalCard | None:
             if q is not None:
                 quotes.append(q)
 
-    snapshot = market_snapshot.get("snapshot") if isinstance(market_snapshot, dict) else None
+    snapshot = (
+        market_snapshot.get("snapshot") if isinstance(market_snapshot, dict) else None
+    )
     graded_rows = _graded_rows_from_market(snapshot)
     pricing = CanonicalPricing(
         consensus=_consensus(quotes, "USD"),
@@ -417,7 +427,9 @@ async def compose_canonical_card(card_id: str) -> CanonicalCard | None:
                     CanonicalCert(
                         house="psa",
                         cert_number=str(verified.get("CertNumber") or cert_no),
-                        grade=str(verified.get("CardGrade") or verified.get("Grade") or "")
+                        grade=str(
+                            verified.get("CardGrade") or verified.get("Grade") or ""
+                        )
                         or None,
                         subject=verified.get("Subject"),
                         year=verified.get("Year"),
