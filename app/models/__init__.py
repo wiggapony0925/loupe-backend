@@ -9,6 +9,8 @@ from app.models.enums import (
     GradeHouseEnum,
     PriceAlertCondition,
     PriceSourceEnum,
+    ReportPeriodEnum,
+    ReportStatusEnum,
     ScannerTransportEnum,
     ScanSourceEnum,
     ScanStatusEnum,
@@ -21,6 +23,7 @@ from app.models.price_alert import PriceAlert
 from app.models.scan import ScanJob
 from app.models.scanner import Scanner
 from app.models.user import User, UserSettings
+from app.models.user_report import UserReport
 
 __all__ = [
     "ApiKey",
@@ -37,6 +40,8 @@ __all__ = [
     "PriceAlertCondition",
     "PriceSnapshot",
     "PriceSourceEnum",
+    "ReportPeriodEnum",
+    "ReportStatusEnum",
     "ScanJob",
     "ScanSourceEnum",
     "ScanStatusEnum",
@@ -44,5 +49,6 @@ __all__ = [
     "ScannerTransportEnum",
     "TcgEnum",
     "User",
+    "UserReport",
     "UserSettings",
 ]

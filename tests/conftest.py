@@ -15,11 +15,25 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:6390/0")  # unreachable → stub
 os.environ.setdefault("S3_ENDPOINT_URL", "")
 os.environ.setdefault("S3_BUCKET", "loupe-test")
+# Force the S3 stub during tests: empty creds make get_s3_client() pick
+# the in-memory backend regardless of what the dev shell or .env exports.
+for _k in ("S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+    os.environ.pop(_k, None)
+os.environ["S3_ACCESS_KEY_ID"] = ""
+os.environ["S3_SECRET_ACCESS_KEY"] = ""
 
 from app.config import reload_settings
 from app.db import Base, get_db, reset_engine
 
 reload_settings()
+
+# Drop any S3 client cached at import time so it picks up the test config.
+try:
+    from app.clients.s3 import reset_s3_client
+
+    reset_s3_client()
+except Exception:
+    pass
 
 
 @pytest.fixture(scope="session")

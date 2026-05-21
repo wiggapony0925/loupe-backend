@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     s3_access_key_id: str = "minioadmin"
     s3_secret_access_key: str = "minioadmin"
     s3_presign_expires_seconds: int = 900
+    # Dedicated bucket for generated user reports (PDF statements).
+    # Falls back to `s3_bucket` when unset so dev / test environments
+    # work zero-config; production should always set this to a separate
+    # bucket with stricter lifecycle / IAM (reports may contain PII).
+    reports_bucket: str | None = None
 
     # --- Upstream card catalog APIs ---
     pokemon_tcg_base_url: str = "https://api.pokemontcg.io/v2"

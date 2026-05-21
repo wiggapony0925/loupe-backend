@@ -69,10 +69,27 @@ class PriceAlertCondition(str, enum.Enum):
     below = "below"
 
 
+class ReportPeriodEnum(str, enum.Enum):
+    """Window covered by a :class:`~app.models.user_report.UserReport`."""
+
+    monthly = "monthly"
+    yearly = "yearly"
+
+
+class ReportStatusEnum(str, enum.Enum):
+    """Lifecycle of a generated portfolio statement PDF."""
+
+    pending = "pending"
+    ready = "ready"
+    failed = "failed"
+
+
 __all__ = [
     "GradeHouseEnum",
     "PriceAlertCondition",
     "PriceSourceEnum",
+    "ReportPeriodEnum",
+    "ReportStatusEnum",
     "ScanSourceEnum",
     "ScanStatusEnum",
     "ScannerTransportEnum",

@@ -57,6 +57,11 @@ class _StubS3:
             f"https://stub-s3.local/{bucket}/{key}?ct={content_type}&exp={expires_in}"
         )
 
+    async def generate_presigned_get_url(
+        self, bucket: str, key: str, expires_in: int
+    ) -> str:
+        return f"https://stub-s3.local/{bucket}/{key}?op=get&exp={expires_in}"
+
 
 class _Aioboto3S3:
     """Real S3-compatible client backed by aioboto3."""
@@ -111,6 +116,16 @@ class _Aioboto3S3:
             return await s3.generate_presigned_url(
                 ClientMethod="put_object",
                 Params={"Bucket": bucket, "Key": key, "ContentType": content_type},
+                ExpiresIn=expires_in,
+            )
+
+    async def generate_presigned_get_url(
+        self, bucket: str, key: str, expires_in: int
+    ) -> str:
+        async with self._session.client(**self._client_kwargs()) as s3:
+            return await s3.generate_presigned_url(
+                ClientMethod="get_object",
+                Params={"Bucket": bucket, "Key": key},
                 ExpiresIn=expires_in,
             )
 
