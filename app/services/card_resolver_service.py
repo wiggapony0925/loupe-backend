@@ -369,28 +369,51 @@ async def ensure_local_card(
         val = unified.get(key)
         if val:
             metadata[key] = val
-    card = Card(
-        set_id=card_set.id,
-        tcg=tcg_enum,
-        name=str(unified.get("name") or "Unknown"),
-        number=unified.get("number"),
-        rarity=unified.get("rarity"),
-        year=unified.get("year"),
-        image_url=unified.get("image_url"),
-        card_metadata=metadata or None,
-    )
-    db.add(card)
-    await db.flush()
 
-    await link_external_ref(
-        db,
-        card_id=card.id,
-        source=source,
-        external_id=external_id,
-        confidence=confidence,
-    )
-    await db.flush()
-    return card
+    # Race-safe materialization. Two concurrent requests for the same
+    # upstream_id will both pass the "no ref" check above; the unique
+    # constraint ``uq_card_external_refs_src_id`` guarantees only one
+    # row wins at the DB level. We catch that IntegrityError, roll back
+    # the savepoint, and re-read the winner so the loser still returns
+    # a valid Card to its caller.
+    from sqlalchemy.exc import IntegrityError as _IntegrityError
+
+    try:
+        async with db.begin_nested():
+            card = Card(
+                set_id=card_set.id,
+                tcg=tcg_enum,
+                name=str(unified.get("name") or "Unknown"),
+                number=unified.get("number"),
+                rarity=unified.get("rarity"),
+                year=unified.get("year"),
+                image_url=unified.get("image_url"),
+                card_metadata=metadata or None,
+            )
+            db.add(card)
+            await db.flush()
+            await link_external_ref(
+                db,
+                card_id=card.id,
+                source=source,
+                external_id=external_id,
+                confidence=confidence,
+            )
+            await db.flush()
+        return card
+    except _IntegrityError:
+        # Lost the race — the other transaction inserted the ref first.
+        winner_ref = (
+            await db.execute(
+                select(CardExternalRef).where(
+                    CardExternalRef.source == source,
+                    CardExternalRef.external_id == external_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if winner_ref is None:
+            return None
+        return await card_catalog_service.get_card(db, winner_ref.card_id)
 
 
 # ---------------------------------------------------------------- unified API

@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     jwt_access_ttl_seconds: int = 900
     jwt_refresh_ttl_seconds: int = 2_592_000
     jwt_algorithm: str = "RS256"
+    # Seconds of clock-skew tolerance applied to ``iat``/``exp``/``nbf`` so
+    # tiny drift between pods doesn't manifest as 401s for valid users.
+    jwt_leeway_seconds: int = 30
 
     # --- Apple Sign-In ---
     apple_client_id: str = "com.loupe.app"

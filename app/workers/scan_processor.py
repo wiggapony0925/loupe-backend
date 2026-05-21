@@ -155,29 +155,65 @@ async def _process(db: AsyncSession, job_id: uuid.UUID, user_id: uuid.UUID) -> N
         logger.info("scan %s resolve failed: %s", job.id, exc)
 
     card_for_grade = resolved_card or await _ensure_placeholder_card(db)
-    graded = GradedCard(
-        user_id=user_id,
-        card_id=card_for_grade.id,
-        scan_job_id=job.id,
-        grade=grading.overall,
-        house=GradeHouseEnum.loupe,
-        subgrades=grading.subgrades.as_dict(),
-        fingerprint_hash=fingerprint.phash,
-    )
-    db.add(graded)
-    await db.flush()
-    db.add(
-        Fingerprint(
-            graded_card_id=graded.id,
-            phash=fingerprint.phash,
-            dhash=fingerprint.dhash,
-            feature_vector={"v": fingerprint.feature_vector},
+
+    # Idempotency guard — re-uploading the same physical photo (or an arq
+    # retry of the same job) must NOT create a phantom duplicate row.
+    # Owning multiple copies is intentional and goes through the manual
+    # POST /v1/grades flow; identical-fingerprint scans from the same
+    # user within a short window are treated as the same submission.
+    from datetime import timedelta as _td
+
+    dup_cutoff = utcnow() - _td(minutes=5)
+    existing = (
+        await db.execute(
+            select(GradedCard)
+            .where(
+                GradedCard.user_id == user_id,
+                GradedCard.card_id == card_for_grade.id,
+                GradedCard.fingerprint_hash == fingerprint.phash,
+                GradedCard.created_at >= dup_cutoff,
+                GradedCard.deleted_at.is_(None),
+            )
+            .order_by(GradedCard.created_at.desc())
+            .limit(1)
         )
-    )
-    job.status = ScanStatusEnum.complete
-    job.completed_at = utcnow()
-    await db.commit()
-    await db.refresh(graded)
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        logger.info(
+            "scan %s deduped onto existing graded_card %s (same user/card/phash within 5m)",
+            job.id,
+            existing.id,
+        )
+        graded = existing
+        job.status = ScanStatusEnum.complete
+        job.completed_at = utcnow()
+        await db.commit()
+        await db.refresh(graded)
+    else:
+        graded = GradedCard(
+            user_id=user_id,
+            card_id=card_for_grade.id,
+            scan_job_id=job.id,
+            grade=grading.overall,
+            house=GradeHouseEnum.loupe,
+            subgrades=grading.subgrades.as_dict(),
+            fingerprint_hash=fingerprint.phash,
+        )
+        db.add(graded)
+        await db.flush()
+        db.add(
+            Fingerprint(
+                graded_card_id=graded.id,
+                phash=fingerprint.phash,
+                dhash=fingerprint.dhash,
+                feature_vector={"v": fingerprint.feature_vector},
+            )
+        )
+        job.status = ScanStatusEnum.complete
+        job.completed_at = utcnow()
+        await db.commit()
+        await db.refresh(graded)
 
     await _publish(
         user_id,

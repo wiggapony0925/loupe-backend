@@ -22,7 +22,10 @@ router = APIRouter(prefix="/grades", tags=["grades"])
 
 
 def _to_read(
-    row: GradedCard, card: Card | None, card_set: CardSet | None
+    row: GradedCard,
+    card: Card | None,
+    card_set: CardSet | None,
+    copies_owned: int = 1,
 ) -> GradedCardRead:
     out = GradedCardRead.model_validate(row)
     if card is not None:
@@ -35,23 +38,53 @@ def _to_read(
         out.card_set_name = card_set.name
         if out.card_year is None and card_set.release_date is not None:
             out.card_year = card_set.release_date.year
+    out.copies_owned = max(1, int(copies_owned))
     return out
 
 
 @router.get("", response_model=list[GradedCardRead], summary="List my graded cards")
 async def list_mine(
-    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(
+        500,
+        ge=1,
+        le=1000,
+        description=(
+            "Hard cap on rows returned in a single response so large vaults "
+            "don't OOM the mobile client. Defaults to 500 — more than any "
+            "real collector currently owns. Use the future cursor param to "
+            "page beyond this limit."
+        ),
+    ),
 ) -> list[GradedCardRead]:
+    from sqlalchemy import func as _func
+
     rows = (
         await db.execute(
             select(GradedCard, Card, CardSet)
             .outerjoin(Card, Card.id == GradedCard.card_id)
             .outerjoin(CardSet, CardSet.id == Card.set_id)
             .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
-            .order_by(GradedCard.graded_at.desc())
+            # Stable tie-breaker on id so successive pages don't shuffle
+            # rows that share the same `graded_at` timestamp.
+            .order_by(GradedCard.graded_at.desc(), GradedCard.id.desc())
+            .limit(limit)
         )
     ).all()
-    return [_to_read(g, c, s) for (g, c, s) in rows]
+    # Per-card copy counts so each row knows "I'm one of N you own".
+    count_rows = (
+        await db.execute(
+            select(GradedCard.card_id, _func.count(GradedCard.id))
+            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+            .group_by(GradedCard.card_id)
+        )
+    ).all()
+    copies_by_card = {cid: int(n) for (cid, n) in count_rows}
+    return [
+        _to_read(g, c, s, copies_owned=copies_by_card.get(g.card_id, 1))
+        for (g, c, s) in rows
+    ]
 
 
 @router.post(

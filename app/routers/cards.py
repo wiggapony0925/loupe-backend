@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models.enums import TcgEnum
+from app.rate_limit import resolve_limit, search_live_limit
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
 from app.services import (
@@ -36,7 +37,11 @@ from app.services import (
 router = APIRouter(prefix="/cards", tags=["cards"])
 
 
-@router.get("/search", summary="Live card search (public)")
+@router.get(
+    "/search",
+    summary="Live card search (public)",
+    dependencies=[Depends(search_live_limit)],
+)
 async def search_live(
     q: str = Query("", max_length=120),
     tcg: str = Query(
@@ -125,6 +130,7 @@ class ResolveCardRequest(BaseModel):
 @router.post(
     "/resolve",
     summary="Resolve any card hint to a canonical Loupe id (public)",
+    dependencies=[Depends(resolve_limit)],
 )
 async def resolve_card(
     payload: ResolveCardRequest,

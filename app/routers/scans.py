@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_user
 from app.db import get_db
 from app.models.user import User
+from app.rate_limit import scan_create_limit
 from app.schemas.scan import (
     ScanJobCompleteRequest,
     ScanJobCreate,
@@ -28,6 +29,7 @@ logger = get_logger("routers.scans")
     response_model=ScanJobCreateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new scan job and return presigned upload URLs",
+    dependencies=[Depends(scan_create_limit)],
 )
 async def create_scan(
     payload: ScanJobCreate,

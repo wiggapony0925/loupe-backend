@@ -100,6 +100,12 @@ def verify_token(token: str, expected_type: TokenType | None = None) -> dict[str
         algorithms=["RS256"],
         audience=s.jwt_audience,
         issuer=s.jwt_issuer,
+        # Allow small clock skew between this pod and the issuer pod.
+        # Without it, a token whose ``iat`` is 1s in the future (or whose
+        # ``exp`` just passed) raises ImmatureSignatureError / ExpiredSignatureError
+        # the moment any node drifts — a constant low-grade source of
+        # spurious 401s in multi-instance / load-balanced deployments.
+        leeway=getattr(s, "jwt_leeway_seconds", 30),
         options={"require": ["exp", "iat", "sub"]},
     )
     if expected_type and decoded.get("typ") != expected_type:
