@@ -98,6 +98,12 @@ async def summary(db: AsyncSession, user: User) -> dict:
     cost_count = 0
     grade_sum = Decimal("0")
     grade_count = 0
+    # Vault-shape extras: lets the client render the Vault page header
+    # (Holdings / Avg Grade / Loupe-graded pills + the Category chip
+    # row) without downloading the full collection just to compute
+    # `Set(c.set)` and `count(c.house == 'loupe')` in JS.
+    unique_card_ids: set = set()
+    loupe_graded_count = 0
     for g, _card in rows:
         if g.estimated_value_usd is not None:
             total += g.estimated_value_usd
@@ -107,6 +113,30 @@ async def summary(db: AsyncSession, user: User) -> dict:
         if g.grade is not None:
             grade_sum += g.grade
             grade_count += 1
+        if g.card_id is not None:
+            unique_card_ids.add(g.card_id)
+        house_val = (
+            g.house.value if hasattr(g.house, "value") else str(g.house or "")
+        ).lower()
+        if house_val == "loupe":
+            loupe_graded_count += 1
+    # Distinct set names the user owns. Pulled in a single SQL pass
+    # (graded_cards → cards → card_sets) so the cost is one query, not
+    # one per row. Result is sorted for stable client-side rendering.
+    from app.models.card import CardSet
+
+    set_rows = (
+        await db.execute(
+            select(CardSet.name)
+            .join(Card, Card.set_id == CardSet.id)
+            .join(GradedCard, GradedCard.card_id == Card.id)
+            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+            .where(CardSet.name.is_not(None))
+            .distinct()
+            .order_by(CardSet.name.asc())
+        )
+    ).all()
+    available_sets = [r[0] for r in set_rows if r[0]]
     avg_grade = float(grade_sum / grade_count) if grade_count else None
     # Unrealized P/L is `value - cost`, but only meaningful when the user
     # has recorded a cost on at least one card. We report `null` (not 0)
@@ -134,6 +164,11 @@ async def summary(db: AsyncSession, user: User) -> dict:
         "costBasisCardCount": cost_count,
         "unrealizedPnlUsd": pnl_usd,
         "unrealizedPnlPct": pnl_pct,
+        # Vault aggregates — moved off the client so the Vault header
+        # never needs the full card list to render.
+        "uniqueCardCount": len(unique_card_ids),
+        "loupeGradedCount": loupe_graded_count,
+        "availableSets": available_sets,
     }
 
 

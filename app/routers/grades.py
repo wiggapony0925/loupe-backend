@@ -42,6 +42,37 @@ def _to_read(
     return out
 
 
+_SORT_OPTIONS: dict[str, Any] = {
+    # key → (sql_expr_factory, tie_breaker_factory). Wrapped in factories so
+    # we don't import GradedCard fields at module load before they're bound.
+    "recent": (
+        lambda: GradedCard.graded_at.desc(),
+        lambda: GradedCard.id.desc(),
+    ),
+    "oldest": (
+        lambda: GradedCard.graded_at.asc(),
+        lambda: GradedCard.id.asc(),
+    ),
+    "value_desc": (
+        # NULLs LAST so empty estimates don't dominate the head of the list.
+        lambda: GradedCard.estimated_value_usd.desc().nulls_last(),
+        lambda: GradedCard.id.desc(),
+    ),
+    "value_asc": (
+        lambda: GradedCard.estimated_value_usd.asc().nulls_last(),
+        lambda: GradedCard.id.asc(),
+    ),
+    "grade_desc": (
+        lambda: GradedCard.grade.desc(),
+        lambda: GradedCard.id.desc(),
+    ),
+    "grade_asc": (
+        lambda: GradedCard.grade.asc(),
+        lambda: GradedCard.id.asc(),
+    ),
+}
+
+
 @router.get("", response_model=list[GradedCardRead], summary="List my graded cards")
 async def list_mine(
     user: User = Depends(require_user),
@@ -53,30 +84,110 @@ async def list_mine(
         description=(
             "Hard cap on rows returned in a single response so large vaults "
             "don't OOM the mobile client. Defaults to 500 — more than any "
-            "real collector currently owns. Use the future cursor param to "
-            "page beyond this limit."
+            "real collector currently owns. Combine with `cursor` to page."
+        ),
+    ),
+    cursor: int = Query(
+        0,
+        ge=0,
+        description=(
+            "Zero-based offset into the sorted result set. Used together "
+            "with `limit` for infinite-scroll pagination. The client should "
+            "increment by `limit` between requests."
+        ),
+    ),
+    q: str | None = Query(
+        None,
+        max_length=120,
+        description=(
+            "Free-text search. Case-insensitive substring match across the "
+            "card name and set name. Backend search keeps mobile responsive "
+            "even on 5k-card vaults where client-side filtering would stall."
+        ),
+    ),
+    set_name: str | None = Query(
+        None,
+        alias="set",
+        max_length=120,
+        description="Filter to a single set by exact name (case-sensitive).",
+    ),
+    house: str | None = Query(
+        None,
+        max_length=16,
+        description=(
+            "Filter by grading house slug (e.g. `loupe`, `psa`, `bgs`). "
+            "Case-insensitive — normalised to lower."
+        ),
+    ),
+    min_grade: float | None = Query(
+        None,
+        ge=0,
+        le=10,
+        description="Minimum grade (inclusive). Rows below this are dropped.",
+    ),
+    sort: str = Query(
+        "recent",
+        description=(
+            "Result ordering. One of: `recent` (default), `oldest`, "
+            "`value_desc`, `value_asc`, `grade_desc`, `grade_asc`."
         ),
     ),
 ) -> list[GradedCardRead]:
-    from sqlalchemy import func as _func
+    from sqlalchemy import func as _func, or_
+
+    if sort not in _SORT_OPTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"sort must be one of {sorted(_SORT_OPTIONS)}",
+        )
+
+    # Base predicate — every filter below stacks on top of this so it
+    # applies uniformly to both the row query and the copy-count rollup.
+    base_where = [
+        GradedCard.user_id == user.id,
+        GradedCard.deleted_at.is_(None),
+    ]
+    if house is not None:
+        base_where.append(GradedCard.house == house.lower())
+    if min_grade is not None:
+        # SQLAlchemy compares Decimal vs float fine; keep as float for clarity.
+        base_where.append(GradedCard.grade >= min_grade)
+
+    # Set & free-text filters touch joined Card/CardSet columns so they
+    # have to be applied to the SELECT, not the copy-count rollup (which
+    # joins only graded_cards).
+    join_where = list(base_where)
+    if set_name is not None:
+        join_where.append(CardSet.name == set_name)
+    if q:
+        like = f"%{q.lower()}%"
+        join_where.append(
+            or_(
+                _func.lower(Card.name).like(like),
+                _func.lower(CardSet.name).like(like),
+            )
+        )
+
+    order_factory, tie_factory = _SORT_OPTIONS[sort]
 
     rows = (
         await db.execute(
             select(GradedCard, Card, CardSet)
             .outerjoin(Card, Card.id == GradedCard.card_id)
             .outerjoin(CardSet, CardSet.id == Card.set_id)
-            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
-            # Stable tie-breaker on id so successive pages don't shuffle
-            # rows that share the same `graded_at` timestamp.
-            .order_by(GradedCard.graded_at.desc(), GradedCard.id.desc())
+            .where(*join_where)
+            .order_by(order_factory(), tie_factory())
+            .offset(cursor)
             .limit(limit)
         )
     ).all()
-    # Per-card copy counts so each row knows "I'm one of N you own".
+    # Per-card copy counts. Scope to *base* filters only — the visible
+    # row may be hidden by the search/set filter while its sibling copy
+    # is shown, but the "x3" badge should still reflect total ownership.
     count_rows = (
         await db.execute(
             select(GradedCard.card_id, _func.count(GradedCard.id))
-            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+            .where(*base_where)
             .group_by(GradedCard.card_id)
         )
     ).all()

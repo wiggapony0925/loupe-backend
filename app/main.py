@@ -16,6 +16,7 @@ from app.observability import init_sentry
 from app.response_envelope import register_envelope_middleware
 from app.routers import (
     alerts,
+    app_config,
     auth,
     cards,
     collections,
@@ -107,6 +108,7 @@ def create_app() -> FastAPI:
     app.include_router(market.router, prefix=api_prefix)
     app.include_router(providers.router, prefix=api_prefix)
     app.include_router(reports.router, prefix=api_prefix)
+    app.include_router(app_config.router, prefix=api_prefix)
 
     # WebSockets mount at root.
     app.include_router(ws.router)
