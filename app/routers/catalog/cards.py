@@ -60,7 +60,7 @@ async def search_live(
 @router.get("/trending", summary="Trending cards (public)")
 async def get_trending(
     tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
-    limit: int = Query(24, ge=1, le=48),
+    limit: int = Query(24, ge=1, le=100),
 ) -> dict[str, Any]:
     """Mixed trending feed across the three live catalogs.
 
