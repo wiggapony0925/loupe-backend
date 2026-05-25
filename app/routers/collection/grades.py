@@ -47,29 +47,29 @@ _SORT_OPTIONS: dict[str, Any] = {
     # key → (sql_expr_factory, tie_breaker_factory). Wrapped in factories so
     # we don't import GradedCard fields at module load before they're bound.
     "recent": (
-        lambda: GradedCard.graded_at.desc(),
-        lambda: GradedCard.id.desc(),
+        GradedCard.graded_at.desc,
+        GradedCard.id.desc,
     ),
     "oldest": (
-        lambda: GradedCard.graded_at.asc(),
-        lambda: GradedCard.id.asc(),
+        GradedCard.graded_at.asc,
+        GradedCard.id.asc,
     ),
     "value_desc": (
         # NULLs LAST so empty estimates don't dominate the head of the list.
         lambda: GradedCard.estimated_value_usd.desc().nulls_last(),
-        lambda: GradedCard.id.desc(),
+        GradedCard.id.desc,
     ),
     "value_asc": (
         lambda: GradedCard.estimated_value_usd.asc().nulls_last(),
-        lambda: GradedCard.id.asc(),
+        GradedCard.id.asc,
     ),
     "grade_desc": (
-        lambda: GradedCard.grade.desc(),
-        lambda: GradedCard.id.desc(),
+        GradedCard.grade.desc,
+        GradedCard.id.desc,
     ),
     "grade_asc": (
-        lambda: GradedCard.grade.asc(),
-        lambda: GradedCard.id.asc(),
+        GradedCard.grade.asc,
+        GradedCard.id.asc,
     ),
 }
 
@@ -134,7 +134,8 @@ async def list_mine(
         ),
     ),
 ) -> list[GradedCardRead]:
-    from sqlalchemy import func as _func, or_
+    from sqlalchemy import func as _func
+    from sqlalchemy import or_
 
     if sort not in _SORT_OPTIONS:
         raise HTTPException(

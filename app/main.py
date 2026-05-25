@@ -14,12 +14,18 @@ from app.http_middleware import register_http_middleware
 from app.lifecycle import lifespan
 from app.observability import init_sentry
 from app.response_envelope import register_envelope_middleware
-from app.routers.analytics import home_feed as home, portfolio_overview as analytics, reports
+from app.routers.analytics import home_feed as home
+from app.routers.analytics import portfolio_overview as analytics
+from app.routers.analytics import reports
 from app.routers.auth import auth, users
-from app.routers.catalog import card_sets as sets, cards, providers
-from app.routers.collection import collections, grades, scan_devices as scanners, scans
+from app.routers.catalog import card_sets as sets
+from app.routers.catalog import cards, providers
+from app.routers.collection import collections, grades, scans
+from app.routers.collection import scan_devices as scanners
 from app.routers.market import alerts, market, prices
-from app.routers.ops import app_config, health as system, websockets as ws
+from app.routers.ops import app_config
+from app.routers.ops import health as system
+from app.routers.ops import websockets as ws
 
 
 def create_app() -> FastAPI:

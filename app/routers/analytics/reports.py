@@ -63,7 +63,7 @@ async def list_mine(
     summary="When my next statements will auto-close",
 )
 async def upcoming(
-    user: User = Depends(require_user),  # noqa: ARG001 — auth-only
+    user: User = Depends(require_user),
 ) -> list[UpcomingReportRead]:
     """Return the next monthly and yearly close datetimes.
 

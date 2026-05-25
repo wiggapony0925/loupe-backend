@@ -215,76 +215,75 @@ async def run_close_cycle(*, now: datetime | None = None) -> dict[str, int]:
     counts = {"checked": 0, "generated": 0, "skipped": 0, "failed": 0}
     sm = get_sessionmaker()
 
-    async with sm() as db:
-        async with _scheduler_lock(db) as acquired:
-            if not acquired:
-                _log.debug("scheduler lock held by another instance; skipping cycle")
-                return counts
+    async with sm() as db, _scheduler_lock(db) as acquired:
+        if not acquired:
+            _log.debug("scheduler lock held by another instance; skipping cycle")
+            return counts
 
-            existing = await _existing_report_keys(db)
+        existing = await _existing_report_keys(db)
 
-            # Monthly sweep.
-            for year, month in iter_closed_monthly_periods(now):
-                period_start, period_end = _month_bounds(year, month)
-                if period_end >= now.date():
-                    # Defensive — shouldn't happen given iter logic.
+        # Monthly sweep.
+        for year, month in iter_closed_monthly_periods(now):
+            period_start, period_end = _month_bounds(year, month)
+            if period_end >= now.date():
+                # Defensive — shouldn't happen given iter logic.
+                continue
+            eligible = await _users_with_any_grade_on_or_before(
+                db, period_end=period_end
+            )
+            for user in eligible:
+                counts["checked"] += 1
+                key = (str(user.id), ReportPeriodEnum.monthly.value, period_start)
+                if key in existing:
+                    counts["skipped"] += 1
                     continue
-                eligible = await _users_with_any_grade_on_or_before(
-                    db, period_end=period_end
-                )
-                for user in eligible:
-                    counts["checked"] += 1
-                    key = (str(user.id), ReportPeriodEnum.monthly.value, period_start)
-                    if key in existing:
-                        counts["skipped"] += 1
-                        continue
-                    try:
-                        await generate_report(
-                            db,
-                            user=user,
-                            period=ReportPeriodEnum.monthly,
-                            year=year,
-                            month=month,
-                        )
-                        counts["generated"] += 1
-                        existing.add(key)
-                    except Exception as exc:
-                        counts["failed"] += 1
-                        _log.warning(
-                            "auto-generate monthly failed user=%s %04d-%02d: %s",
-                            user.id, year, month, exc,
-                        )
+                try:
+                    await generate_report(
+                        db,
+                        user=user,
+                        period=ReportPeriodEnum.monthly,
+                        year=year,
+                        month=month,
+                    )
+                    counts["generated"] += 1
+                    existing.add(key)
+                except Exception as exc:
+                    counts["failed"] += 1
+                    _log.warning(
+                        "auto-generate monthly failed user=%s %04d-%02d: %s",
+                        user.id, year, month, exc,
+                    )
 
-            # Yearly sweep.
-            for year in iter_closed_yearly_periods(now):
-                period_start = date(year, 1, 1)
-                period_end = date(year, 12, 31)
-                if period_end >= now.date():
+        # Yearly sweep.
+        for year in iter_closed_yearly_periods(now):
+            period_start = date(year, 1, 1)
+            period_end = date(year, 12, 31)
+            if period_end >= now.date():
+                continue
+            eligible = await _users_with_any_grade_on_or_before(
+                db, period_end=period_end
+            )
+            for user in eligible:
+                counts["checked"] += 1
+                key = (str(user.id), ReportPeriodEnum.yearly.value, period_start)
+                if key in existing:
+                    counts["skipped"] += 1
                     continue
-                eligible = await _users_with_any_grade_on_or_before(
-                    db, period_end=period_end
-                )
-                for user in eligible:
-                    counts["checked"] += 1
-                    key = (str(user.id), ReportPeriodEnum.yearly.value, period_start)
-                    if key in existing:
-                        counts["skipped"] += 1
-                        continue
-                    try:
-                        await generate_report(
-                            db,
-                            user=user,
-                            period=ReportPeriodEnum.yearly,
-                            year=year,
-                        )
-                        counts["generated"] += 1
-                        existing.add(key)
-                    except Exception as exc:
-                        counts["failed"] += 1
-                        _log.warning(
-                            "auto-generate yearly failed user=%s %04d: %s",
-                            user.id, year, exc,
-                        )
+                try:
+                    await generate_report(
+                        db,
+                        user=user,
+                        period=ReportPeriodEnum.yearly,
+                        year=year,
+                    )
+                    counts["generated"] += 1
+                    existing.add(key)
+                except Exception as exc:
+                    counts["failed"] += 1
+                    _log.warning(
+                        "auto-generate yearly failed user=%s %04d: %s",
+                        user.id, year, exc,
+                    )
 
     if counts["generated"] or counts["failed"]:
         _log.info(

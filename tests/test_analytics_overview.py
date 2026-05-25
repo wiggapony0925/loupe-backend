@@ -112,7 +112,7 @@ async def test_analytics_overview_movers_split_gainers_and_losers(
     gainers = body["movers"]["gainers"]
     losers = body["movers"]["losers"]
     assert [g["cardName"] for g in gainers] == ["Up"]
-    assert [l["cardName"] for l in losers] == ["Down"]
+    assert [m["cardName"] for m in losers] == ["Down"]
     # Card without price history is excluded from movers entirely.
     assert "Flat" not in [m["cardName"] for m in gainers + losers]
 

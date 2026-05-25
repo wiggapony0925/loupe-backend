@@ -23,8 +23,14 @@ from app.models.enums import TcgEnum
 from app.rate_limit import resolve_limit, search_live_limit
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
-from app.services.catalog import canonical_card_service, card_catalog_service, card_resolver_service, card_search_service
-from app.services.market import listings_service, market_service, sold_comps_service as comps_service, trending_service
+from app.services.catalog import (
+    canonical_card_service,
+    card_catalog_service,
+    card_resolver_service,
+    card_search_service,
+)
+from app.services.market import listings_service, market_service, trending_service
+from app.services.market import sold_comps_service as comps_service
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 

@@ -7,7 +7,8 @@ import pytest
 from app.config import reload_settings
 from app.integrations.registry import reset_registry
 from app.services.catalog import card_search_service
-from app.services.market import listings_service, market_service, sold_comps_service as comps_service
+from app.services.market import listings_service, market_service
+from app.services.market import sold_comps_service as comps_service
 from tests.conftest import assert_envelope_ok
 
 _COMPOSITE = "pokemontcg:base1-4"

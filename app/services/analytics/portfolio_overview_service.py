@@ -34,7 +34,6 @@ from app.models.grade import GradedCard
 from app.models.user import User
 from app.services.analytics.home_feed_service import _change_pct_1y
 
-
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -114,7 +113,7 @@ async def build_overview(db: AsyncSession, user: User) -> dict[str, Any]:
     grader_split = {"psa": 0, "bgs": 0, "cgc": 0}
     last_scan_at = None
     year_min: int | None = None
-    grade_buckets: dict[str, int] = {b: 0 for b in _GRADE_BUCKET_ORDER}
+    grade_buckets: dict[str, int] = dict.fromkeys(_GRADE_BUCKET_ORDER, 0)
 
     for g, c, s in rows:
         value = float(g.estimated_value_usd) if g.estimated_value_usd is not None else 0.0
