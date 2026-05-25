@@ -18,6 +18,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 from app.db.types import UuidCol
 
@@ -56,8 +57,33 @@ def upgrade() -> None:
             name="sealed_product_type_enum",
             create_type=False,
         )
+        # Use the PG-native ENUM type so ``create_type=False`` is honored
+        # during ``_on_table_create``. The generic ``sa.Enum`` with
+        # ``create_type=False`` does NOT propagate the flag to the dialect
+        # impl, so on prod (where ``tcg_enum`` was created by an earlier
+        # migration) it would still attempt ``CREATE TYPE tcg_enum`` and
+        # crash with DuplicateObject. ``postgresql.ENUM`` honors the flag.
+        tcg_col = postgresql.ENUM(
+            "pokemon",
+            "magic",
+            "yugioh",
+            "onepiece",
+            "lorcana",
+            "sports",
+            name="tcg_enum",
+            create_type=False,
+        )
     else:
         product_type_col = sa.Enum(*_TYPE_VALUES, name="sealed_product_type_enum")
+        tcg_col = sa.Enum(
+            "pokemon",
+            "magic",
+            "yugioh",
+            "onepiece",
+            "lorcana",
+            "sports",
+            name="tcg_enum",
+        )
 
     # ── sealed_products (catalog) ─────────────────────────────────────────
     op.create_table(
@@ -65,16 +91,7 @@ def upgrade() -> None:
         sa.Column("id", UuidCol(), primary_key=True),
         sa.Column(
             "tcg",
-            sa.Enum(
-                "pokemon",
-                "magic",
-                "yugioh",
-                "onepiece",
-                "lorcana",
-                "sports",
-                name="tcg_enum",
-                create_type=False,
-            ),
+            tcg_col,
             nullable=False,
         ),
         sa.Column("product_type", product_type_col, nullable=False),
@@ -178,9 +195,7 @@ def upgrade() -> None:
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("ix_sealed_holdings_user_id", "sealed_holdings", ["user_id"])
-    op.create_index(
-        "ix_sealed_holdings_product_id", "sealed_holdings", ["product_id"]
-    )
+    op.create_index("ix_sealed_holdings_product_id", "sealed_holdings", ["product_id"])
     op.create_index(
         "ix_sealed_holdings_user_acquired",
         "sealed_holdings",
@@ -189,18 +204,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_sealed_holdings_user_acquired", table_name="sealed_holdings"
-    )
+    op.drop_index("ix_sealed_holdings_user_acquired", table_name="sealed_holdings")
     op.drop_index("ix_sealed_holdings_product_id", table_name="sealed_holdings")
     op.drop_index("ix_sealed_holdings_user_id", table_name="sealed_holdings")
     op.drop_table("sealed_holdings")
 
     op.drop_index("ix_sealed_products_name_lower", table_name="sealed_products")
     op.drop_index("ix_sealed_products_tcg_type", table_name="sealed_products")
-    op.drop_index(
-        "ix_sealed_products_upstream_source", table_name="sealed_products"
-    )
+    op.drop_index("ix_sealed_products_upstream_source", table_name="sealed_products")
     op.drop_index("ix_sealed_products_set_id", table_name="sealed_products")
     op.drop_index("ix_sealed_products_product_type", table_name="sealed_products")
     op.drop_index("ix_sealed_products_tcg", table_name="sealed_products")
