@@ -20,7 +20,7 @@ from app.routers.analytics import reports
 from app.routers.auth import auth, users
 from app.routers.catalog import card_sets as sets
 from app.routers.catalog import cards, providers
-from app.routers.collection import collections, grades, scans
+from app.routers.collection import collections, grades, scans, sealed
 from app.routers.collection import scan_devices as scanners
 from app.routers.market import alerts, market, prices
 from app.routers.ops import app_config
@@ -105,6 +105,8 @@ def create_app() -> FastAPI:
     app.include_router(app_config.router, prefix=api_prefix)
     app.include_router(home.router, prefix=api_prefix)
     app.include_router(analytics.router, prefix=api_prefix)
+    app.include_router(sealed.catalog_router, prefix=api_prefix)
+    app.include_router(sealed.holdings_router, prefix=api_prefix)
 
     # WebSockets mount at root.
     app.include_router(ws.router)

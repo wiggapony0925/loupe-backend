@@ -100,14 +100,37 @@ class ReportStatusEnum(str, enum.Enum):
     failed = "failed"
 
 
+class SealedProductTypeEnum(str, enum.Enum):
+    """Categories of sealed TCG product collectors track as investments.
+
+    Mirrors the vocabulary the major retailers (TCGplayer, Troll & Toad)
+    use for filtering so external catalog imports map 1:1. Keep this
+    list closed — anything truly bespoke goes in ``other`` and gets
+    promoted in a later migration once we see real volume.
+    """
+
+    booster_box = "booster_box"
+    booster_pack = "booster_pack"
+    etb = "etb"  # Elite Trainer Box
+    collection_box = "collection_box"
+    premium_collection = "premium_collection"
+    tin = "tin"
+    blister = "blister"
+    bundle = "bundle"
+    case = "case"
+    other = "other"
+
+
 __all__ = [
     "GradeHouseEnum",
     "PriceAlertCondition",
     "PriceSourceEnum",
+    "RawConditionEnum",
     "ReportPeriodEnum",
     "ReportStatusEnum",
     "ScanSourceEnum",
     "ScanStatusEnum",
     "ScannerTransportEnum",
+    "SealedProductTypeEnum",
     "TcgEnum",
 ]

@@ -9,11 +9,13 @@ from app.models.enums import (
     GradeHouseEnum,
     PriceAlertCondition,
     PriceSourceEnum,
+    RawConditionEnum,
     ReportPeriodEnum,
     ReportStatusEnum,
     ScannerTransportEnum,
     ScanSourceEnum,
     ScanStatusEnum,
+    SealedProductTypeEnum,
     TcgEnum,
 )
 from app.models.fingerprint import Fingerprint
@@ -22,6 +24,7 @@ from app.models.price import PriceSnapshot
 from app.models.price_alert import PriceAlert
 from app.models.scan import ScanJob
 from app.models.scanner import Scanner
+from app.models.sealed import SealedHolding, SealedProduct
 from app.models.user import User, UserSettings
 from app.models.user_report import UserReport
 
@@ -40,6 +43,7 @@ __all__ = [
     "PriceAlertCondition",
     "PriceSnapshot",
     "PriceSourceEnum",
+    "RawConditionEnum",
     "ReportPeriodEnum",
     "ReportStatusEnum",
     "ScanJob",
@@ -47,6 +51,9 @@ __all__ = [
     "ScanStatusEnum",
     "Scanner",
     "ScannerTransportEnum",
+    "SealedHolding",
+    "SealedProduct",
+    "SealedProductTypeEnum",
     "TcgEnum",
     "User",
     "UserReport",
