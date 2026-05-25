@@ -6,7 +6,8 @@ from typing import Any
 
 import pytest
 
-from app.services import card_search_service, market_service
+from app.services.catalog import card_search_service
+from app.services.market import market_service
 from tests.conftest import assert_envelope_ok
 
 _POKEMON_ID = "base1-4"

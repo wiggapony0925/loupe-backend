@@ -27,7 +27,7 @@ from app.schemas.canonical_card import (
     CanonicalIdentity,
     CanonicalProvenance,
 )
-from app.services import canonical_card_service
+from app.services.catalog import canonical_card_service
 
 # --------------------------------------------------------------------- schema
 

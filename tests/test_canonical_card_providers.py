@@ -20,7 +20,7 @@ from app.schemas.canonical_card import (
     Money,
     PopulationRow,
 )
-from app.services import canonical_card_service
+from app.services.catalog import canonical_card_service
 
 
 def test_listing_dataclass_maps_to_canonical_listing() -> None:

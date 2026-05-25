@@ -23,7 +23,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.card_external_ref import CardExternalRef
-from app.services import card_resolver_service
+from app.services.catalog import card_resolver_service
 
 # ----------------------------------------------------------- shared fixtures
 

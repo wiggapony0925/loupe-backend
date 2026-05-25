@@ -12,7 +12,7 @@ from tests.conftest import assert_envelope_error, assert_envelope_ok
 @pytest.mark.asyncio
 async def test_resolve_period_helpers():
     from app.models.enums import ReportPeriodEnum
-    from app.services.reports import resolve_period
+    from app.services.analytics.reports import resolve_period
 
     start, end, label = resolve_period(ReportPeriodEnum.monthly, year=2024, month=2)
     assert start == date(2024, 2, 1)
@@ -171,7 +171,7 @@ async def test_empty_vault_still_renders_pdf(client, auth_headers):
 def test_iter_closed_monthly_periods():
     from datetime import UTC, datetime
 
-    from app.services.reports.scheduler import iter_closed_monthly_periods
+    from app.services.analytics.reports.scheduler import iter_closed_monthly_periods
 
     # Mid-May 2026 → newest closed month is April 2026.
     out = list(iter_closed_monthly_periods(datetime(2026, 5, 21, tzinfo=UTC), lookback_months=4))
@@ -185,7 +185,7 @@ def test_iter_closed_monthly_periods():
 def test_iter_closed_yearly_periods():
     from datetime import UTC, datetime
 
-    from app.services.reports.scheduler import iter_closed_yearly_periods
+    from app.services.analytics.reports.scheduler import iter_closed_yearly_periods
 
     out = list(iter_closed_yearly_periods(datetime(2026, 5, 21, tzinfo=UTC), lookback_years=3))
     assert out == [2025, 2024, 2023]
@@ -194,7 +194,7 @@ def test_iter_closed_yearly_periods():
 def test_next_close_helpers():
     from datetime import UTC, datetime
 
-    from app.services.reports.scheduler import (
+    from app.services.analytics.reports.scheduler import (
         next_monthly_close,
         next_yearly_close,
     )
@@ -224,7 +224,7 @@ async def test_upcoming_endpoint(client, auth_headers):
 @pytest.mark.asyncio
 async def test_run_close_cycle_skips_users_without_grades(db_session, created_user):
     """No grades → no statements, even if the user existed for the period."""
-    from app.services.reports.scheduler import run_close_cycle
+    from app.services.analytics.reports.scheduler import run_close_cycle
 
     counts = await run_close_cycle()
     # `created_user` exists but has no grades — nothing to materialise.
@@ -243,7 +243,7 @@ async def test_run_close_cycle_materialises_past_periods(db_session, created_use
     from app.models.grade import GradedCard
     from app.models.user import User
     from app.models.user_report import UserReport
-    from app.services.reports.scheduler import run_close_cycle
+    from app.services.analytics.reports.scheduler import run_close_cycle
     from tests.factories import make_card
 
     # Backdate the user so they "existed" for the periods we'll close.

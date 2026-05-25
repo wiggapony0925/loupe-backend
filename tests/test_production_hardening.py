@@ -35,7 +35,7 @@ async def test_ensure_local_card_is_idempotent(db_session):
     SQLite session, but idempotence on the happy path catches the bulk
     of regressions and proves the early-return ref lookup works.
     """
-    from app.services import card_resolver_service
+    from app.services.catalog import card_resolver_service
 
     unified = {
         "tcg": "pokemon",

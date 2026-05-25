@@ -1,7 +1,7 @@
 """Market snapshot schemas.
 
 Rich per-house × per-grade market view returned by
-``GET /v1/cards/{id}/market`` (see :mod:`app.services.market_service`).
+``GET /v1/cards/{id}/market`` (see :mod:`app.services.market.market_service`).
 
 Money/pricing field shapes mirror the dict shape the upstream search
 service already produces — kept as a thin BaseModel so downstream

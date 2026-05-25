@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from app.integrations.base import SoldComp
-from app.services import card_search_service, comps_service
+from app.services.catalog import card_search_service
+from app.services.market import sold_comps_service as comps_service
 from tests.conftest import assert_envelope_ok
 
 _COMPOSITE = "pokemontcg:base1-4"

@@ -8,7 +8,7 @@ import pytest
 
 from app.models.card import Card, CardSet
 from app.models.enums import TcgEnum
-from app.services import card_search_service
+from app.services.catalog import card_search_service
 from tests.conftest import (
     assert_envelope_error,
     assert_envelope_ok,

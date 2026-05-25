@@ -1,1 +1,1 @@
-"""Domain services orchestrating ORM operations."""
+"""Business-logic services, grouped by domain."""

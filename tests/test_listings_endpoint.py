@@ -6,7 +6,8 @@ import pytest
 
 from app.integrations import registry as registry_mod
 from app.integrations.base import Listing
-from app.services import card_search_service, listings_service
+from app.services.catalog import card_search_service
+from app.services.market import listings_service
 from tests.conftest import assert_envelope_ok
 
 _COMPOSITE = "pokemontcg:base1-4"

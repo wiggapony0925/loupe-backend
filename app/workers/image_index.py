@@ -19,7 +19,7 @@ from sqlalchemy import select
 
 from app.db import get_sessionmaker
 from app.models.card import Card
-from app.services import fingerprint_service
+from app.services.catalog import card_fingerprint_service as fingerprint_service
 from app.utils.logger import get_logger
 
 logger = get_logger("workers.image_index")

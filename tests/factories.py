@@ -35,11 +35,17 @@ async def make_card_set(db: AsyncSession, *, tcg: TcgEnum = TcgEnum.pokemon) -> 
     return cset
 
 
-async def make_card(db: AsyncSession, *, set_id: uuid.UUID | None = None) -> Card:
+async def make_card(
+    db: AsyncSession,
+    *,
+    set_id: uuid.UUID | None = None,
+    name: str = "Test Card",
+    year: int | None = None,
+) -> Card:
     if set_id is None:
         cset = await make_card_set(db)
         set_id = cset.id
-    card = Card(set_id=set_id, tcg=TcgEnum.pokemon, name="Test Card")
+    card = Card(set_id=set_id, tcg=TcgEnum.pokemon, name=name, year=year)
     db.add(card)
     await db.commit()
     await db.refresh(card)

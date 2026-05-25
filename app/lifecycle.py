@@ -86,7 +86,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # No-op when ``reports_scheduler_enabled`` is false or in tests.
     try:
         from app.config import get_settings
-        from app.services.reports import scheduler_loop
+        from app.services.analytics.reports import scheduler_loop
 
         s = get_settings()
         if s.reports_scheduler_enabled and not s.is_test:

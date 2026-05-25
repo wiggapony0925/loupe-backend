@@ -7,7 +7,8 @@ from typing import Any
 
 import pytest
 
-from app.services import card_search_service, trending_service
+from app.services.catalog import card_search_service
+from app.services.market import trending_service
 
 
 @pytest.fixture(autouse=True)

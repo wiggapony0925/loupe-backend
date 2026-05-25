@@ -14,24 +14,12 @@ from app.http_middleware import register_http_middleware
 from app.lifecycle import lifespan
 from app.observability import init_sentry
 from app.response_envelope import register_envelope_middleware
-from app.routers import (
-    alerts,
-    app_config,
-    auth,
-    cards,
-    collections,
-    grades,
-    market,
-    prices,
-    providers,
-    reports,
-    scanners,
-    scans,
-    sets,
-    system,
-    users,
-    ws,
-)
+from app.routers.analytics import home_feed as home, portfolio_overview as analytics, reports
+from app.routers.auth import auth, users
+from app.routers.catalog import card_sets as sets, cards, providers
+from app.routers.collection import collections, grades, scan_devices as scanners, scans
+from app.routers.market import alerts, market, prices
+from app.routers.ops import app_config, health as system, websockets as ws
 
 
 def create_app() -> FastAPI:
@@ -109,6 +97,8 @@ def create_app() -> FastAPI:
     app.include_router(providers.router, prefix=api_prefix)
     app.include_router(reports.router, prefix=api_prefix)
     app.include_router(app_config.router, prefix=api_prefix)
+    app.include_router(home.router, prefix=api_prefix)
+    app.include_router(analytics.router, prefix=api_prefix)
 
     # WebSockets mount at root.
     app.include_router(ws.router)

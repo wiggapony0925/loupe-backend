@@ -9,7 +9,7 @@ import pytest
 
 from app.models.enums import PriceAlertCondition
 from app.models.price_alert import PriceAlert
-from app.services import price_alert_service
+from app.services.market import price_alert_service
 from tests.conftest import assert_envelope_error, assert_envelope_ok
 from tests.factories import make_card
 

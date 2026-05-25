@@ -3,7 +3,7 @@
 The original ``seed_test_users.py`` creates users, cards, and ``GradedCard``
 rows with ``estimated_value_usd`` populated, but it doesn't write the
 ``metadata['price_history']`` payload that
-``app.services.portfolio_service`` reads to draw the Command Center chart
+``app.services.collection.portfolio_service`` reads to draw the Command Center chart
 and Top Movers sparklines, and it doesn't create a ``Scanner`` row so
 ``GET /v1/scanners/status`` can return a device.
 

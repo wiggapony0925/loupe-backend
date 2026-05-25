@@ -24,7 +24,8 @@ from sqlalchemy.orm import selectinload
 
 from app.db import get_sessionmaker
 from app.models.card import Card
-from app.services import card_resolver_service, card_search_service, price_alert_service
+from app.services.catalog import card_resolver_service, card_search_service
+from app.services.market import price_alert_service
 from app.utils.logger import get_logger
 
 logger = get_logger("workers.price_backfill")

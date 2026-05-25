@@ -31,7 +31,7 @@ import pytest
 from app.models.enums import GradeHouseEnum, ScanStatusEnum
 from app.models.grade import GradedCard
 from app.models.scan import ScanJob
-from app.services.fingerprint_service import FingerprintResult
+from app.services.catalog.card_fingerprint_service import FingerprintResult
 from app.utils.time import utcnow
 from app.workers import scan_processor
 from tests.conftest import assert_envelope_ok
@@ -206,7 +206,7 @@ async def test_scan_dedup_within_window(db_session, created_user):
 
     # Force the resolver to land on our `card` (no real catalog hit).
     async def _fake_resolve(*_args, **_kwargs):
-        from app.services.card_resolver_service import ResolvedCard
+        from app.services.catalog.card_resolver_service import ResolvedCard
 
         return ResolvedCard(
             card_id=card.id,
@@ -288,7 +288,7 @@ async def test_scan_dedup_does_not_apply_after_window(db_session, created_user):
         identified_name = None
 
     async def _fake_resolve(*_args, **_kwargs):
-        from app.services.card_resolver_service import ResolvedCard
+        from app.services.catalog.card_resolver_service import ResolvedCard
 
         return ResolvedCard(
             card_id=card.id,
