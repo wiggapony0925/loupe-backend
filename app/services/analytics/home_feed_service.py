@@ -27,7 +27,9 @@ from app.models.user import User
 from app.services.collection.portfolio_service import _extract_price_history, _value_on
 
 
-def _change_pct_1y(card: Card | None, estimated_value_usd: float | None) -> float | None:
+def _change_pct_1y(
+    card: Card | None, estimated_value_usd: float | None
+) -> float | None:
     """Compute trailing 1-year change % from real price_history.
 
     Returns ``None`` when we don't have enough history to make an honest
@@ -80,7 +82,9 @@ async def top_movers(
         if cid is None or cid in seen:
             continue
         seen.add(cid)
-        est = float(g.estimated_value_usd) if g.estimated_value_usd is not None else None
+        est = (
+            float(g.estimated_value_usd) if g.estimated_value_usd is not None else None
+        )
         change_pct = _change_pct_1y(c, est)
         scored.append(
             {
@@ -91,7 +95,8 @@ async def top_movers(
                 "cardNumber": c.number if c is not None else None,
                 "cardYear": c.year if c is not None else None,
                 "cardTcg": (
-                    c.tcg.value if c is not None and hasattr(c.tcg, "value")
+                    c.tcg.value
+                    if c is not None and hasattr(c.tcg, "value")
                     else (str(c.tcg) if c is not None else None)
                 ),
                 "cardSetName": s.name if s is not None else None,
@@ -135,10 +140,15 @@ async def recent_scans(
                 "grade": float(g.grade) if g.grade is not None else None,
                 "house": (
                     g.house.value if hasattr(g.house, "value") else str(g.house or "")
-                ).lower() or None,
-                "scannedAt": g.graded_at.isoformat() if g.graded_at is not None else None,
+                ).lower()
+                or None,
+                "scannedAt": g.graded_at.isoformat()
+                if g.graded_at is not None
+                else None,
                 "estimatedValueUsd": (
-                    float(g.estimated_value_usd) if g.estimated_value_usd is not None else None
+                    float(g.estimated_value_usd)
+                    if g.estimated_value_usd is not None
+                    else None
                 ),
             }
         )

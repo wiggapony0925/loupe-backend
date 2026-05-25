@@ -116,10 +116,14 @@ async def build_overview(db: AsyncSession, user: User) -> dict[str, Any]:
     grade_buckets: dict[str, int] = dict.fromkeys(_GRADE_BUCKET_ORDER, 0)
 
     for g, c, s in rows:
-        value = float(g.estimated_value_usd) if g.estimated_value_usd is not None else 0.0
+        value = (
+            float(g.estimated_value_usd) if g.estimated_value_usd is not None else 0.0
+        )
         grade = float(g.grade) if g.grade is not None else None
         set_name = (s.name if s is not None else None) or (
-            c.set.name if c is not None and getattr(c, "set", None) is not None else None
+            c.set.name
+            if c is not None and getattr(c, "set", None) is not None
+            else None
         )
         year = c.year if c is not None and c.year is not None else None
         holdings.append(
@@ -181,7 +185,9 @@ async def build_overview(db: AsyncSession, user: User) -> dict[str, Any]:
                 "setName": name,
                 "count": len(items),
                 "totalValueUsd": round(sub_total, 2),
-                "sharePct": round((sub_total / total_value) * 100, 2) if total_value else 0.0,
+                "sharePct": round((sub_total / total_value) * 100, 2)
+                if total_value
+                else 0.0,
                 "changePct1y": change_pct,
             }
         )
@@ -246,7 +252,11 @@ async def build_overview(db: AsyncSession, user: User) -> dict[str, Any]:
         cur["count"] += 1
         cur["valueUsd"] += h["valueUsd"]
     year_distribution = [
-        {"decade": int(d), "count": int(v["count"]), "valueUsd": round(v["valueUsd"], 2)}
+        {
+            "decade": int(d),
+            "count": int(v["count"]),
+            "valueUsd": round(v["valueUsd"], 2),
+        }
         for d, v in sorted(decade_buckets.items())
     ]
 

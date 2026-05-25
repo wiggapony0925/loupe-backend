@@ -14,7 +14,9 @@ async def test_apple_sign_in_creates_user(client, monkeypatch):
             sub="apple-sub-1", email="alice@example.com", email_verified=True
         )
 
-    monkeypatch.setattr("app.routers.auth.auth.verify_apple_identity_token", fake_verify)
+    monkeypatch.setattr(
+        "app.routers.auth.auth.verify_apple_identity_token", fake_verify
+    )
 
     resp = await client.post(
         "/v1/auth/apple",
@@ -54,7 +56,9 @@ async def test_refresh_token_rotation(client, monkeypatch):
             sub="apple-refresh-x", email="x@example.com", email_verified=True
         )
 
-    monkeypatch.setattr("app.routers.auth.auth.verify_apple_identity_token", fake_verify)
+    monkeypatch.setattr(
+        "app.routers.auth.auth.verify_apple_identity_token", fake_verify
+    )
 
     first = await client.post(
         "/v1/auth/apple", json={"identity_token": "fake-token-1234567890"}

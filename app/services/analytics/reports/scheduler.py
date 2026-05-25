@@ -162,7 +162,10 @@ async def _existing_report_keys(
             select(UserReport.user_id, UserReport.period, UserReport.period_start)
         )
     ).all()
-    return {(str(uid), p.value if hasattr(p, "value") else str(p), ps) for uid, p, ps in rows}
+    return {
+        (str(uid), p.value if hasattr(p, "value") else str(p), ps)
+        for uid, p, ps in rows
+    }
 
 
 # ── advisory lock ─────────────────────────────────────────────────────
@@ -184,7 +187,9 @@ async def _scheduler_lock(db: AsyncSession) -> AsyncIterator[bool]:
         yield True
         return
     got = (
-        await db.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": _ADVISORY_LOCK_KEY})
+        await db.execute(
+            text("SELECT pg_try_advisory_lock(:k)"), {"k": _ADVISORY_LOCK_KEY}
+        )
     ).scalar_one()
     if not got:
         yield False
@@ -251,7 +256,10 @@ async def run_close_cycle(*, now: datetime | None = None) -> dict[str, int]:
                     counts["failed"] += 1
                     _log.warning(
                         "auto-generate monthly failed user=%s %04d-%02d: %s",
-                        user.id, year, month, exc,
+                        user.id,
+                        year,
+                        month,
+                        exc,
                     )
 
         # Yearly sweep.
@@ -282,13 +290,18 @@ async def run_close_cycle(*, now: datetime | None = None) -> dict[str, int]:
                     counts["failed"] += 1
                     _log.warning(
                         "auto-generate yearly failed user=%s %04d: %s",
-                        user.id, year, exc,
+                        user.id,
+                        year,
+                        exc,
                     )
 
     if counts["generated"] or counts["failed"]:
         _log.info(
             "reports scheduler cycle: checked=%d generated=%d skipped=%d failed=%d",
-            counts["checked"], counts["generated"], counts["skipped"], counts["failed"],
+            counts["checked"],
+            counts["generated"],
+            counts["skipped"],
+            counts["failed"],
         )
     return counts
 

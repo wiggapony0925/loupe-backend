@@ -174,11 +174,17 @@ def test_iter_closed_monthly_periods():
     from app.services.analytics.reports.scheduler import iter_closed_monthly_periods
 
     # Mid-May 2026 → newest closed month is April 2026.
-    out = list(iter_closed_monthly_periods(datetime(2026, 5, 21, tzinfo=UTC), lookback_months=4))
+    out = list(
+        iter_closed_monthly_periods(
+            datetime(2026, 5, 21, tzinfo=UTC), lookback_months=4
+        )
+    )
     assert out == [(2026, 4), (2026, 3), (2026, 2), (2026, 1)]
 
     # Early January 2026 → newest closed month wraps to December 2025.
-    out = list(iter_closed_monthly_periods(datetime(2026, 1, 3, tzinfo=UTC), lookback_months=3))
+    out = list(
+        iter_closed_monthly_periods(datetime(2026, 1, 3, tzinfo=UTC), lookback_months=3)
+    )
     assert out == [(2025, 12), (2025, 11), (2025, 10)]
 
 
@@ -187,7 +193,9 @@ def test_iter_closed_yearly_periods():
 
     from app.services.analytics.reports.scheduler import iter_closed_yearly_periods
 
-    out = list(iter_closed_yearly_periods(datetime(2026, 5, 21, tzinfo=UTC), lookback_years=3))
+    out = list(
+        iter_closed_yearly_periods(datetime(2026, 5, 21, tzinfo=UTC), lookback_years=3)
+    )
     assert out == [2025, 2024, 2023]
 
 
@@ -211,7 +219,9 @@ def test_next_close_helpers():
 @pytest.mark.asyncio
 async def test_upcoming_endpoint(client, auth_headers):
     """`/v1/reports/upcoming` returns the next monthly + yearly close times."""
-    body = assert_envelope_ok(await client.get("/v1/reports/upcoming", headers=auth_headers))
+    body = assert_envelope_ok(
+        await client.get("/v1/reports/upcoming", headers=auth_headers)
+    )
     assert isinstance(body, list) and len(body) == 2
     kinds = {row["period"] for row in body}
     assert kinds == {"monthly", "yearly"}
@@ -249,7 +259,9 @@ async def test_run_close_cycle_materialises_past_periods(db_session, created_use
     # Backdate the user so they "existed" for the periods we'll close.
     long_ago = datetime.now(UTC) - timedelta(days=400)
     await db_session.execute(
-        User.__table__.update().where(User.id == created_user.id).values(created_at=long_ago)
+        User.__table__.update()
+        .where(User.id == created_user.id)
+        .values(created_at=long_ago)
     )
 
     card = await make_card(db_session)
@@ -281,9 +293,13 @@ async def test_run_close_cycle_materialises_past_periods(db_session, created_use
 
     # Verify rows actually landed.
     rows = (
-        await db_session.execute(
-            select(UserReport).where(UserReport.user_id == created_user.id)
+        (
+            await db_session.execute(
+                select(UserReport).where(UserReport.user_id == created_user.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == first["generated"]
     assert all(r.status.value == "ready" for r in rows)
