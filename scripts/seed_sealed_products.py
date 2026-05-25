@@ -347,7 +347,11 @@ async def main() -> None:
         await session.commit()
     logger.info(
         "sealed seed complete",
-        extra={"created": created, "updated": updated, "total": len(SEEDS)},
+        extra={
+            "seeded_created": created,
+            "seeded_updated": updated,
+            "seeded_total": len(SEEDS),
+        },
     )
     print(
         f"Seeded sealed products — created={created} updated={updated} total={len(SEEDS)}"
