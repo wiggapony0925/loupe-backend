@@ -238,6 +238,7 @@ async def create(
         scan_job_id=payload.scan_job_id,
         grade=payload.grade,
         house=payload.house,
+        condition=payload.condition,
         subgrades=payload.subgrades,
         estimated_value_usd=payload.estimated_value_usd,
         purchase_price_usd=payload.purchase_price_usd,
@@ -354,6 +355,8 @@ async def update(
         row.grade = payload.grade
     if payload.house is not None:
         row.house = payload.house
+    if payload.condition is not None:
+        row.condition = payload.condition
     if payload.subgrades is not None:
         row.subgrades = payload.subgrades
     if payload.notes is not None:

@@ -27,6 +27,22 @@ class GradeHouseEnum(str, enum.Enum):
     loupe = "loupe"
 
 
+class RawConditionEnum(str, enum.Enum):
+    """PSA-style condition grades for RAW (ungraded) cards.
+
+    Optional on every :class:`~app.models.grade.GradedCard` row — only
+    meaningful when the card has not been slabbed by a third-party grading
+    house. Mirrors the standard TCG/sports vocabulary collectors and
+    eBay use so per-condition pricing maps directly.
+    """
+
+    nm = "nm"  # Near Mint
+    lp = "lp"  # Lightly Played
+    mp = "mp"  # Moderately Played
+    hp = "hp"  # Heavily Played
+    dmg = "dmg"  # Damaged
+
+
 class ScanStatusEnum(str, enum.Enum):
     """Lifecycle states of a :class:`~app.models.scan.ScanJob`."""
 

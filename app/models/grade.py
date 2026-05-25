@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.types import JsonCol, UuidCol
-from app.models.enums import GradeHouseEnum
+from app.models.enums import GradeHouseEnum, RawConditionEnum
 
 
 class GradedCard(Base):
@@ -45,6 +45,14 @@ class GradedCard(Base):
         Enum(GradeHouseEnum, name="grade_house_enum"),
         default=GradeHouseEnum.loupe,
         nullable=False,
+    )
+    # PSA-style condition for RAW (ungraded) cards. Only meaningful when
+    # `house == loupe` (our placeholder for "raw / not slabbed"). Nullable
+    # so legacy rows + slabbed cards stay valid; UI hides the chip when
+    # the card has a third-party grade since the slab already says it.
+    condition: Mapped[RawConditionEnum | None] = mapped_column(
+        Enum(RawConditionEnum, name="raw_condition_enum"),
+        nullable=True,
     )
     subgrades: Mapped[dict | None] = mapped_column(JsonCol, nullable=True)
     estimated_value_usd: Mapped[Decimal | None] = mapped_column(

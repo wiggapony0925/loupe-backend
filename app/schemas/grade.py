@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.models.enums import GradeHouseEnum
+from app.models.enums import GradeHouseEnum, RawConditionEnum
 
 # Sanity bounds for user-supplied numbers / dates. Anything outside these
 # almost certainly means a typo or a copy-paste error from a different
@@ -38,6 +38,7 @@ class GradedCardRead(BaseModel):
     scan_job_id: uuid.UUID | None = None
     grade: Decimal
     house: GradeHouseEnum
+    condition: RawConditionEnum | None = None
     subgrades: dict | None = None
     estimated_value_usd: Decimal | None = None
     # Cost basis (user-supplied). `null` means "no cost recorded" —
@@ -81,6 +82,13 @@ class GradedCardCreate(BaseModel):
     )
     grade: Decimal = Field(..., ge=Decimal("0"), le=Decimal("10"))
     house: GradeHouseEnum = GradeHouseEnum.loupe
+    condition: RawConditionEnum | None = Field(
+        None,
+        description=(
+            "PSA-style raw condition (nm/lp/mp/hp/dmg). Only meaningful "
+            "for ungraded (`house=loupe`) cards; ignored for slabbed grades."
+        ),
+    )
     subgrades: dict | None = None
     estimated_value_usd: Decimal | None = Field(
         None, ge=Decimal("0"), le=_MAX_VALUE_USD
@@ -167,6 +175,7 @@ class GradedCardUpdate(BaseModel):
 
     grade: Decimal | None = Field(None, ge=Decimal("0"), le=Decimal("10"))
     house: GradeHouseEnum | None = None
+    condition: RawConditionEnum | None = None
     subgrades: dict | None = None
     notes: str | None = Field(None, max_length=2000)
     estimated_value_usd: Decimal | None = Field(
