@@ -73,10 +73,14 @@ async def search_catalog(
         stmt = stmt.where(SealedProduct.product_type == product_type)
     # Newest releases first so the home/discovery surfaces feel fresh,
     # falling back to name for deterministic paging on undated rows.
-    stmt = stmt.order_by(
-        SealedProduct.release_date.desc().nulls_last(),
-        SealedProduct.name.asc(),
-    ).offset(cursor).limit(limit)
+    stmt = (
+        stmt.order_by(
+            SealedProduct.release_date.desc().nulls_last(),
+            SealedProduct.name.asc(),
+        )
+        .offset(cursor)
+        .limit(limit)
+    )
     rows = (await db.execute(stmt)).scalars().all()
     return [SealedProductRead.model_validate(r) for r in rows]
 

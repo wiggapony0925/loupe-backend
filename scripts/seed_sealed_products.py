@@ -349,7 +349,9 @@ async def main() -> None:
         "sealed seed complete",
         extra={"created": created, "updated": updated, "total": len(SEEDS)},
     )
-    print(f"Seeded sealed products — created={created} updated={updated} total={len(SEEDS)}")
+    print(
+        f"Seeded sealed products — created={created} updated={updated} total={len(SEEDS)}"
+    )
 
 
 if __name__ == "__main__":

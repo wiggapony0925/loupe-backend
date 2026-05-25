@@ -82,9 +82,7 @@ class SealedHoldingCreate(BaseModel):
 
     product_id: uuid.UUID
     quantity: int = Field(1, ge=1, le=10_000)
-    purchase_price_usd: Decimal | None = Field(
-        None, ge=Decimal("0"), le=_MAX_VALUE_USD
-    )
+    purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"), le=_MAX_VALUE_USD)
     purchase_date: date | None = None
     estimated_value_usd: Decimal | None = Field(
         None, ge=Decimal("0"), le=_MAX_VALUE_USD
@@ -118,9 +116,7 @@ class SealedHoldingUpdate(BaseModel):
     """
 
     quantity: int | None = Field(None, ge=1, le=10_000)
-    purchase_price_usd: Decimal | None = Field(
-        None, ge=Decimal("0"), le=_MAX_VALUE_USD
-    )
+    purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"), le=_MAX_VALUE_USD)
     purchase_date: date | None = None
     estimated_value_usd: Decimal | None = Field(
         None, ge=Decimal("0"), le=_MAX_VALUE_USD

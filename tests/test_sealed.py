@@ -90,9 +90,7 @@ async def test_create_list_delete_holding_roundtrip(
         "purchase_date": "2024-01-15",
         "notes": "Costco snipe",
     }
-    resp = await client.post(
-        "/v1/sealed-holdings", json=payload, headers=auth_headers
-    )
+    resp = await client.post("/v1/sealed-holdings", json=payload, headers=auth_headers)
     data = assert_envelope_ok(resp, expected_status=201)
     holding_id = data["id"]
     assert data["product_id"] == str(product.id)
@@ -119,9 +117,7 @@ async def test_update_holding_changes_quantity_and_marks_opened(
     client, db_session, created_user, auth_headers
 ):
     product = await _make_product(db_session)
-    holding = SealedHolding(
-        user_id=created_user.id, product_id=product.id, quantity=1
-    )
+    holding = SealedHolding(user_id=created_user.id, product_id=product.id, quantity=1)
     db_session.add(holding)
     await db_session.commit()
     await db_session.refresh(holding)
