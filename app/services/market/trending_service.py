@@ -49,12 +49,19 @@ from app.services.catalog.card_search_service import (
 
 logger = logging.getLogger(__name__)
 
-MAX_LIMIT = 48
+MAX_LIMIT = 100
 DEFAULT_LIMIT = 24
 
-# Per-provider trending queries. Chosen for: (a) always-popular cards
-# that yield rich image data, (b) low upstream cost, (c) stability.
-POKEMON_TRENDING_QUERY = "name:charizard*"
+# Per-provider trending queries. Chosen for: (a) high variety so the
+# rail doesn't look like one card type, (b) low upstream cost, (c)
+# alignment with what collectors actually chase right now.
+#
+# Pokémon TCG has no native "trending" sort, so we proxy it with the
+# modern chase subtypes (ex / VMAX / VSTAR). These are the cards
+# actually trading at premium right now and span dozens of Pokémon
+# (Charizard, Pikachu, Mew, Gengar, Eevee, Lugia, etc.) instead of
+# returning 60 Charizard variants in a row.
+POKEMON_TRENDING_QUERY = "(subtypes:ex OR subtypes:VMAX OR subtypes:VSTAR)"
 SCRYFALL_TRENDING_QUERY = "is:booster game:paper"
 
 # Hardcoded fallback ids — must resolve via ``get_card`` if all live
