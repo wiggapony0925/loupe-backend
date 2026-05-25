@@ -47,22 +47,22 @@ def upgrade() -> None:
     dialect = bind.dialect.name
 
     if dialect == "postgresql":
-        sa.Enum(
+        # Use postgresql.ENUM (not generic sa.Enum) so create_type=False is
+        # honored during _on_table_create. The previous attempt with sa.Enum
+        # silently re-issued CREATE TYPE during create_table, crashing with
+        # DuplicateObject on retries where the type already exists (e.g.
+        # after a partially-succeeded prior migration left the type in
+        # place but rolled back the tables).
+        postgresql.ENUM(
             *_TYPE_VALUES,
             name="sealed_product_type_enum",
             create_type=True,
         ).create(bind, checkfirst=True)
-        product_type_col = sa.Enum(
+        product_type_col = postgresql.ENUM(
             *_TYPE_VALUES,
             name="sealed_product_type_enum",
             create_type=False,
         )
-        # Use the PG-native ENUM type so ``create_type=False`` is honored
-        # during ``_on_table_create``. The generic ``sa.Enum`` with
-        # ``create_type=False`` does NOT propagate the flag to the dialect
-        # impl, so on prod (where ``tcg_enum`` was created by an earlier
-        # migration) it would still attempt ``CREATE TYPE tcg_enum`` and
-        # crash with DuplicateObject. ``postgresql.ENUM`` honors the flag.
         tcg_col = postgresql.ENUM(
             "pokemon",
             "magic",
@@ -219,6 +219,6 @@ def downgrade() -> None:
 
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
-        sa.Enum(*_TYPE_VALUES, name="sealed_product_type_enum").drop(
+        postgresql.ENUM(*_TYPE_VALUES, name="sealed_product_type_enum").drop(
             bind, checkfirst=True
         )
