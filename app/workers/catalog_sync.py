@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.clients import pokemon_tcg, scryfall, ygoprodeck
+from app.integrations._http import pokemon_tcg, scryfall, ygoprodeck
 from app.db import get_sessionmaker
 from app.models.card import CardSet
 from app.models.enums import TcgEnum

@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
-from app.clients.redis_client import get_redis
+from app.platform.redis_client import get_redis
 from app.integrations.base import BaseProvider, SoldComp, parse_grade
 from app.utils.logger import get_logger
 

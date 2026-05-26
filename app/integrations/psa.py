@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.clients.redis_client import get_redis
+from app.platform.redis_client import get_redis
 from app.config import get_settings
 from app.integrations.base import BaseProvider
 from app.utils.logger import get_logger

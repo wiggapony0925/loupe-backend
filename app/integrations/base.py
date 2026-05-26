@@ -1,9 +1,11 @@
 """Common base for real data providers.
 
 * Module-level shared :class:`httpx.AsyncClient` (lazy, async-lock guarded).
-* Lightweight value dataclasses for cross-provider normalization
-  (``Listing`` / ``SoldComp`` / ``PopulationReport`` / ``MarketPrice``).
 * :class:`BaseProvider` ABC with safe no-op defaults + retry helper.
+* Value dataclasses (``Listing`` / ``SoldComp`` / ``PopulationReport``
+  / ``MarketPrice``) are re-exported from :mod:`app.domain.market` so
+  legacy ``from app.integrations.base import Listing`` keeps working
+  while new code can import the canonical home directly.
 
 Every public provider method MUST swallow upstream errors and return
 empty/``None`` so callers never see 5xx.
@@ -14,12 +16,23 @@ from __future__ import annotations
 import asyncio
 import re
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import httpx
 
+from app.domain.market import Listing, MarketPrice, PopulationReport, SoldComp
 from app.utils.logger import get_logger
+
+__all__ = [
+    "BaseProvider",
+    "Listing",
+    "MarketPrice",
+    "PopulationReport",
+    "SoldComp",
+    "close_http_client",
+    "get_http_client",
+    "parse_grade",
+]
 
 logger = get_logger("integrations.base")
 
@@ -57,74 +70,7 @@ async def close_http_client() -> None:
         _client = None
 
 
-# ----------------------------------------------------------------- shapes
-
-
-@dataclass
-class Listing:
-    """Live for-sale listing."""
-
-    source: str
-    title: str
-    price: float
-    currency: str = "USD"
-    url: str = ""
-    condition: str | None = None
-    image_url: str | None = None
-    is_auction: bool = False
-    time_left_seconds: int | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class SoldComp:
-    """One completed sale."""
-
-    source: str
-    title: str
-    price: float
-    sold_at: str  # ISO 8601 UTC, ends with ``Z``
-    currency: str = "USD"
-    condition: str | None = None
-    grade: str | None = None
-    house: str | None = None
-    url: str | None = None
-    image_url: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class PopulationReport:
-    """Population for a single (house, grade) tier."""
-
-    source: str
-    house: str
-    grade: str
-    population: int
-    pop_higher: int | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class MarketPrice:
-    """Snapshot price for a product (low/mid/high/market in USD)."""
-
-    source: str
-    market: float | None = None
-    low: float | None = None
-    mid: float | None = None
-    high: float | None = None
-    currency: str = "USD"
-    extras: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+# Domain shapes live in app.domain.market; re-exported above for legacy callers.
 
 
 # ----------------------------------------------------------------- helpers

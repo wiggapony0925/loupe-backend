@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.clients import pokemon_tcg
+from app.integrations._http import pokemon_tcg
 from app.integrations.base import BaseProvider, MarketPrice
 from app.utils.logger import get_logger
 

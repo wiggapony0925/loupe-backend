@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients.s3 import get_s3_client
+from app.platform.s3 import get_s3_client
 from app.config import get_settings
 from app.models.enums import ScanStatusEnum
 from app.models.scan import ScanJob

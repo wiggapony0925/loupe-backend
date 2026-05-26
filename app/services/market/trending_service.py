@@ -36,7 +36,7 @@ from typing import Any
 import httpx
 
 from app.platform.cache_config import TRENDING_TTL
-from app.clients import pokemon_tcg
+from app.integrations._http import pokemon_tcg
 from app.services.catalog import card_search_service
 from app.services.catalog.card_search_service import (
     _cache_get,

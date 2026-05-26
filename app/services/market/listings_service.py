@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.clients.redis_client import get_redis
+from app.platform.redis_client import get_redis
 from app.integrations import get_registry
 from app.services.catalog import card_search_service
 from app.utils.logger import get_logger

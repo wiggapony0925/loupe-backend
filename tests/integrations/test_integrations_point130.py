@@ -35,7 +35,7 @@ async def test_point130_parse(monkeypatch):
     async def _noop(*_a, **_kw):
         return None
 
-    monkeypatch.setattr("app.clients.redis_client.get_redis", lambda: _FakeRedis())
+    monkeypatch.setattr("app.platform.redis_client.get_redis", lambda: _FakeRedis())
     p = Point130Provider()
     with respx.mock(assert_all_called=False) as router:
         router.get(url__startswith="https://130point.com/sales").mock(
@@ -57,7 +57,7 @@ class _FakeRedis:
 
 @pytest.mark.asyncio
 async def test_point130_scrape_failure_returns_empty(monkeypatch):
-    monkeypatch.setattr("app.clients.redis_client.get_redis", lambda: _FakeRedis())
+    monkeypatch.setattr("app.platform.redis_client.get_redis", lambda: _FakeRedis())
     p = Point130Provider()
     with respx.mock(assert_all_called=False) as router:
         router.get(url__startswith="https://130point.com/sales").mock(

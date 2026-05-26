@@ -1,0 +1,208 @@
+{
+  "/health": [
+    "GET"
+  ],
+  "/metrics": [
+    "GET"
+  ],
+  "/v1/alerts": [
+    "GET",
+    "POST"
+  ],
+  "/v1/alerts/{alert_id}": [
+    "DELETE"
+  ],
+  "/v1/analytics/overview": [
+    "GET"
+  ],
+  "/v1/app/config": [
+    "GET"
+  ],
+  "/v1/auth/apple": [
+    "POST"
+  ],
+  "/v1/auth/dev-login": [
+    "POST"
+  ],
+  "/v1/auth/google": [
+    "POST"
+  ],
+  "/v1/auth/login": [
+    "POST"
+  ],
+  "/v1/auth/refresh": [
+    "POST"
+  ],
+  "/v1/auth/register": [
+    "POST"
+  ],
+  "/v1/cards": [
+    "GET"
+  ],
+  "/v1/cards/admin/ocr/metrics": [
+    "GET"
+  ],
+  "/v1/cards/identify": [
+    "POST"
+  ],
+  "/v1/cards/identify/text": [
+    "POST"
+  ],
+  "/v1/cards/identify/{identification_id}/feedback": [
+    "POST"
+  ],
+  "/v1/cards/resolve": [
+    "POST"
+  ],
+  "/v1/cards/search": [
+    "GET"
+  ],
+  "/v1/cards/trending": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}/canonical": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}/comps": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}/grade-summary": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}/listings": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}/market": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}/marketplace-prices": [
+    "GET"
+  ],
+  "/v1/cards/{card_id}/prices": [
+    "GET"
+  ],
+  "/v1/collections": [
+    "GET",
+    "POST"
+  ],
+  "/v1/collections/{collection_id}": [
+    "DELETE",
+    "PATCH"
+  ],
+  "/v1/collections/{collection_id}/items": [
+    "GET",
+    "POST"
+  ],
+  "/v1/collections/{collection_id}/items/{graded_card_id}": [
+    "DELETE"
+  ],
+  "/v1/grades": [
+    "GET",
+    "POST"
+  ],
+  "/v1/grades/history": [
+    "GET"
+  ],
+  "/v1/grades/sparklines": [
+    "GET"
+  ],
+  "/v1/grades/summary": [
+    "GET"
+  ],
+  "/v1/grades/{grade_id}": [
+    "DELETE",
+    "GET",
+    "PATCH"
+  ],
+  "/v1/home/feed": [
+    "GET"
+  ],
+  "/v1/market/indices/{index_id}/history": [
+    "GET"
+  ],
+  "/v1/me": [
+    "GET",
+    "PATCH"
+  ],
+  "/v1/me/settings": [
+    "GET",
+    "PATCH"
+  ],
+  "/v1/prices": [
+    "GET"
+  ],
+  "/v1/providers/psa/cert/{cert_no}": [
+    "GET"
+  ],
+  "/v1/providers/status": [
+    "GET"
+  ],
+  "/v1/reports": [
+    "GET",
+    "POST"
+  ],
+  "/v1/reports/upcoming": [
+    "GET"
+  ],
+  "/v1/reports/{report_id}": [
+    "GET"
+  ],
+  "/v1/reports/{report_id}/download": [
+    "GET"
+  ],
+  "/v1/reports/{report_id}/file": [
+    "GET"
+  ],
+  "/v1/scanners": [
+    "GET",
+    "POST"
+  ],
+  "/v1/scanners/status": [
+    "GET"
+  ],
+  "/v1/scanners/{scanner_id}": [
+    "DELETE",
+    "GET",
+    "PATCH"
+  ],
+  "/v1/scanners/{scanner_id}/heartbeat": [
+    "POST"
+  ],
+  "/v1/scans": [
+    "GET",
+    "POST"
+  ],
+  "/v1/scans/{job_id}": [
+    "DELETE",
+    "GET"
+  ],
+  "/v1/scans/{job_id}/complete": [
+    "POST"
+  ],
+  "/v1/sealed-holdings": [
+    "GET",
+    "POST"
+  ],
+  "/v1/sealed-holdings/{holding_id}": [
+    "DELETE",
+    "PATCH"
+  ],
+  "/v1/sealed/search": [
+    "GET"
+  ],
+  "/v1/sealed/{product_id}": [
+    "GET"
+  ],
+  "/v1/sets": [
+    "GET"
+  ],
+  "/v1/sets/progress": [
+    "GET"
+  ],
+  "/version": [
+    "GET"
+  ]
+}

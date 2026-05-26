@@ -116,7 +116,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
         # Close shared HTTP and Redis clients.
         with contextlib.suppress(Exception):
-            from app.clients.redis_client import close_redis
+            from app.platform.redis_client import close_redis
 
             await close_redis()
 

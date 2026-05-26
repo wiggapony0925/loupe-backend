@@ -27,7 +27,7 @@ async def startup(ctx: dict[str, Any]) -> None:
 
 async def shutdown(ctx: dict[str, Any]) -> None:
     """arq shutdown hook — close shared resources."""
-    from app.clients.redis_client import close_redis
+    from app.platform.redis_client import close_redis
     from app.db import reset_engine
 
     await reset_engine()

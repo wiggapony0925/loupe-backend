@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.platform.cache_config import SCAN_PUBSUB_CHANNEL
-from app.clients.redis_client import get_redis
+from app.platform.redis_client import get_redis
 from app.db import get_sessionmaker
 from app.models.card import Card
 from app.models.enums import GradeHouseEnum, ScanStatusEnum, TcgEnum

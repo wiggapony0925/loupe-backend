@@ -32,8 +32,8 @@ from app.platform.cache_config import (
     PRICE_HISTORY_TTL,
     SET_LIST_TTL,
 )
-from app.clients import pokemon_tcg, scryfall, ygoprodeck
-from app.clients.redis_client import get_redis
+from app.integrations._http import pokemon_tcg, scryfall, ygoprodeck
+from app.platform.redis_client import get_redis
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 

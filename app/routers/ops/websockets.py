@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.auth.jwt import verify_token
 from app.platform.cache_config import SCAN_PUBSUB_CHANNEL
-from app.clients.redis_client import get_redis
+from app.platform.redis_client import get_redis
 from app.db import get_sessionmaker
 from app.models.user import User
 from app.utils.logger import get_logger

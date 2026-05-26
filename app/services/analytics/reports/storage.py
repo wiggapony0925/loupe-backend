@@ -1,6 +1,6 @@
 """Object storage helpers for user-facing reports (PDF statements).
 
-Reuses the existing S3-compatible client (``app.clients.s3``) which
+Reuses the existing S3-compatible client (``app.platform.s3``) which
 already supports real S3, MinIO, and an in-memory stub for tests.
 Reports live under their own logical bucket (``settings.reports_bucket``
 falls back to ``settings.s3_bucket``) and a deterministic key shape so
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 
-from app.clients.s3 import get_s3_client
+from app.platform.s3 import get_s3_client
 from app.config import get_settings
 from app.utils.logger import get_logger
 

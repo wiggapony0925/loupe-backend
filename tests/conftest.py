@@ -34,7 +34,7 @@ reload_settings()
 
 # Drop any S3 client cached at import time so it picks up the test config.
 try:
-    from app.clients.s3 import reset_s3_client
+    from app.platform.s3 import reset_s3_client
 
     reset_s3_client()
 except Exception:
