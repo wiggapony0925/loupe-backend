@@ -87,3 +87,48 @@ tests/         pytest suite (sqlite + ASGI)
 
 `Dockerfile` builds the API container; `start.sh` runs `uvicorn` after applying
 migrations. Workers run from the same image with `arq app.worker.WorkerSettings`.
+
+## Card identification (OCR)
+
+`POST /v1/cards/identify` accepts a multipart image upload and returns a
+ranked list of catalog candidates plus an `identification_id` the client
+uses to attach thumbs-up/down feedback (`POST /v1/cards/identify/{id}/feedback`).
+
+### Provider selection
+
+Set the `OCR_PROVIDER` env var:
+
+| Value           | Behaviour                                                     |
+| --------------- | ------------------------------------------------------------- |
+| `mock`          | Default. Returns canned text for registered fixtures, empty otherwise. Zero cost, used by CI and the test suite. |
+| `google_vision` | Real Google Cloud Vision (DOCUMENT_TEXT_DETECTION). Requires `GOOGLE_APPLICATION_CREDENTIALS` to point at a service-account JSON. |
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=secrets/gcp-sa.json
+export OCR_PROVIDER=google_vision
+```
+
+Per-call cost (Vision Text Detection) is ~$0.0015 (first 1k/month free).
+Each `CardIdentification` row records `cost_usd` so `GET
+/v1/cards/admin/ocr/metrics?days=30` can report a running total.
+
+### Feedback loop
+
+When a user confirms or corrects a candidate, an `IdentificationFeedback`
+row is persisted. The next identification with a similar parsed title
+applies a popularity prior to candidates that recent users confirmed
+correct (window: `OCR_FEEDBACK_BOOST_WINDOW_DAYS`, default 30). No model
+training; the feedback acts purely as a re-rank boost so the loop is
+safe to enable without retrain-on-write infra.
+
+### Evaluation harness
+
+`scripts/ocr_eval.py` downloads a curated fixture set (`tests/fixtures/ocr/fixtures.json`),
+runs the full pipeline through whichever provider is configured, and prints
+top-1 / top-3 accuracy, latency p50/p95, and estimated cost. A CSV
+`ocr_eval_<provider>.csv` is written for spreadsheet drill-down.
+
+```bash
+make ocr-eval                         # uses the configured provider
+make ocr-eval PROVIDER=google_vision  # one-off override
+```

@@ -20,6 +20,7 @@ from app.models.enums import (
 )
 from app.models.fingerprint import Fingerprint
 from app.models.grade import GradedCard
+from app.models.identification import CardIdentification, IdentificationFeedback
 from app.models.price import PriceSnapshot
 from app.models.price_alert import PriceAlert
 from app.models.scan import ScanJob
@@ -33,12 +34,14 @@ __all__ = [
     "AuditLog",
     "Card",
     "CardExternalRef",
+    "CardIdentification",
     "CardSet",
     "Collection",
     "CollectionItem",
     "Fingerprint",
     "GradeHouseEnum",
     "GradedCard",
+    "IdentificationFeedback",
     "PriceAlert",
     "PriceAlertCondition",
     "PriceSnapshot",

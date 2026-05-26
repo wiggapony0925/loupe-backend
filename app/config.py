@@ -128,6 +128,38 @@ class Settings(BaseSettings):
     http_max_connections: int = 20
     http_max_keepalive: int = 10
 
+    # --- OCR / card identification pipeline ---
+    # Provider selection. ``mock`` returns canned text so dev and CI never
+    # touch a paid API; ``google_vision`` calls Cloud Vision text detection
+    # ($1.50 per 1k requests after the 1k/mo free tier — leave disabled by
+    # default to avoid surprise bills).
+    ocr_provider: Literal["mock", "google_vision"] = "mock"
+    # Which Vision feature to use. DOCUMENT_TEXT_DETECTION is tuned for
+    # dense, structured text (card faces fit that profile better than
+    # photos of street signs) and returns block/paragraph structure we
+    # can exploit when ranking candidates.
+    ocr_google_feature: Literal["TEXT_DETECTION", "DOCUMENT_TEXT_DETECTION"] = (
+        "DOCUMENT_TEXT_DETECTION"
+    )
+    # Hard timeout for any single OCR call. We never let one slow image
+    # block a request — on timeout we fall through to phash-only matching.
+    ocr_timeout_ms: int = 4_000
+    # How many ranked candidates to return on POST /v1/cards/identify.
+    ocr_max_candidates: int = 5
+    # Sliding window for feedback-driven re-rank boosts. Recent correct
+    # confirmations on similar OCR text gently lift those candidates.
+    ocr_feedback_boost_window_days: int = 30
+    # Maximum bytes accepted on the identify endpoint. Vision API caps at
+    # 20 MB; we cap lower to keep round-trip cost predictable.
+    ocr_max_image_bytes: int = 8_000_000
+    # Preprocess: resize so the longest edge is <= this before sending to
+    # the provider. Vision's docs recommend 1024px+ for OCR; oversize images
+    # waste bytes without accuracy gain.
+    ocr_preprocess_long_edge_px: int = 1600
+    # Estimated cost per Google Vision text request, surfaced in admin
+    # metrics for spend visibility. Override per pricing tier if needed.
+    ocr_google_cost_usd_per_call: float = 0.0015
+
     # --- Observability (optional; no-ops when DSN is missing) ---
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.1

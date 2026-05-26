@@ -1,0 +1,80 @@
+[
+  {
+    "id": "pokemon-charizard-base-4",
+    "tcg": "pokemon",
+    "image_url": "https://images.pokemontcg.io/base1/4_hires.png",
+    "expected_upstream_id": "pokemontcg:base1-4",
+    "expected_name": "Charizard",
+    "expected_set_code": "BS",
+    "expected_number": "4/102"
+  },
+  {
+    "id": "pokemon-pikachu-base-58",
+    "tcg": "pokemon",
+    "image_url": "https://images.pokemontcg.io/base1/58_hires.png",
+    "expected_upstream_id": "pokemontcg:base1-58",
+    "expected_name": "Pikachu",
+    "expected_set_code": "BS",
+    "expected_number": "58/102"
+  },
+  {
+    "id": "pokemon-blastoise-base-2",
+    "tcg": "pokemon",
+    "image_url": "https://images.pokemontcg.io/base1/2_hires.png",
+    "expected_upstream_id": "pokemontcg:base1-2",
+    "expected_name": "Blastoise",
+    "expected_set_code": "BS",
+    "expected_number": "2/102"
+  },
+  {
+    "id": "pokemon-venusaur-base-15",
+    "tcg": "pokemon",
+    "image_url": "https://images.pokemontcg.io/base1/15_hires.png",
+    "expected_upstream_id": "pokemontcg:base1-15",
+    "expected_name": "Venusaur",
+    "expected_set_code": "BS",
+    "expected_number": "15/102"
+  },
+  {
+    "id": "pokemon-mewtwo-base-10",
+    "tcg": "pokemon",
+    "image_url": "https://images.pokemontcg.io/base1/10_hires.png",
+    "expected_upstream_id": "pokemontcg:base1-10",
+    "expected_name": "Mewtwo",
+    "expected_set_code": "BS",
+    "expected_number": "10/102"
+  },
+  {
+    "id": "magic-lightning-bolt-lea",
+    "tcg": "magic",
+    "image_url": "https://cards.scryfall.io/large/front/c/e/ce711943-c1a1-43a0-8b89-8d169cfb8e06.jpg",
+    "expected_name": "Lightning Bolt",
+    "expected_set_code": "LEA"
+  },
+  {
+    "id": "magic-black-lotus-lea",
+    "tcg": "magic",
+    "image_url": "https://cards.scryfall.io/large/front/b/d/bd8fa327-dd41-4737-8f19-2cf5eb1f7cdd.jpg",
+    "expected_name": "Black Lotus",
+    "expected_set_code": "LEA"
+  },
+  {
+    "id": "magic-counterspell-lea",
+    "tcg": "magic",
+    "image_url": "https://cards.scryfall.io/large/front/0/d/0df55e3f-14de-46ef-b6b1-616618724d9e.jpg",
+    "expected_name": "Counterspell",
+    "expected_set_code": "LEA"
+  },
+  {
+    "id": "yugioh-dark-magician-lob",
+    "tcg": "yugioh",
+    "image_url": "https://images.ygoprodeck.com/images/cards/46986414.jpg",
+    "expected_name": "Dark Magician"
+  },
+  {
+    "id": "yugioh-blue-eyes-lob",
+    "tcg": "yugioh",
+    "image_url": "https://images.ygoprodeck.com/images/cards/89631139.jpg",
+    "expected_name": "Blue-Eyes White Dragon"
+  }
+]

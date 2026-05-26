@@ -33,6 +33,13 @@ lxml>=5.3,<6
 Pillow>=10.4,<12
 ImageHash>=4.3,<5
 
+# --- OCR (card identification via Google Cloud Vision; optional at runtime) ---
+# The provider is feature-flagged behind OCR_PROVIDER; install is required
+# so the import succeeds at boot, but no API calls are made unless the
+# google_vision provider is selected.
+google-cloud-vision>=3.7,<4
+rapidfuzz>=3.10,<4
+
 # --- PDF generation (user-facing portfolio statements) ---
 reportlab>=4.2,<5
 
