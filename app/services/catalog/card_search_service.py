@@ -618,7 +618,12 @@ async def resolve_pricing_for_local(
             if set_code:
                 q_parts.append(f"set.id:{set_code}")
             if number:
-                q_parts.append(f"number:{number}")
+                # Pokémon TCG API expects the bare card number (e.g. "8"),
+                # not a "collector/total" form like "8/102". Strip any
+                # trailing "/total" before querying.
+                bare_number = number.split("/", 1)[0].strip()
+                if bare_number:
+                    q_parts.append(f"number:{bare_number}")
             body = await pokemon_tcg.search_cards(
                 " ".join(q_parts), page=1, page_size=1
             )
@@ -696,42 +701,74 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                 resolved = None
                 upstream_match: tuple[str, str] | None = None
 
-                # Cheap path: if we already linked an upstream ref, use it
-                # directly instead of searching by name.
-                ref_rows = (
-                    (
-                        await session.execute(
-                            _select(CardExternalRef).where(
-                                CardExternalRef.card_id == as_uuid
+                async def _do_resolve() -> tuple[
+                    dict[str, Any] | None, tuple[str, str] | None
+                ]:
+                    """Inner resolver — returns (card_dict, upstream_ref).
+
+                    Wrapped in a hard timeout below so card detail
+                    responses never block the UI for >4s waiting on a
+                    sluggish upstream (Pokémon TCG, Scryfall, etc.).
+                    """
+                    local_resolved: dict[str, Any] | None = None
+                    local_match: tuple[str, str] | None = None
+
+                    # Cheap path: if we already linked an upstream ref,
+                    # use it directly instead of searching by name.
+                    ref_rows = (
+                        (
+                            await session.execute(
+                                _select(CardExternalRef).where(
+                                    CardExternalRef.card_id == as_uuid
+                                )
                             )
                         )
+                        .scalars()
+                        .all()
                     )
-                    .scalars()
-                    .all()
-                )
-                priority = {"pokemontcg": 0, "scryfall": 1, "ygoprodeck": 2}
-                preferred = sorted(ref_rows, key=lambda r: priority.get(r.source, 99))
-                for ref in preferred:
-                    if ref.source not in priority:
-                        continue
-                    resolved = await get_card(f"{ref.source}:{ref.external_id}")
-                    if resolved is not None and resolved.get("pricing_summary"):
-                        upstream_match = (ref.source, ref.external_id)
-                        break
+                    priority = {"pokemontcg": 0, "scryfall": 1, "ygoprodeck": 2}
+                    preferred = sorted(
+                        ref_rows, key=lambda r: priority.get(r.source, 99)
+                    )
+                    for ref in preferred:
+                        if ref.source not in priority:
+                            continue
+                        local_resolved = await get_card(
+                            f"{ref.source}:{ref.external_id}"
+                        )
+                        if local_resolved is not None and local_resolved.get(
+                            "pricing_summary"
+                        ):
+                            local_match = (ref.source, ref.external_id)
+                            break
 
-                # Expensive path: search upstream by name.
-                if resolved is None or not resolved.get("pricing_summary"):
-                    resolved = await resolve_pricing_for_local(
-                        tcg=tcg_str,
-                        name=row.name,
-                        set_code=set_code,
-                        number=row.number,
+                    # Expensive path: search upstream by name.
+                    if local_resolved is None or not local_resolved.get(
+                        "pricing_summary"
+                    ):
+                        local_resolved = await resolve_pricing_for_local(
+                            tcg=tcg_str,
+                            name=row.name,
+                            set_code=set_code,
+                            number=row.number,
+                        )
+                        if local_resolved is not None and local_resolved.get("id"):
+                            rid = local_resolved["id"]
+                            if ":" in rid:
+                                src, _, ext = rid.partition(":")
+                                local_match = (src, ext)
+                    return local_resolved, local_match
+
+                try:
+                    resolved, upstream_match = await asyncio.wait_for(
+                        _do_resolve(), timeout=4.0
                     )
-                    if resolved is not None and resolved.get("id"):
-                        rid = resolved["id"]
-                        if ":" in rid:
-                            src, _, ext = rid.partition(":")
-                            upstream_match = (src, ext)
+                except (asyncio.TimeoutError, Exception) as exc:  # noqa: BLE001
+                    logger.info(
+                        "upstream resolve skipped for %s (%s)", as_uuid, exc
+                    )
+                    resolved = None
+                    upstream_match = None
 
                 if resolved is not None:
                     cached_pricing = resolved.get("pricing_summary")

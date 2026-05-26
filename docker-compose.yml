@@ -6,7 +6,9 @@ services:
       POSTGRES_PASSWORD: loupe
       POSTGRES_DB: loupe
     ports:
-      - "5432:5432"
+      # Host port 5433 (not 5432) so we don't collide with a system Postgres
+      # install (EDB / Postgres.app). Container still listens on 5432 internally.
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
