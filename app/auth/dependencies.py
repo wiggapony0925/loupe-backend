@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.jwt import verify_token
 from app.db import get_db
 from app.models.user import User
-from app.request_context import set_request_user_id
+from app.platform.request_context import set_request_user_id
 from app.utils.logger import get_logger
 
 logger = get_logger("auth.deps")

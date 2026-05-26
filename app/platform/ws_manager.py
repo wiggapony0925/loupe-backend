@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from app.request_context import get_request_id, new_request_id
+from app.platform.request_context import get_request_id, new_request_id
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 

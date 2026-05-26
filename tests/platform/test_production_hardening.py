@@ -231,7 +231,7 @@ def test_sliding_window_blocks_after_limit():
     """The limiter is the unit under test, not the endpoint — keeps the
     test fast and deterministic (no need to actually hammer FastAPI 61
     times)."""
-    from app.rate_limit import _SlidingWindow
+    from app.platform.rate_limit import _SlidingWindow
 
     w = _SlidingWindow(limit=3, window_s=60)
     assert w.hit("ip1") is True
@@ -245,7 +245,7 @@ def test_sliding_window_blocks_after_limit():
 
 def test_sliding_window_recovers_after_window():
     """Once the window slides past the old hits the bucket refills."""
-    from app.rate_limit import _SlidingWindow
+    from app.platform.rate_limit import _SlidingWindow
 
     # Very short window so the test is fast.
     w = _SlidingWindow(limit=2, window_s=0.2)

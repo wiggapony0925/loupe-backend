@@ -42,7 +42,7 @@ from app.models.grade import GradedCard
 from app.models.scanner import Scanner
 from app.models.user import User, UserSettings
 
-from .conftest import assert_envelope_ok
+from tests.conftest import assert_envelope_ok
 
 # ---- Fixture -----------------------------------------------------------
 

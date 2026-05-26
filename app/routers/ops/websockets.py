@@ -11,12 +11,12 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 
 from app.auth.jwt import verify_token
-from app.cache_config import SCAN_PUBSUB_CHANNEL
+from app.platform.cache_config import SCAN_PUBSUB_CHANNEL
 from app.clients.redis_client import get_redis
 from app.db import get_sessionmaker
 from app.models.user import User
 from app.utils.logger import get_logger
-from app.ws_manager import get_manager, ws_envelope
+from app.platform.ws_manager import get_manager, ws_envelope
 
 router = APIRouter(tags=["ws"])
 logger = get_logger("routers.ws")

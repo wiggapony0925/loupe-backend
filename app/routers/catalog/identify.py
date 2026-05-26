@@ -27,7 +27,7 @@ from app.config import get_settings
 from app.db import get_db
 from app.models.identification import CardIdentification, IdentificationFeedback
 from app.models.user import User
-from app.rate_limit import rate_limit
+from app.platform.rate_limit import rate_limit
 from app.schemas.identification import (
     IdentifyByTextRequest,
     IdentifyCandidate,

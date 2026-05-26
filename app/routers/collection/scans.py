@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_user
 from app.db import get_db
 from app.models.user import User
-from app.rate_limit import scan_create_limit
+from app.platform.rate_limit import scan_create_limit
 from app.schemas.scan import (
     ScanJobCompleteRequest,
     ScanJobCreate,

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models.enums import TcgEnum
-from app.rate_limit import resolve_limit, search_live_limit
+from app.platform.rate_limit import resolve_limit, search_live_limit
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
 from app.services.catalog import (

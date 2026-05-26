@@ -20,7 +20,7 @@ from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.request_context import (
+from app.platform.request_context import (
     get_request_id,
     new_request_id,
     request_elapsed_ms,

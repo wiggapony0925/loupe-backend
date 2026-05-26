@@ -7,7 +7,7 @@ envelope so the frontend can validate frames against a single contract.
 import pytest
 
 from app.auth.jwt import issue_token
-from app.cache_config import SCAN_PUBSUB_CHANNEL
+from app.platform.cache_config import SCAN_PUBSUB_CHANNEL
 
 
 @pytest.mark.asyncio

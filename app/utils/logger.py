@@ -49,7 +49,7 @@ class JsonFormatter(logging.Formatter):
     are merged into the top-level JSON payload, with reserved keys (``ts``,
     ``level``, ``logger``, ``msg``, ``exc``) winning to keep the schema
     stable. Request-scoped fields (request_id, user_id) are auto-injected
-    from :mod:`app.request_context` when set.
+    from :mod:`app.platform.request_context` when set.
     """
 
     _RESERVED = {"ts", "level", "logger", "msg", "exc"}
@@ -64,7 +64,7 @@ class JsonFormatter(logging.Formatter):
         # Pull request-scoped context lazily to avoid an import cycle at
         # module load (request_context imports nothing from us).
         try:
-            from app.request_context import get_request_id, get_request_user_id
+            from app.platform.request_context import get_request_id, get_request_user_id
 
             req_id = get_request_id()
             if req_id:

@@ -21,7 +21,7 @@ fails we fall back to a small hardcoded list of well-known card ids and
 attempt a per-card ``get_card`` lookup; if even that fails we emit
 minimal stubs so the endpoint NEVER returns a 5xx.
 
-Responses are cached in Redis for :data:`~app.cache_config.TRENDING_TTL`
+Responses are cached in Redis for :data:`~app.platform.cache_config.TRENDING_TTL`
 seconds (15 min) under ``loupe:cards:trending:{tcg}:{limit}`` to keep
 the rail snappy and stay well under provider rate budgets.
 """
@@ -35,7 +35,7 @@ from typing import Any
 
 import httpx
 
-from app.cache_config import TRENDING_TTL
+from app.platform.cache_config import TRENDING_TTL
 from app.clients import pokemon_tcg
 from app.services.catalog import card_search_service
 from app.services.catalog.card_search_service import (

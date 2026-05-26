@@ -1,6 +1,6 @@
 """HTTP middleware: request logging + Cache-Control header injection.
 
-The middleware also populates the request-scoped :mod:`app.request_context`
+The middleware also populates the request-scoped :mod:`app.platform.request_context`
 ContextVars so the envelope/meta builder downstream can stamp every response
 with the same ``request_id`` and compute ``duration_ms``.
 """
@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.request_context import (
+from app.platform.request_context import (
     new_request_id,
     set_request_id,
     set_request_started_at,

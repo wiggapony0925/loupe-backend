@@ -26,7 +26,7 @@ from typing import Any
 
 import httpx
 
-from app.cache_config import (
+from app.platform.cache_config import (
     CARD_DETAIL_TTL,
     CARD_SEARCH_TTL,
     PRICE_HISTORY_TTL,

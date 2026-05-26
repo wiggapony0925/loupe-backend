@@ -1,8 +1,8 @@
 """Per-request context (ULID, start time) exposed via :mod:`contextvars`.
 
-Populated by :class:`~app.http_middleware.RequestLogMiddleware` and read by
+Populated by :class:`~app.http.middleware.RequestLogMiddleware` and read by
 the envelope helpers (:mod:`app.schemas.envelope`) and the global exception
-handlers (:mod:`app.exception_handlers`).
+handlers (:mod:`app.http.exception_handlers`).
 """
 
 from __future__ import annotations

@@ -16,7 +16,7 @@ import httpx
 import jwt
 from jwt.algorithms import RSAAlgorithm
 
-from app.cache_config import JWKS_CACHE_TTL
+from app.platform.cache_config import JWKS_CACHE_TTL
 from app.clients.redis_client import get_redis
 from app.config import get_settings
 from app.utils.logger import get_logger
