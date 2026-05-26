@@ -12,8 +12,8 @@ so each step can be replaced or evaluated in isolation by the
 """
 
 from app.services.identification.card_identifier import (
-    CardIdentifier,
     CandidateOut,
+    CardIdentifier,
     IdentifyOutcome,
 )
 

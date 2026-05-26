@@ -14,7 +14,6 @@ from app.services.identification.confidence import (
 )
 from app.services.identification.text_parser import parse_ocr_text
 
-
 # ───────────────────────────────────────────────────────────── text parser
 
 

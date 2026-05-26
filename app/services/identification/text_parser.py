@@ -37,9 +37,9 @@ _MANA_RE = re.compile(r"\{[0-9WUBRGCXS/]+\}")
 _OP_DON_RE = re.compile(r"DON!{1,3}", re.IGNORECASE)
 # A standard Pokémon / MTG / OP set+number footer like "123/198" or "SV1 045/198".
 _NUMBERING_RE = re.compile(r"\b(\d{1,3})\s*/\s*(\d{1,3})\b")
-# 4-digit year (1996–2099) — copyright or release stamp.
+# 4-digit year (1996-2099) - copyright or release stamp.
 _YEAR_RE = re.compile(r"\b(199[6-9]|20\d{2})\b")
-# Set code candidates: 2–6 uppercase letters/digits with at least one letter,
+# Set code candidates: 2-6 uppercase letters/digits with at least one letter,
 # typically printed next to the number ("SV1", "BLB", "MOM", "LOB", "BS").
 _SET_CODE_RE = re.compile(r"\b([A-Z][A-Z0-9]{1,5})\b")
 # Lines we *never* want to consider as the title. Lowercased contains-check.
@@ -118,9 +118,7 @@ def _looks_like_title(line: str) -> bool:
     if alpha / max(1, len(stripped)) < 0.5:
         return False
     # Reject super-long lines (rules text, not titles).
-    if len(stripped) > 50:
-        return False
-    return True
+    return len(stripped) <= 50
 
 
 def _clean_line(line: str) -> str:

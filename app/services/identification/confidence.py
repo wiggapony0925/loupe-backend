@@ -47,10 +47,10 @@ class ScoreBreakdown:
     weightings without losing the original decision.
     """
 
-    text_similarity: float  # 0–1 fuzzy match of parsed title vs candidate name
-    ocr_quality: float  # provider's mean word confidence, 0–1
+    text_similarity: float  # 0-1 fuzzy match of parsed title vs candidate name
+    ocr_quality: float  # provider's mean word confidence, 0-1
     field_match: float  # bonuses for set_code / number / HP / mana matches
-    phash_match: float  # 0–1, 1.0 if the candidate came from the phash path
+    phash_match: float  # 0-1, 1.0 if the candidate came from the phash path
     feedback_prior: float  # gentle boost from prior correct identifications
     final: float  # weighted sum, clamped to [0, 1]
 

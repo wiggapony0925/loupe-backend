@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import optional_user, require_user
@@ -150,7 +149,7 @@ async def submit_identify_feedback(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return None
+    return
 
 
 @router.get(
@@ -170,7 +169,7 @@ async def ocr_metrics(
        For now any signed-in user can hit this endpoint; once roles
        land, gate with ``Depends(require_admin)``.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.now(UTC) - timedelta(days=days)
 
     # Pull every row in the window. The volume is bounded by our scan
     # rate-limits (~30/min/user) so we can comfortably aggregate in
@@ -240,5 +239,5 @@ def _percentile(values: list[int], pct: int) -> int:
     if not values:
         return 0
     ordered = sorted(values)
-    k = max(0, min(len(ordered) - 1, int(round((pct / 100.0) * (len(ordered) - 1)))))
+    k = max(0, min(len(ordered) - 1, round((pct / 100.0) * (len(ordered) - 1))))
     return ordered[k]

@@ -36,7 +36,8 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import UTC
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -232,11 +233,12 @@ class CardIdentifier:
         even for not-yet-materialized catalog rows.
         """
         # Local import keeps the module importable before migrations run.
+        from sqlalchemy import select
+
         from app.models.identification import (
             CardIdentification,
             IdentificationFeedback,
         )
-        from sqlalchemy import select
 
         existing = (
             await db.execute(
@@ -334,7 +336,7 @@ class CardIdentifier:
 
         Returns a map of ``card_id_or_upstream_id`` → ``[0,1]`` boost.
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timedelta
 
         from sqlalchemy import func, select
 
@@ -344,7 +346,7 @@ class CardIdentifier:
         )
 
         settings = get_settings()
-        cutoff = datetime.now(timezone.utc) - timedelta(
+        cutoff = datetime.now(UTC) - timedelta(
             days=settings.ocr_feedback_boost_window_days
         )
 

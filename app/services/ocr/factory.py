@@ -13,7 +13,6 @@ themselves.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from app.config import get_settings
 from app.services.ocr.base import OcrError, OcrResult, VisionProvider
@@ -42,7 +41,7 @@ class _TimedProvider:
                 self._inner.detect_text(image_bytes, language_hints=language_hints),
                 timeout=self._timeout_s,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             logger.warning(
                 "OCR provider %s timed out after %.1fs",
                 self._inner.name,

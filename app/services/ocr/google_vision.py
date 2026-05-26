@@ -165,8 +165,8 @@ class GoogleVisionProvider:
         if fta and getattr(fta, "text", None):
             full_text = fta.text
             for page in getattr(fta, "pages", []) or []:
-                for prop in getattr(page, "property", None) or []:
-                    pass  # noqa - placeholder for future per-page work
+                for _prop in getattr(page, "property", None) or []:
+                    pass
                 for block in getattr(page, "blocks", []) or []:
                     for para in getattr(block, "paragraphs", []) or []:
                         for word in getattr(para, "words", []) or []:
