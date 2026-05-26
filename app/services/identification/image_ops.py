@@ -81,7 +81,7 @@ def prepare_image_for_ocr(image_bytes: bytes) -> PreparedImage:
             scale = min(1.0, max_edge / float(max(w, h)))
             if scale < 1.0:
                 new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
-                rgb = rgb.resize(new_size, Image.LANCZOS)
+                rgb = rgb.resize(new_size, Image.Resampling.LANCZOS)
             buf = io.BytesIO()
             rgb.save(buf, format="JPEG", quality=85, optimize=True)
             ocr_bytes = buf.getvalue()
