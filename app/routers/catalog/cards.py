@@ -29,7 +29,13 @@ from app.services.catalog import (
     card_resolver_service,
     card_search_service,
 )
-from app.services.market import listings_service, market_service, trending_service
+from app.services.market import (
+    grade_summary_service,
+    listings_service,
+    market_service,
+    marketplace_prices_service,
+    trending_service,
+)
 from app.services.market import sold_comps_service as comps_service
 
 router = APIRouter(prefix="/cards", tags=["cards"])
@@ -249,6 +255,50 @@ async def get_comps(
     """Recent sold comps fanned out across configured providers."""
     result = await comps_service.get_comps_for_card(
         card_id, days=days, grade=grade, house=house, limit=limit
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return result
+
+
+@router.get(
+    "/{card_id}/grade-summary",
+    summary="Per-grade price summary (public)",
+)
+async def get_grade_summary(
+    card_id: str,
+    window_days: int = Query(30, ge=1, le=180),
+) -> dict[str, Any]:
+    """Pivot recent sold comps into a per-grade summary for the card.
+
+    Powers the price-by-grade pill row on the scan/detail sheet:
+    UNGRADED $X · PSA 10 $Y · BGS 10 $Z. Returns ``grades: []`` when
+    no comps are available so the client always renders.
+    """
+    result = await grade_summary_service.get_grade_summary_for_card(
+        card_id, window_days=window_days
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return result
+
+
+@router.get(
+    "/{card_id}/marketplace-prices",
+    summary="Lowest active price per marketplace (public)",
+)
+async def get_marketplace_prices(
+    card_id: str,
+    limit: int = Query(50, ge=1, le=100),
+) -> dict[str, Any]:
+    """Lowest live listing per provider + deep-link search URL.
+
+    Powers the marketplace chip row on the card-detail sheet
+    (eBay $X · TCGplayer $Y · ...). Empty ``providers`` is rendered as
+    "no live listings yet" by the client.
+    """
+    result = await marketplace_prices_service.get_marketplace_prices_for_card(
+        card_id, limit=limit
     )
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
