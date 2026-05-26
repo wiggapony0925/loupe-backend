@@ -37,7 +37,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 async def process_scan(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     """Process a finished scan-upload through the grading pipeline."""
-    from app.workers.scan_processor import process_scan as run_scan_processor
+    from app.tasks.scan_processor import process_scan as run_scan_processor
 
     await run_scan_processor(payload)
     return {"ok": True}
@@ -45,7 +45,7 @@ async def process_scan(ctx: dict[str, Any], payload: dict[str, Any]) -> dict[str
 
 async def catalog_sync(ctx: dict[str, Any]) -> dict[str, Any]:
     """Pull recent card data from upstream catalogs."""
-    from app.workers.catalog_sync import catalog_sync as run_catalog_sync
+    from app.tasks.catalog_sync import catalog_sync as run_catalog_sync
 
     await run_catalog_sync(ctx)
     return {"ok": True}
@@ -53,14 +53,14 @@ async def catalog_sync(ctx: dict[str, Any]) -> dict[str, Any]:
 
 async def price_backfill(ctx: dict[str, Any]) -> dict[str, Any]:
     """Backfill embedded upstream prices into local ``cards.metadata``."""
-    from app.workers.price_backfill import backfill_prices
+    from app.tasks.price_backfill import backfill_prices
 
     return await backfill_prices(ctx)
 
 
 async def image_index(ctx: dict[str, Any]) -> dict[str, Any]:
     """Compute perceptual hashes for catalog card images."""
-    from app.workers.image_index import index_card_images
+    from app.tasks.image_index import index_card_images
 
     return await index_card_images(ctx)
 

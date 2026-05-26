@@ -6,7 +6,7 @@ import pytest
 
 from app.models.enums import ScanStatusEnum
 from app.models.scan import ScanJob
-from app.workers.scan_processor import process_scan
+from app.tasks.scan_processor import process_scan
 
 
 @pytest.mark.asyncio

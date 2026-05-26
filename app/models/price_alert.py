@@ -1,7 +1,7 @@
 """PriceAlert ORM model — user-defined trigger on a card's market price.
 
 When the daily price-backfill worker writes a new price, an alert
-evaluator (see `app/workers/price_alert_worker.py`) compares the latest
+evaluator (see `app/tasks/price_alert_worker.py`) compares the latest
 price against any active alert thresholds and sets `triggered_at` when
 the condition is first met. Each alert fires at most once; users
 re-arm by deleting + recreating.

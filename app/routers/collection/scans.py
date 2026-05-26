@@ -56,7 +56,7 @@ async def complete_scan(
         raise HTTPException(status_code=404, detail="Scan job not found")
     # Best-effort enqueue: in dev/test we just call the worker inline.
     try:
-        from app.workers.scan_processor import process_scan  # local import
+        from app.tasks.scan_processor import process_scan  # local import
 
         await process_scan({"job_id": str(job.id), "user_id": str(user.id)}, db=db)
     except Exception as exc:  # pragma: no cover - background path

@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.http.exception_handlers import register_exception_handlers
 from app.http.middleware import register_http_middleware
 from app.lifecycle import lifespan
-from app.platform.observability import init_sentry
+from app.platform.observability import init_otel, init_sentry
 from app.http.response_envelope import register_envelope_middleware
 from app.routers.analytics import home_feed as home
 from app.routers.analytics import portfolio_overview as analytics
@@ -111,6 +111,10 @@ def create_app() -> FastAPI:
 
     # WebSockets mount at root.
     app.include_router(ws.router)
+
+    # Wire OpenTelemetry last so FastAPI instrumentation sees every route.
+    # No-op unless ``otel_enabled`` is true; safe for tests and dev.
+    init_otel(s, app=app)
 
     return app
 

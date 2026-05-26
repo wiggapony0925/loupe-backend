@@ -171,6 +171,18 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.1
 
+    # --- OpenTelemetry (off by default; flip on once SDK + exporter
+    # extras are installed in the runtime image and the IAM role for
+    # the target backend is granted).
+    # When true, ``init_otel(settings)`` wires FastAPI / SQLAlchemy /
+    # HTTPX / Redis instrumentations and pushes spans through the OTLP
+    # exporter defined by the standard OTEL_* env vars (Cloud Trace
+    # works with the GCP OTLP HTTP endpoint, or use the dedicated
+    # opentelemetry-exporter-gcp-trace package).
+    otel_enabled: bool = False
+    otel_service_name: str = "loupe-backend"
+    otel_sample_ratio: float = 0.1
+
     # --- Convenience flags ---
     @property
     def is_production(self) -> bool:
