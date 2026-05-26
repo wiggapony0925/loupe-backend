@@ -1,17 +1,16 @@
-"""Collection endpoints (binders/decks)."""
+"""Collection endpoints (binders/decks) — thin HTTP shell over
+:mod:`app.services.collection.collection_service`.
+"""
 
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_user
 from app.db import get_db
-from app.models.collection import Collection, CollectionItem
-from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.collection import (
     CollectionCreate,
@@ -20,40 +19,16 @@ from app.schemas.collection import (
     CollectionUpdate,
 )
 from app.schemas.grade import GradedCardRead
+from app.services.collection import collection_service
 
 router = APIRouter(prefix="/collections", tags=["collections"])
-
-
-async def _get_owned(
-    db: AsyncSession, user: User, collection_id: uuid.UUID
-) -> Collection:
-    row = (
-        await db.execute(
-            select(Collection).where(
-                Collection.id == collection_id, Collection.user_id == user.id
-            )
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    return row
 
 
 @router.get("", response_model=list[CollectionRead], summary="List my collections")
 async def list_mine(
     user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
 ) -> list[CollectionRead]:
-    rows = (
-        (
-            await db.execute(
-                select(Collection)
-                .where(Collection.user_id == user.id)
-                .order_by(Collection.created_at.desc())
-            )
-        )
-        .scalars()
-        .all()
-    )
+    rows = await collection_service.list_for_user(db, user)
     return [CollectionRead.model_validate(r) for r in rows]
 
 
@@ -68,16 +43,7 @@ async def create(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> CollectionRead:
-    row = Collection(
-        user_id=user.id,
-        name=payload.name,
-        description=payload.description,
-        color=payload.color,
-        is_public=payload.is_public,
-    )
-    db.add(row)
-    await db.commit()
-    await db.refresh(row)
+    row = await collection_service.create(db, user, payload)
     return CollectionRead.model_validate(row)
 
 
@@ -90,17 +56,7 @@ async def update(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> CollectionRead:
-    row = await _get_owned(db, user, collection_id)
-    if payload.name is not None:
-        row.name = payload.name
-    if payload.description is not None:
-        row.description = payload.description
-    if payload.color is not None:
-        row.color = payload.color
-    if payload.is_public is not None:
-        row.is_public = payload.is_public
-    await db.commit()
-    await db.refresh(row)
+    row = await collection_service.update(db, user, collection_id, payload)
     return CollectionRead.model_validate(row)
 
 
@@ -110,9 +66,7 @@ async def delete(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    row = await _get_owned(db, user, collection_id)
-    await db.delete(row)
-    await db.commit()
+    await collection_service.delete(db, user, collection_id)
 
 
 @router.get(
@@ -125,22 +79,7 @@ async def list_items(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[GradedCardRead]:
-    await _get_owned(db, user, collection_id)
-    rows = (
-        (
-            await db.execute(
-                select(GradedCard)
-                .join(CollectionItem, CollectionItem.graded_card_id == GradedCard.id)
-                .where(
-                    CollectionItem.collection_id == collection_id,
-                    GradedCard.deleted_at.is_(None),
-                )
-                .order_by(CollectionItem.added_at.desc())
-            )
-        )
-        .scalars()
-        .all()
-    )
+    rows = await collection_service.list_items(db, user, collection_id)
     return [GradedCardRead.model_validate(r) for r in rows]
 
 
@@ -155,33 +94,7 @@ async def add_item(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
-    await _get_owned(db, user, collection_id)
-    graded = (
-        await db.execute(
-            select(GradedCard).where(
-                GradedCard.id == payload.graded_card_id,
-                GradedCard.user_id == user.id,
-                GradedCard.deleted_at.is_(None),
-            )
-        )
-    ).scalar_one_or_none()
-    if graded is None:
-        raise HTTPException(status_code=404, detail="Graded card not found")
-    existing = (
-        await db.execute(
-            select(CollectionItem).where(
-                CollectionItem.collection_id == collection_id,
-                CollectionItem.graded_card_id == payload.graded_card_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing is None:
-        db.add(
-            CollectionItem(
-                collection_id=collection_id, graded_card_id=payload.graded_card_id
-            )
-        )
-        await db.commit()
+    await collection_service.add_item(db, user, collection_id, payload.graded_card_id)
     return {"status": "ok"}
 
 
@@ -194,19 +107,7 @@ async def remove_item(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    await _get_owned(db, user, collection_id)
-    row = (
-        await db.execute(
-            select(CollectionItem).where(
-                CollectionItem.collection_id == collection_id,
-                CollectionItem.graded_card_id == graded_card_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Item not in collection")
-    await db.delete(row)
-    await db.commit()
+    await collection_service.remove_item(db, user, collection_id, graded_card_id)
 
 
 __all__ = ["router"]
