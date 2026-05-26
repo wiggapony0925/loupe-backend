@@ -283,7 +283,10 @@ class CardIdentifier:
                 logger.exception("text search failed for title=%r tcg=%s", title, tcg)
                 continue
             for result in body.get("results", []) or []:
-                key = result.get("id") or f"{result.get('name')}::{(result.get('set') or {}).get('id')}"
+                key = (
+                    result.get("id")
+                    or f"{result.get('name')}::{(result.get('set') or {}).get('id')}"
+                )
                 if key and key not in seen:
                     seen[key] = result
             if seen:
@@ -366,9 +369,7 @@ class CardIdentifier:
             .where(IdentificationFeedback.correct.is_(True))
             .where(IdentificationFeedback.chosen_card_id.is_not(None))
             .where(CardIdentification.created_at >= cutoff)
-            .where(
-                func.lower(CardIdentification.parsed_title) == parsed_title.lower()
-            )
+            .where(func.lower(CardIdentification.parsed_title) == parsed_title.lower())
             .group_by(IdentificationFeedback.chosen_card_id)
         )
         rows = (await db.execute(stmt)).all()

@@ -98,7 +98,9 @@ async def identify_card(
 
     return IdentifyResponse(
         identification_id=outcome.identification_id,
-        candidates=[IdentifyCandidate(**dataclasses.asdict(c)) for c in outcome.candidates],
+        candidates=[
+            IdentifyCandidate(**dataclasses.asdict(c)) for c in outcome.candidates
+        ],
         accuracy_score=outcome.accuracy_score,
         primary_source=outcome.primary_source,
         tcg_inferred=outcome.tcg_inferred,
@@ -175,20 +177,17 @@ async def ocr_metrics(
     # rate-limits (~30/min/user) so we can comfortably aggregate in
     # Python rather than craft dialect-specific percentile SQL.
     rows = (
-        (
-            await db.execute(
-                select(
-                    CardIdentification.id,
-                    CardIdentification.ocr_provider,
-                    CardIdentification.tcg_inferred,
-                    CardIdentification.top_confidence,
-                    CardIdentification.latency_ms,
-                    CardIdentification.cost_usd,
-                ).where(CardIdentification.created_at >= cutoff)
-            )
+        await db.execute(
+            select(
+                CardIdentification.id,
+                CardIdentification.ocr_provider,
+                CardIdentification.tcg_inferred,
+                CardIdentification.top_confidence,
+                CardIdentification.latency_ms,
+                CardIdentification.cost_usd,
+            ).where(CardIdentification.created_at >= cutoff)
         )
-        .all()
-    )
+    ).all()
     total = len(rows)
     by_provider: dict[str, int] = {}
     by_tcg: dict[str, int] = {}

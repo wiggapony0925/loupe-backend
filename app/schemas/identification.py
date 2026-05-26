@@ -74,9 +74,7 @@ class IdentifyResponse(BaseModel):
 class IdentifyFeedbackRequest(BaseModel):
     """``POST /v1/cards/identify/{id}/feedback`` body."""
 
-    correct: bool = Field(
-        description="True = the top candidate matched the real card."
-    )
+    correct: bool = Field(description="True = the top candidate matched the real card.")
     chosen_card_id: str | None = Field(
         default=None,
         description=(

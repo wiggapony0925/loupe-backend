@@ -96,9 +96,7 @@ def _field_bonus(parsed: ParsedCard, candidate: dict[str, Any]) -> float:
     bonus = 0.0
     # Set code (case-insensitive). Strong signal.
     cand_set = (
-        (candidate.get("set") or {}).get("code")
-        or candidate.get("set_code")
-        or ""
+        (candidate.get("set") or {}).get("code") or candidate.get("set_code") or ""
     )
     if parsed.set_code and cand_set and parsed.set_code.upper() == cand_set.upper():
         bonus += 0.5
@@ -148,7 +146,9 @@ def score_candidate(
     # Use the best of the candidate names against the best of the parsed
     # titles. Both are short strings; comparison is O(small).
     cand_name = candidate.get("name") or ""
-    titles = [t for t, _ in parsed.title_candidates] or ([parsed.title] if parsed.title else [])
+    titles = [t for t, _ in parsed.title_candidates] or (
+        [parsed.title] if parsed.title else []
+    )
     text_sim = max((_string_similarity(t, cand_name) for t in titles), default=0.0)
     field_match = _field_bonus(parsed, candidate)
     clamped_ocr = max(0.0, min(1.0, ocr_confidence))

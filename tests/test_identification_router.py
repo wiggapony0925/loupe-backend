@@ -37,9 +37,7 @@ def _make_test_jpeg(text: str = "card") -> bytes:
 def mock_search(monkeypatch):
     """Stub ``card_search_service.search_cards`` with a deterministic catalog."""
 
-    async def fake_search_cards(
-        *, q: str, tcg: str, limit: int = 20
-    ) -> dict[str, Any]:
+    async def fake_search_cards(*, q: str, tcg: str, limit: int = 20) -> dict[str, Any]:
         # Return the same Charizard payload regardless of query so the
         # pipeline's de-dupe + scoring + persistence paths get exercised.
         return {
@@ -150,9 +148,7 @@ async def test_identify_rejects_oversize_image(client, mock_search, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_feedback_requires_auth_and_persists(
-    client, mock_search, auth_headers
-):
+async def test_feedback_requires_auth_and_persists(client, mock_search, auth_headers):
     from app.services.ocr.base import OcrBlock, OcrResult
 
     get_mock_provider().set_default(
@@ -206,9 +202,7 @@ async def test_feedback_unknown_identification_returns_404(client, auth_headers)
 
 @pytest.mark.asyncio
 async def test_ocr_metrics_endpoint_returns_empty_window(client, auth_headers):
-    resp = await client.get(
-        "/v1/cards/admin/ocr/metrics?days=7", headers=auth_headers
-    )
+    resp = await client.get("/v1/cards/admin/ocr/metrics?days=7", headers=auth_headers)
     body = assert_envelope_ok(resp)
     assert body["window_days"] == 7
     assert body["total_identifications"] == 0

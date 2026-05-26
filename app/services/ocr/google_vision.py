@@ -182,7 +182,9 @@ class GoogleVisionProvider:
                             bbox = _bbox_from_vertices(
                                 list(getattr(word.bounding_box, "vertices", []) or [])
                             )
-                            blocks.append(OcrBlock(text=text, confidence=conf, bbox=bbox))
+                            blocks.append(
+                                OcrBlock(text=text, confidence=conf, bbox=bbox)
+                            )
                             prop = getattr(word, "property", None)
                             for lang in (
                                 getattr(prop, "detected_languages", []) or []

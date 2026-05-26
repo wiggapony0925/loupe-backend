@@ -69,7 +69,10 @@ async def _download(url: str, client: httpx.AsyncClient) -> bytes:
 def _name_matches(expected: str, actual: str | None) -> bool:
     if not actual:
         return False
-    return expected.strip().lower() in actual.strip().lower() or actual.strip().lower() in expected.strip().lower()
+    return (
+        expected.strip().lower() in actual.strip().lower()
+        or actual.strip().lower() in expected.strip().lower()
+    )
 
 
 async def _run() -> list[Result]:
@@ -116,7 +119,9 @@ async def _run() -> list[Result]:
 
             top3 = outcome.candidates[:3]
             top1 = top3[0] if top3 else None
-            top1_correct = _name_matches(fx["expected_name"], top1.name if top1 else None)
+            top1_correct = _name_matches(
+                fx["expected_name"], top1.name if top1 else None
+            )
             top3_correct = any(_name_matches(fx["expected_name"], c.name) for c in top3)
             results.append(
                 Result(
@@ -132,7 +137,9 @@ async def _run() -> list[Result]:
                 )
             )
             mark = "✓" if top1_correct else ("~" if top3_correct else "✗")
-            print(f"{mark} top1={top1.name if top1 else '-'!r} conf={outcome.accuracy_score:.2f} {elapsed}ms")
+            print(
+                f"{mark} top1={top1.name if top1 else '-'!r} conf={outcome.accuracy_score:.2f} {elapsed}ms"
+            )
 
     return results
 
@@ -149,13 +156,15 @@ def _summarize(results: list[Result]) -> None:
     cost_total = sum(r.cost_usd for r in results)
     print()
     print("=" * 60)
-    print(f"Top-1 accuracy: {top1}/{total} = {top1/total:.1%}")
-    print(f"Top-3 accuracy: {top3}/{total} = {top3/total:.1%}")
+    print(f"Top-1 accuracy: {top1}/{total} = {top1 / total:.1%}")
+    print(f"Top-3 accuracy: {top3}/{total} = {top3 / total:.1%}")
     if latencies:
         latencies.sort()
         p50 = latencies[len(latencies) // 2]
         p95 = latencies[max(0, int(len(latencies) * 0.95) - 1)]
-        print(f"Latency p50: {p50}ms   p95: {p95}ms   mean: {statistics.mean(latencies):.0f}ms")
+        print(
+            f"Latency p50: {p50}ms   p95: {p95}ms   mean: {statistics.mean(latencies):.0f}ms"
+        )
     print(f"Mean confidence: {statistics.mean(confidences):.2f}")
     print(f"Estimated cost: ${cost_total:.4f}")
     print("=" * 60)

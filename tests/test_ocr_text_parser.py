@@ -54,12 +54,7 @@ def test_parse_magic_picks_up_mana_cost():
 
 
 def test_parse_yugioh_extracts_atk_def():
-    ocr = (
-        "Dark Magician\n"
-        "Spellcaster / Effect\n"
-        "ATK/2500 DEF/2100\n"
-        "LOB-005\n"
-    )
+    ocr = "Dark Magician\nSpellcaster / Effect\nATK/2500 DEF/2100\nLOB-005\n"
     parsed = parse_ocr_text(ocr)
     assert parsed.title == "Dark Magician"
     assert parsed.atk_def == (2500, 2100)
@@ -67,12 +62,7 @@ def test_parse_yugioh_extracts_atk_def():
 
 
 def test_parse_filters_legalese_from_title_candidates():
-    ocr = (
-        "©2024 Pokemon\n"
-        "Illus. Some Artist\n"
-        "Pikachu\n"
-        "HP 60\n"
-    )
+    ocr = "©2024 Pokemon\nIllus. Some Artist\nPikachu\nHP 60\n"
     parsed = parse_ocr_text(ocr)
     titles = [t for t, _ in parsed.title_candidates]
     assert "Pikachu" in titles
