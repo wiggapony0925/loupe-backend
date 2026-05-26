@@ -55,6 +55,7 @@ from app.services.identification.image_ops import (
 )
 from app.services.identification.text_parser import ParsedCard, parse_ocr_text
 from app.services.ocr import OcrError, OcrResult, VisionProvider, get_provider
+from app.services.ocr.budget import is_budget_exceeded, record_spend_increment
 from app.utils.logger import get_logger
 
 logger = get_logger("services.identification")
@@ -90,6 +91,12 @@ class IdentifyOutcome:
     latency_ms: int
     tcg_inferred: str
     cost_usd: float
+    # When ``True`` the server refused to call the paid OCR provider
+    # (typically because ``OCR_MONTHLY_BUDGET_USD`` is exhausted) and
+    # the client should run on-device OCR + resubmit via
+    # ``POST /v1/cards/identify/text``. ``candidates`` will be empty.
+    fallback_required: bool = False
+    fallback_reason: str | None = None
 
 
 class CardIdentifier:
@@ -121,19 +128,49 @@ class CardIdentifier:
 
         # Step 2 — OCR. Errors become an empty result so the pipeline still
         # produces a (low-confidence) identification + analytics row.
+        #
+        # Budget guard: if the configured provider costs money and the
+        # monthly cap is hit, skip the call entirely. The client gets a
+        # ``fallback_required=True`` response and is expected to retry
+        # via the cheaper ``/identify/text`` route after running
+        # on-device OCR (Apple Vision / ML Kit).
+        provider_costs_money = self._provider.name == "google_vision"
+        budget_blocked = False
+        if provider_costs_money:
+            try:
+                budget_blocked = await is_budget_exceeded(db)
+            except Exception:
+                # Never let a budget bookkeeping failure take down OCR.
+                logger.exception("budget check failed; assuming not exceeded")
+                budget_blocked = False
+
         ocr_result: OcrResult
-        try:
-            ocr_result = await self._provider.detect_text(prepared.ocr_bytes)
-        except OcrError as exc:
-            logger.warning("OCR failed (%s): %s", self._provider.name, exc)
+        if budget_blocked:
+            logger.warning(
+                "OCR budget exceeded ($%.2f cap); signalling client fallback",
+                settings.ocr_monthly_budget_usd,
+            )
             ocr_result = OcrResult(
                 full_text="",
                 blocks=[],
                 mean_confidence=0.0,
                 language_codes=[],
-                provider=self._provider.name,
+                provider="client_fallback",
                 latency_ms=0,
             )
+        else:
+            try:
+                ocr_result = await self._provider.detect_text(prepared.ocr_bytes)
+            except OcrError as exc:
+                logger.warning("OCR failed (%s): %s", self._provider.name, exc)
+                ocr_result = OcrResult(
+                    full_text="",
+                    blocks=[],
+                    mean_confidence=0.0,
+                    language_codes=[],
+                    provider=self._provider.name,
+                    latency_ms=0,
+                )
 
         # Step 3 — parse.
         parsed = parse_ocr_text(ocr_result.full_text)
@@ -186,11 +223,16 @@ class CardIdentifier:
         accuracy = top_candidates[0].confidence if top_candidates else 0.0
         primary_source = top_candidates[0].source if top_candidates else "none"
         latency_ms = int((time.perf_counter() - started) * 1000)
-        cost_usd = (
-            settings.ocr_google_cost_usd_per_call
-            if self._provider.name == "google_vision"
-            else 0.0
+        # Only bill for calls that actually hit Vision. Budget-blocked
+        # short-circuits and provider errors must not inflate spend.
+        billed = (
+            provider_costs_money
+            and not budget_blocked
+            and ocr_result.provider == "google_vision"
         )
+        cost_usd = settings.ocr_google_cost_usd_per_call if billed else 0.0
+        if billed:
+            record_spend_increment(cost_usd)
         identification_id = await self._persist(
             db,
             user_id=user_id,
@@ -215,6 +257,134 @@ class CardIdentifier:
             latency_ms=latency_ms,
             tcg_inferred=tcg_inferred,
             cost_usd=cost_usd,
+            fallback_required=budget_blocked,
+            fallback_reason=(
+                f"monthly OCR budget ${settings.ocr_monthly_budget_usd:.2f} exhausted"
+                if budget_blocked
+                else None
+            ),
+        )
+
+    async def identify_from_text(
+        self,
+        db: AsyncSession,
+        *,
+        ocr_text: str,
+        tcg_hint: str | None = None,
+        client_provider: str = "client_fallback",
+        ocr_confidence: float = 0.0,
+        user_id: uuid.UUID | None = None,
+    ) -> IdentifyOutcome:
+        """Run the pipeline against text the *client* already OCR'd.
+
+        Used when the server returns ``fallback_required=True`` because
+        the Vision budget is exhausted. The client runs on-device OCR
+        (Apple Vision / ML Kit) and resubmits the parsed text here. We
+        skip steps 1 + 2 (preprocess + paid OCR) and run parse →
+        catalog search → score → persist.
+        """
+        import hashlib
+
+        started = time.perf_counter()
+        settings = get_settings()
+
+        ocr_result = OcrResult(
+            full_text=ocr_text or "",
+            blocks=[],
+            mean_confidence=max(0.0, min(1.0, ocr_confidence)),
+            language_codes=[],
+            provider=client_provider,
+            latency_ms=0,
+        )
+        # Synthetic sha256 keyed on the parsed text so repeated submits
+        # of the same OCR string land on the same identification row.
+        synthetic_sha = hashlib.sha256(
+            ("text::" + (ocr_text or "")).encode("utf-8")
+        ).hexdigest()
+
+        parsed = parse_ocr_text(ocr_result.full_text)
+        tcg_inferred = infer_tcg(parsed, user_hint=tcg_hint)
+        text_candidates = await self._search_text(parsed=parsed, tcg=tcg_inferred)
+        merged = self._dedupe(text_candidates, None)
+
+        feedback_priors: dict[str, float] = {}
+        if parsed.title:
+            try:
+                feedback_priors = await self._feedback_priors(
+                    db, ocr_text=ocr_result.full_text, parsed_title=parsed.title
+                )
+            except Exception:
+                logger.exception("feedback prior lookup failed (text path)")
+
+        scored: list[tuple[CandidateOut, ScoreBreakdown]] = []
+        for cand, source in merged:
+            cand_id = cand.get("id") or ""
+            prior = feedback_priors.get(cand_id, 0.0)
+            breakdown = score_candidate(
+                parsed=parsed,
+                candidate=cand,
+                ocr_confidence=ocr_result.mean_confidence,
+                phash_hit=False,
+                feedback_prior=prior,
+            )
+            scored.append((self._to_candidate(cand, source, breakdown), breakdown))
+        scored.sort(key=lambda pair: pair[0].confidence, reverse=True)
+        top_candidates = [pair[0] for pair in scored[: settings.ocr_max_candidates]]
+
+        accuracy = top_candidates[0].confidence if top_candidates else 0.0
+        primary_source = top_candidates[0].source if top_candidates else "none"
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
+        # Persist via a lightweight stub so we share schema with the
+        # image path. ``image_sha256`` carries our synthetic key.
+        from app.models.identification import CardIdentification
+
+        top = top_candidates[0] if top_candidates else None
+        row = CardIdentification(
+            user_id=user_id,
+            image_sha256=synthetic_sha,
+            phash=None,
+            ocr_provider=ocr_result.provider,
+            ocr_full_text=(ocr_result.full_text or "")[:8000],
+            ocr_confidence=ocr_result.mean_confidence,
+            parsed_title=(parsed.title or "")[:200] or None,
+            parsed_set_code=parsed.set_code,
+            parsed_card_number=parsed.card_number,
+            tcg_inferred=tcg_inferred,
+            primary_source=primary_source,
+            top_card_id=top.card_id if top else None,
+            top_upstream_id=top.upstream_id if top else None,
+            top_confidence=accuracy,
+            candidates_json=[
+                {
+                    "card_id": c.card_id,
+                    "upstream_id": c.upstream_id,
+                    "name": c.name,
+                    "confidence": c.confidence,
+                    "source": c.source,
+                    "breakdown": c.breakdown,
+                }
+                for c in top_candidates
+            ],
+            latency_ms=latency_ms,
+            cost_usd=0.0,
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+
+        return IdentifyOutcome(
+            identification_id=row.id,
+            candidates=top_candidates,
+            accuracy_score=accuracy,
+            primary_source=primary_source,
+            parsed=parsed,
+            ocr=ocr_result,
+            latency_ms=latency_ms,
+            tcg_inferred=tcg_inferred,
+            cost_usd=0.0,
+            fallback_required=False,
+            fallback_reason=None,
         )
 
     async def record_feedback(

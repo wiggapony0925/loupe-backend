@@ -29,6 +29,7 @@ from app.models.identification import CardIdentification, IdentificationFeedback
 from app.models.user import User
 from app.rate_limit import rate_limit
 from app.schemas.identification import (
+    IdentifyByTextRequest,
     IdentifyCandidate,
     IdentifyFeedbackRequest,
     IdentifyMetricsResponse,
@@ -116,6 +117,60 @@ async def identify_card(
         ocr_full_text=outcome.ocr.full_text,
         latency_ms=outcome.latency_ms,
         cost_usd=outcome.cost_usd,
+        fallback_required=outcome.fallback_required,
+        fallback_reason=outcome.fallback_reason,
+    )
+
+
+@router.post(
+    "/identify/text",
+    response_model=IdentifyResponse,
+    summary="Identify a card from client-side OCR text (budget fallback)",
+    dependencies=[Depends(identify_limit)],
+)
+async def identify_card_from_text(
+    body: IdentifyByTextRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> IdentifyResponse:
+    """Run the catalog / scoring pipeline against text the client OCR'd.
+
+    Used when ``POST /v1/cards/identify`` returned ``fallback_required=true``
+    (typically because the monthly Vision budget is exhausted). The
+    client extracts text on-device with Apple Vision or ML Kit and
+    POSTs it here. No paid OCR call is made; ``cost_usd`` is always 0.
+    """
+    identifier = CardIdentifier()
+    outcome = await identifier.identify_from_text(
+        db,
+        ocr_text=body.text,
+        tcg_hint=body.tcg,
+        client_provider=body.client_provider,
+        ocr_confidence=body.ocr_confidence,
+        user_id=user.id if user else None,
+    )
+    return IdentifyResponse(
+        identification_id=outcome.identification_id,
+        candidates=[
+            IdentifyCandidate(**dataclasses.asdict(c)) for c in outcome.candidates
+        ],
+        accuracy_score=outcome.accuracy_score,
+        primary_source=outcome.primary_source,
+        tcg_inferred=outcome.tcg_inferred,
+        parsed=IdentifyParsed(
+            title=outcome.parsed.title,
+            set_code=outcome.parsed.set_code,
+            card_number=outcome.parsed.card_number,
+            year=outcome.parsed.year,
+            hp=outcome.parsed.hp,
+        ),
+        ocr_provider=outcome.ocr.provider,
+        ocr_confidence=outcome.ocr.mean_confidence,
+        ocr_full_text=outcome.ocr.full_text,
+        latency_ms=outcome.latency_ms,
+        cost_usd=outcome.cost_usd,
+        fallback_required=False,
+        fallback_reason=None,
     )
 
 

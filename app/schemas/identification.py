@@ -69,6 +69,44 @@ class IdentifyResponse(BaseModel):
     ocr_full_text: str
     latency_ms: int
     cost_usd: float
+    fallback_required: bool = Field(
+        default=False,
+        description=(
+            "When true, the server refused to call the paid OCR provider "
+            "(typically because OCR_MONTHLY_BUDGET_USD is exhausted). "
+            "The client should run on-device OCR (Apple Vision / ML Kit) "
+            "and resubmit via POST /v1/cards/identify/text."
+        ),
+    )
+    fallback_reason: str | None = Field(
+        default=None,
+        description="Human-readable reason when fallback_required is true.",
+    )
+
+
+class IdentifyByTextRequest(BaseModel):
+    """``POST /v1/cards/identify/text`` body — client-side OCR fallback."""
+
+    text: str = Field(
+        min_length=1,
+        max_length=8000,
+        description="Raw OCR text the client extracted on-device.",
+    )
+    tcg: str | None = Field(
+        default=None,
+        description='Optional hint: "pokemon" | "magic" | "yugioh" | …',
+    )
+    client_provider: str = Field(
+        default="client_fallback",
+        max_length=40,
+        description='Identifier for the on-device engine, e.g. "apple_vision" / "mlkit".',
+    )
+    ocr_confidence: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Mean confidence reported by the on-device OCR.",
+    )
 
 
 class IdentifyFeedbackRequest(BaseModel):
@@ -105,6 +143,7 @@ class IdentifyMetricsResponse(BaseModel):
 
 
 __all__ = [
+    "IdentifyByTextRequest",
     "IdentifyCandidate",
     "IdentifyFeedbackRequest",
     "IdentifyMetricsResponse",

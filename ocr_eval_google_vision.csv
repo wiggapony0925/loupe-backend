@@ -1,0 +1,11 @@
+fixture_id,expected_name,top1_name,top1_correct,top3_correct,confidence,latency_ms,cost_usd,parsed_title,notes
+pokemon-charizard-base-4,Charizard,Charizard,True,True,0.6167,3502,0.0015,Charizard,
+pokemon-pikachu-base-58,Pikachu,Pikachu,True,True,0.5527,927,0.0015,Pikachu,
+pokemon-blastoise-base-2,Blastoise,Blastoise,True,True,0.6157,2983,0.0015,Evolves from Wartortle,
+pokemon-venusaur-base-15,Venusaur,Venusaur,True,True,0.5449,4609,0.0015,Evolves from Ivysaur,
+pokemon-mewtwo-base-10,Mewtwo,Mewtwo,True,True,0.6151,2522,0.0015,Mewtwo,
+magic-lightning-bolt-lea,Lightning Bolt,Lightning Bolt,True,True,0.5466,602,0.0015,Lightning Bolt,
+magic-black-lotus-lea,Black Lotus,Black Lotus,True,True,0.6116,601,0.0015,Black Lotus,
+magic-counterspell-lea,Counterspell,Counterspell,True,True,0.5397,705,0.0015,Counterspell,
+yugioh-dark-magician-lob,Dark Magician,Dark Magician,True,True,0.5408,976,0.0015,DARK MAGICIAN,
+yugioh-blue-eyes-lob,Blue-Eyes White Dragon,Accellight,False,False,0.395,870,0.0015,LIGHT,

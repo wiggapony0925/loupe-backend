@@ -159,6 +159,12 @@ class Settings(BaseSettings):
     # Estimated cost per Google Vision text request, surfaced in admin
     # metrics for spend visibility. Override per pricing tier if needed.
     ocr_google_cost_usd_per_call: float = 0.0015
+    # Soft monthly cap on Vision spend. When month-to-date cost_usd hits
+    # this number the pipeline refuses to call the paid provider and
+    # instead returns ``fallback_required=True`` so the client can run
+    # on-device OCR (Apple Vision / ML Kit) and resubmit text via
+    # ``POST /v1/cards/identify/text``. Set ≤0 to disable the cap.
+    ocr_monthly_budget_usd: float = 50.0
 
     # --- Observability (optional; no-ops when DSN is missing) ---
     sentry_dsn: str | None = None

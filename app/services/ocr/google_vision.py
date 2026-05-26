@@ -165,8 +165,15 @@ class GoogleVisionProvider:
         if fta and getattr(fta, "text", None):
             full_text = fta.text
             for page in getattr(fta, "pages", []) or []:
-                for _prop in getattr(page, "property", None) or []:
-                    pass
+                # ``page.property`` is a single ``TextProperty`` (or None),
+                # not a list — iterating it raises ``TypeError``. Pull
+                # languages straight off it when available.
+                page_prop = getattr(page, "property", None)
+                if page_prop is not None:
+                    for lang in getattr(page_prop, "detected_languages", []) or []:
+                        code = getattr(lang, "language_code", "") or ""
+                        if code and code not in languages:
+                            languages.append(code)
                 for block in getattr(page, "blocks", []) or []:
                     for para in getattr(block, "paragraphs", []) or []:
                         for word in getattr(para, "words", []) or []:
