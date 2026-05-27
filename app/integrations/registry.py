@@ -151,7 +151,21 @@ class ProviderRegistry:
             try:
                 return await asyncio.wait_for(coro, timeout=_FANOUT_TIMEOUT_S)
             except Exception as exc:
-                logger.debug("provider fan-out call failed: %s", exc)
+                # Per-provider fan-out failures used to vanish at DEBUG; now
+                # they're reported with the provider tagged so dashboards can
+                # show "PSA error rate" without log spelunking.
+                from app.platform.observability import capture_integration_error
+
+                provider_name = getattr(
+                    getattr(coro, "cr_frame", None), "f_locals", {}
+                ).get("self", None)
+                capture_integration_error(
+                    exc,
+                    integration=type(provider_name).__name__
+                    if provider_name is not None
+                    else "unknown",
+                    operation="fan_out",
+                )
                 return None
 
         return await asyncio.gather(*(safe(c) for c in coros))

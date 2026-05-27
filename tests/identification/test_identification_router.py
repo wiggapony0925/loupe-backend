@@ -201,11 +201,25 @@ async def test_feedback_unknown_identification_returns_404(client, auth_headers)
 
 
 @pytest.mark.asyncio
-async def test_ocr_metrics_endpoint_returns_empty_window(client, auth_headers):
-    resp = await client.get("/v1/cards/admin/ocr/metrics?days=7", headers=auth_headers)
-    body = assert_envelope_ok(resp)
-    assert body["window_days"] == 7
-    assert body["total_identifications"] == 0
-    assert body["total_feedback"] == 0
-    assert body["top1_accuracy"] == 0.0
-    assert body["latency_p50_ms"] == 0
+async def test_ocr_metrics_endpoint_returns_empty_window(
+    client, created_user, auth_headers
+):
+    # Endpoint is admin-gated — bypass by adding the test user's email to
+    # the runtime allowlist for the duration of this test.
+    from app.config import get_settings
+
+    settings = get_settings()
+    prev = settings.admin_emails
+    settings.admin_emails = created_user.email  # type: ignore[misc]
+    try:
+        resp = await client.get(
+            "/v1/cards/admin/ocr/metrics?days=7", headers=auth_headers
+        )
+        body = assert_envelope_ok(resp)
+        assert body["window_days"] == 7
+        assert body["total_identifications"] == 0
+        assert body["total_feedback"] == 0
+        assert body["top1_accuracy"] == 0.0
+        assert body["latency_p50_ms"] == 0
+    finally:
+        settings.admin_emails = prev  # type: ignore[misc]

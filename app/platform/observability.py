@@ -137,4 +137,48 @@ def init_otel(settings: Settings, app: object | None = None) -> bool:
         return False
 
 
-__all__ = ["init_otel", "init_sentry"]
+__all__ = ["capture_integration_error", "init_otel", "init_sentry"]
+
+
+def capture_integration_error(
+    exc: BaseException,
+    *,
+    integration: str,
+    operation: str,
+    extra: dict[str, object] | None = None,
+) -> None:
+    """Log + Sentry-capture an upstream integration failure.
+
+    The upstream provider clients (eBay, PSA, Pokémon TCG, …) are wrapped
+    in broad ``except`` blocks that fall back to synthesized data — by
+    design, so a flaky third party never breaks the user request. The
+    downside is silent failure. This helper:
+
+    * always emits a structured ``WARNING`` log so on-call sees it in
+      Cloud Logging filters,
+    * captures the exception to Sentry with tags so a per-integration
+      health view is one filter away.
+
+    Safe to call before/after Sentry init — when uninitialised it logs
+    only. Never raises.
+    """
+    _log.warning(
+        "integration-fallback integration=%s op=%s err=%s",
+        integration,
+        operation,
+        exc,
+    )
+    if not _sentry_initialized:
+        return
+    try:
+        import sentry_sdk
+
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("integration", integration)
+            scope.set_tag("operation", operation)
+            if extra:
+                for k, v in extra.items():
+                    scope.set_extra(k, v)
+            sentry_sdk.capture_exception(exc)
+    except Exception:  # pragma: no cover - observability must not crash
+        _log.debug("sentry capture failed", exc_info=True)

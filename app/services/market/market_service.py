@@ -294,7 +294,14 @@ async def _enrich_with_real_data(
     try:
         comps = await registry.fan_out_comps(query, days=90, limit=100)
     except Exception as exc:
-        logger.debug("real-data fan_out_comps failed: %s", exc)
+        from app.platform.observability import capture_integration_error
+
+        capture_integration_error(
+            exc,
+            integration="market.registry",
+            operation="fan_out_comps",
+            extra={"query": query, "card_id": card.get("id")},
+        )
         return
     if not comps:
         return
