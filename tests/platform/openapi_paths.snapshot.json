@@ -120,6 +120,9 @@
   "/v1/home/feed": [
     "GET"
   ],
+  "/v1/img": [
+    "GET"
+  ],
   "/v1/market/indices/{index_id}/history": [
     "GET"
   ],

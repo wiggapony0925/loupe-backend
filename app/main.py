@@ -19,7 +19,7 @@ from app.routers.analytics import portfolio_overview as analytics
 from app.routers.analytics import reports
 from app.routers.auth import auth, users
 from app.routers.catalog import card_sets as sets
-from app.routers.catalog import cards, identify, providers
+from app.routers.catalog import cards, identify, image_proxy, providers
 from app.routers.collection import collections, grades, scans, sealed
 from app.routers.collection import scan_devices as scanners
 from app.routers.market import alerts, market, prices
@@ -95,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(scans.router, prefix=api_prefix)
     app.include_router(cards.router, prefix=api_prefix)
     app.include_router(identify.router, prefix=api_prefix)
+    app.include_router(image_proxy.router, prefix=api_prefix)
     app.include_router(sets.router, prefix=api_prefix)
     app.include_router(grades.router, prefix=api_prefix)
     app.include_router(prices.router, prefix=api_prefix)
