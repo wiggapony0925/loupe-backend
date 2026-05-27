@@ -195,11 +195,17 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     cards: list[dict[str, Any]] = []
     try:
         if tcg == "pokemon":
-            cards = (await asyncio.wait_for(_trending_pokemon(limit), _PROVIDER_TIMEOUT_S))[:limit]
+            cards = (
+                await asyncio.wait_for(_trending_pokemon(limit), _PROVIDER_TIMEOUT_S)
+            )[:limit]
         elif tcg == "magic":
-            cards = (await asyncio.wait_for(_trending_magic(limit), _PROVIDER_TIMEOUT_S))[:limit]
+            cards = (
+                await asyncio.wait_for(_trending_magic(limit), _PROVIDER_TIMEOUT_S)
+            )[:limit]
         elif tcg == "yugioh":
-            cards = (await asyncio.wait_for(_trending_yugioh(limit), _PROVIDER_TIMEOUT_S))[:limit]
+            cards = (
+                await asyncio.wait_for(_trending_yugioh(limit), _PROVIDER_TIMEOUT_S)
+            )[:limit]
         else:
             per = max(4, (limit // 3) + 2)
             results = await asyncio.gather(

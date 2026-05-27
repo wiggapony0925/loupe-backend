@@ -64,9 +64,7 @@ def test_openapi_paths_snapshot() -> None:
         added = sorted(set(current) - set(expected))
         removed = sorted(set(expected) - set(current))
         changed = sorted(
-            p
-            for p in set(current) & set(expected)
-            if current[p] != expected[p]
+            p for p in set(current) & set(expected) if current[p] != expected[p]
         )
         msg = ["OpenAPI surface drifted from snapshot."]
         if added:
@@ -74,9 +72,7 @@ def test_openapi_paths_snapshot() -> None:
         if removed:
             msg.append(f"  REMOVED: {removed}")
         for p in changed:
-            msg.append(
-                f"  CHANGED: {p}  was={expected[p]}  now={current[p]}"
-            )
+            msg.append(f"  CHANGED: {p}  was={expected[p]}  now={current[p]}")
         msg.append(
             "If intentional, regenerate with: "
             "UPDATE_OPENAPI_SNAPSHOT=1 pytest tests/platform/test_openapi_snapshot.py"

@@ -764,9 +764,7 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                         _do_resolve(), timeout=4.0
                     )
                 except (TimeoutError, Exception) as exc:
-                    logger.info(
-                        "upstream resolve skipped for %s (%s)", as_uuid, exc
-                    )
+                    logger.info("upstream resolve skipped for %s (%s)", as_uuid, exc)
                     resolved = None
                     upstream_match = None
 

@@ -64,18 +64,14 @@ async def test_image_proxy_serves_cache_on_second_hit(client):
 
 @pytest.mark.asyncio
 async def test_image_proxy_rejects_disallowed_host(client):
-    resp = await client.get(
-        "/v1/img", params={"u": "https://evil.example.com/secret"}
-    )
+    resp = await client.get("/v1/img", params={"u": "https://evil.example.com/secret"})
     # Envelope middleware wraps non-2xx as JSON envelope; just check status.
     assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_image_proxy_rejects_non_http_scheme(client):
-    resp = await client.get(
-        "/v1/img", params={"u": "file:///etc/passwd"}
-    )
+    resp = await client.get("/v1/img", params={"u": "file:///etc/passwd"})
     assert resp.status_code == 400
 
 
@@ -83,9 +79,7 @@ async def test_image_proxy_rejects_non_http_scheme(client):
 async def test_image_proxy_502_on_upstream_failure(client):
     url = "https://images.ygoprodeck.com/cards/12345.jpg"
     with respx.mock(assert_all_called=False) as router:
-        router.get(url).mock(
-            side_effect=httpx.ConnectError("boom")
-        )
+        router.get(url).mock(side_effect=httpx.ConnectError("boom"))
         resp = await client.get("/v1/img", params={"u": url})
     assert resp.status_code == 502
 
@@ -96,7 +90,8 @@ async def test_image_proxy_502_on_non_image_content_type(client):
     with respx.mock(assert_all_called=False) as router:
         router.get(url).mock(
             return_value=httpx.Response(
-                200, content=b"<html>not an image</html>",
+                200,
+                content=b"<html>not an image</html>",
                 headers={"content-type": "text/html"},
             )
         )

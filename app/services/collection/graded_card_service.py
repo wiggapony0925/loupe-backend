@@ -137,9 +137,7 @@ async def list_for_user(
     ]
 
 
-async def create(
-    db: AsyncSession, user: User, payload: GradedCardCreate
-) -> GradedCard:
+async def create(db: AsyncSession, user: User, payload: GradedCardCreate) -> GradedCard:
     # Resolve / materialize the card identity first so users can submit
     # an upstream id without pre-creating a local Card.
     card_id = payload.card_id
@@ -200,9 +198,7 @@ async def get_one(
     return pair[0], pair[1], pair[2]
 
 
-async def _load_owned(
-    db: AsyncSession, user: User, grade_id: uuid.UUID
-) -> GradedCard:
+async def _load_owned(db: AsyncSession, user: User, grade_id: uuid.UUID) -> GradedCard:
     row = (
         await db.execute(
             select(GradedCard).where(
@@ -245,9 +241,7 @@ async def update(
     return row
 
 
-async def soft_delete(
-    db: AsyncSession, user: User, grade_id: uuid.UUID
-) -> None:
+async def soft_delete(db: AsyncSession, user: User, grade_id: uuid.UUID) -> None:
     row = await _load_owned(db, user, grade_id)
     row.deleted_at = utcnow()
     await db.commit()

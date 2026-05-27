@@ -26,7 +26,9 @@ def _percentile(values: list[int], pct: int) -> int:
     return ordered[k]
 
 
-async def compute_ocr_metrics(db: AsyncSession, *, days: int) -> IdentifyMetricsResponse:
+async def compute_ocr_metrics(
+    db: AsyncSession, *, days: int
+) -> IdentifyMetricsResponse:
     """Return rolling OCR accuracy + cost metrics over the last ``days`` days."""
     cutoff = datetime.now(UTC) - timedelta(days=days)
 

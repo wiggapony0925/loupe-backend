@@ -178,9 +178,7 @@ async def update_holding(
     return row, product
 
 
-async def delete_holding(
-    db: AsyncSession, user: User, holding_id: uuid.UUID
-) -> None:
+async def delete_holding(db: AsyncSession, user: User, holding_id: uuid.UUID) -> None:
     row = await _load_owned(db, user, holding_id)
     row.deleted_at = utcnow()
     await db.commit()

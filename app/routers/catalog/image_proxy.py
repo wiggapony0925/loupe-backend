@@ -131,7 +131,9 @@ def _validate_url(raw: str) -> str:
     dependencies=[Depends(catalog_read_limit)],
     response_class=Response,
 )
-async def proxy_image(u: str = Query(..., description="Upstream image URL")) -> Response:
+async def proxy_image(
+    u: str = Query(..., description="Upstream image URL"),
+) -> Response:
     """Fetch and re-emit ``u`` as an image with long cache headers.
 
     Returns the raw image bytes on success. On upstream failure returns
@@ -160,16 +162,12 @@ async def proxy_image(u: str = Query(..., description="Upstream image URL")) -> 
         raise HTTPException(status_code=502, detail="upstream_unreachable") from exc
 
     if resp.status_code != 200:
-        logger.warning(
-            "image_proxy non-200 url=%s status=%s", url, resp.status_code
-        )
+        logger.warning("image_proxy non-200 url=%s status=%s", url, resp.status_code)
         raise HTTPException(status_code=502, detail="upstream_status")
 
     body = resp.content
     if len(body) > _MAX_BYTES_PER_IMAGE:
-        logger.warning(
-            "image_proxy oversize url=%s bytes=%d", url, len(body)
-        )
+        logger.warning("image_proxy oversize url=%s bytes=%d", url, len(body))
         raise HTTPException(status_code=502, detail="upstream_too_large")
 
     content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()

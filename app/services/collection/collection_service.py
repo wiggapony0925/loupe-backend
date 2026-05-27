@@ -51,9 +51,7 @@ async def list_for_user(db: AsyncSession, user: User) -> list[Collection]:
     )
 
 
-async def create(
-    db: AsyncSession, user: User, payload: CollectionCreate
-) -> Collection:
+async def create(db: AsyncSession, user: User, payload: CollectionCreate) -> Collection:
     row = Collection(
         user_id=user.id,
         name=payload.name,
@@ -143,9 +141,7 @@ async def add_item(
     ).scalar_one_or_none()
     if existing is None:
         db.add(
-            CollectionItem(
-                collection_id=collection_id, graded_card_id=graded_card_id
-            )
+            CollectionItem(collection_id=collection_id, graded_card_id=graded_card_id)
         )
         await db.commit()
 

@@ -29,9 +29,7 @@ async def test_ocr_metrics_admin_allowed(client, created_user, auth_headers):
     prev = settings.admin_emails
     settings.admin_emails = created_user.email  # type: ignore[misc]
     try:
-        resp = await client.get(
-            "/v1/cards/admin/ocr/metrics", headers=auth_headers
-        )
+        resp = await client.get("/v1/cards/admin/ocr/metrics", headers=auth_headers)
         assert resp.status_code == 200
     finally:
         settings.admin_emails = prev  # type: ignore[misc]

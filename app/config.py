@@ -181,11 +181,7 @@ class Settings(BaseSettings):
     @property
     def admin_email_set(self) -> set[str]:
         """Normalised admin email allowlist (lowercased, deduped)."""
-        return {
-            e.strip().lower()
-            for e in self.admin_emails.split(",")
-            if e.strip()
-        }
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
 
     # --- OpenTelemetry (off by default; flip on once SDK + exporter
     # extras are installed in the runtime image and the IAM role for

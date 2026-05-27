@@ -117,9 +117,7 @@ scan_create_limit = rate_limit(limit=30, window_seconds=60, name="scans.create")
 # trending / canonical / DB search). These all touch upstream APIs or
 # heavy DB queries; 120/min/IP is generous for genuine usage and tight
 # enough to stop scrapers cold.
-catalog_read_limit = rate_limit(
-    limit=120, window_seconds=60, name="cards.read"
-)
+catalog_read_limit = rate_limit(limit=120, window_seconds=60, name="cards.read")
 
 
 __all__ = [
