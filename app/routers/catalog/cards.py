@@ -20,7 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models.enums import TcgEnum
-from app.platform.rate_limit import resolve_limit, search_live_limit
+from app.platform.rate_limit import (
+    catalog_read_limit,
+    resolve_limit,
+    search_live_limit,
+)
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
 from app.services.catalog import (
@@ -63,7 +67,11 @@ async def search_live(
     return await card_search_service.search_cards(q=q, tcg=tcg, limit=limit)
 
 
-@router.get("/trending", summary="Trending cards (public)")
+@router.get(
+    "/trending",
+    summary="Trending cards (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
 async def get_trending(
     tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
     limit: int = Query(24, ge=1, le=100),
@@ -77,7 +85,12 @@ async def get_trending(
     return await trending_service.get_trending(tcg=tcg, limit=limit)
 
 
-@router.get("", response_model=Pagination[CardRead], summary="Search cards (DB)")
+@router.get(
+    "",
+    response_model=Pagination[CardRead],
+    summary="Search cards (DB)",
+    dependencies=[Depends(catalog_read_limit)],
+)
 async def search(
     q: str | None = Query(None, max_length=120),
     tcg: TcgEnum | None = None,
@@ -191,7 +204,11 @@ async def resolve_card(
     }
 
 
-@router.get("/{card_id}/market", summary="Card market snapshot (public)")
+@router.get(
+    "/{card_id}/market",
+    summary="Card market snapshot (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
 async def get_market(card_id: str) -> dict[str, Any]:
     """Return the full per-house × per-grade market view for a card.
 
@@ -205,7 +222,11 @@ async def get_market(card_id: str) -> dict[str, Any]:
     return result
 
 
-@router.get("/{card_id}/prices", summary="Card price history (public)")
+@router.get(
+    "/{card_id}/prices",
+    summary="Card price history (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
 async def get_prices(
     card_id: str,
     range: str = Query("30d", pattern="^(7d|30d|90d|180d|1y|365d)$"),
@@ -228,7 +249,11 @@ async def get_prices(
     return result
 
 
-@router.get("/{card_id}/listings", summary="Live for-sale listings (public)")
+@router.get(
+    "/{card_id}/listings",
+    summary="Live for-sale listings (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
 async def get_listings(
     card_id: str,
     limit: int = Query(20, ge=1, le=50),
@@ -244,7 +269,11 @@ async def get_listings(
     return result
 
 
-@router.get("/{card_id}/comps", summary="Recent sold comps (public)")
+@router.get(
+    "/{card_id}/comps",
+    summary="Recent sold comps (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
 async def get_comps(
     card_id: str,
     days: int = Query(90, ge=1, le=365),
@@ -264,6 +293,7 @@ async def get_comps(
 @router.get(
     "/{card_id}/grade-summary",
     summary="Per-grade price summary (public)",
+    dependencies=[Depends(catalog_read_limit)],
 )
 async def get_grade_summary(
     card_id: str,
@@ -286,6 +316,7 @@ async def get_grade_summary(
 @router.get(
     "/{card_id}/marketplace-prices",
     summary="Lowest active price per marketplace (public)",
+    dependencies=[Depends(catalog_read_limit)],
 )
 async def get_marketplace_prices(
     card_id: str,
@@ -305,7 +336,11 @@ async def get_marketplace_prices(
     return result
 
 
-@router.get("/{card_id}/canonical", summary="Canonical unified card (public)")
+@router.get(
+    "/{card_id}/canonical",
+    summary="Canonical unified card (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
 async def get_canonical(card_id: str) -> dict[str, Any]:
     """Return the single "holy grail" :class:`CanonicalCard` document.
 
