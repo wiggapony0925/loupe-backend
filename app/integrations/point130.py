@@ -15,8 +15,8 @@ from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
-from app.platform.redis_client import get_redis
 from app.integrations.base import BaseProvider, SoldComp, parse_grade
+from app.platform.redis_client import get_redis
 from app.utils.logger import get_logger
 
 logger = get_logger("integrations.point130")

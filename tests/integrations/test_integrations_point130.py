@@ -6,9 +6,9 @@ import httpx
 import pytest
 import respx
 
+from app.integrations import point130 as point130_module
 from app.integrations.base import close_http_client
 from app.integrations.point130 import Point130Provider
-from app.integrations import point130 as point130_module
 
 _HTML = """
 <html><body><table>

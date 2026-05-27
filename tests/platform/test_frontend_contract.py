@@ -41,7 +41,6 @@ from app.models.enums import GradeHouseEnum, ScannerTransportEnum, TcgEnum
 from app.models.grade import GradedCard
 from app.models.scanner import Scanner
 from app.models.user import User, UserSettings
-
 from tests.conftest import assert_envelope_ok
 
 # ---- Fixture -----------------------------------------------------------

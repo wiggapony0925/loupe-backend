@@ -7,11 +7,11 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.platform.s3 import get_s3_client
 from app.config import get_settings
 from app.models.enums import ScanStatusEnum
 from app.models.scan import ScanJob
 from app.models.user import User
+from app.platform.s3 import get_s3_client
 from app.schemas.scan import (
     PresignedUpload,
     ScanAngle,

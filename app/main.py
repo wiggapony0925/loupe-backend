@@ -11,9 +11,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 from app.config import get_settings
 from app.http.exception_handlers import register_exception_handlers
 from app.http.middleware import register_http_middleware
+from app.http.response_envelope import register_envelope_middleware
 from app.lifecycle import lifespan
 from app.platform.observability import init_otel, init_sentry
-from app.http.response_envelope import register_envelope_middleware
 from app.routers.analytics import home_feed as home
 from app.routers.analytics import portfolio_overview as analytics
 from app.routers.analytics import reports

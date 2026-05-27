@@ -18,9 +18,9 @@ import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.integrations import get_registry
 from app.platform.cache_config import PRICE_HISTORY_TTL
 from app.platform.redis_client import get_redis
-from app.integrations import get_registry
 from app.services.catalog import card_search_service
 from app.utils.logger import get_logger
 

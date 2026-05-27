@@ -15,9 +15,9 @@ import httpx
 import jwt
 from jwt.algorithms import RSAAlgorithm
 
+from app.config import get_settings
 from app.platform.cache_config import JWKS_CACHE_TTL
 from app.platform.redis_client import get_redis
-from app.config import get_settings
 from app.utils.logger import get_logger
 
 logger = get_logger("auth.apple")

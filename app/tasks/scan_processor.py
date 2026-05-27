@@ -14,21 +14,21 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.platform.cache_config import SCAN_PUBSUB_CHANNEL
-from app.platform.redis_client import get_redis
 from app.db import get_sessionmaker
 from app.models.card import Card
 from app.models.enums import GradeHouseEnum, ScanStatusEnum, TcgEnum
 from app.models.fingerprint import Fingerprint
 from app.models.grade import GradedCard
 from app.models.scan import ScanJob
+from app.platform.cache_config import SCAN_PUBSUB_CHANNEL
+from app.platform.redis_client import get_redis
+from app.platform.ws_manager import get_manager
 from app.schemas.scan import ScanProgressEvent
 from app.services.catalog import card_resolver_service
 from app.services.catalog.card_fingerprint_service import fingerprint_from_images
 from app.services.collection.grading_service import grade_from_images
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
-from app.platform.ws_manager import get_manager
 
 logger = get_logger("workers.scan")
 

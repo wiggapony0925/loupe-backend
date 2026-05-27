@@ -39,7 +39,7 @@ def _current_paths() -> dict[str, list[str]]:
     for path, ops in (schema.get("paths") or {}).items():
         methods = sorted(
             m.upper()
-            for m in ops.keys()
+            for m in ops
             if m.lower() in {"get", "post", "put", "patch", "delete", "head", "options"}
         )
         if methods:

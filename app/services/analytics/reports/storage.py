@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import uuid
 
-from app.platform.s3 import get_s3_client
 from app.config import get_settings
+from app.platform.s3 import get_s3_client
 from app.utils.logger import get_logger
 
 _log = get_logger("services.reports.storage")

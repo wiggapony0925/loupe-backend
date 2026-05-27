@@ -7,8 +7,8 @@ import time
 from fastapi import APIRouter
 
 from app import __version__
-from app.platform.redis_client import get_redis
 from app.config import get_settings
+from app.platform.redis_client import get_redis
 
 router = APIRouter(tags=["system"])
 

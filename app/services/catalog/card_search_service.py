@@ -26,13 +26,13 @@ from typing import Any
 
 import httpx
 
+from app.integrations._http import pokemon_tcg, scryfall, ygoprodeck
 from app.platform.cache_config import (
     CARD_DETAIL_TTL,
     CARD_SEARCH_TTL,
     PRICE_HISTORY_TTL,
     SET_LIST_TTL,
 )
-from app.integrations._http import pokemon_tcg, scryfall, ygoprodeck
 from app.platform.redis_client import get_redis
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
@@ -763,7 +763,7 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                     resolved, upstream_match = await asyncio.wait_for(
                         _do_resolve(), timeout=4.0
                     )
-                except (asyncio.TimeoutError, Exception) as exc:  # noqa: BLE001
+                except (TimeoutError, Exception) as exc:
                     logger.info(
                         "upstream resolve skipped for %s (%s)", as_uuid, exc
                     )

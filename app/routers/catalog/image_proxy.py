@@ -82,7 +82,7 @@ _UPSTREAM_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
 # once the upstream URL exists, so we tell clients "never re-validate".
 _PUBLIC_CACHE_SECONDS = 60 * 60 * 24 * 30  # 30 days
 
-_cache: "OrderedDict[str, tuple[bytes, str]]" = OrderedDict()
+_cache: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
 _cache_lock = asyncio.Lock()
 
 

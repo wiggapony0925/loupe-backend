@@ -32,8 +32,8 @@ from app.models.enums import GradeHouseEnum, ScanStatusEnum
 from app.models.grade import GradedCard
 from app.models.scan import ScanJob
 from app.services.catalog.card_fingerprint_service import FingerprintResult
-from app.utils.time import utcnow
 from app.tasks import scan_processor
+from app.utils.time import utcnow
 from tests.conftest import assert_envelope_ok
 from tests.factories import make_card
 
