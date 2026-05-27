@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.jwt import verify_token
+from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
 from app.platform.request_context import set_request_user_id
@@ -89,4 +90,34 @@ async def optional_user(
     return await _resolve_user(creds, db, required=False)
 
 
-__all__ = ["bearer_scheme", "optional_user", "require_user"]
+async def require_admin(user: User = Depends(require_user)) -> User:
+    """Dependency: a signed-in user whose email is in the admin allowlist.
+
+    Authorization model is intentionally minimal — until a proper role
+    table lands on :class:`User`, admin membership is driven by the
+    ``ADMIN_EMAILS`` env var (comma-separated). This keeps internal
+    metrics / dashboards behind a real auth check rather than a
+    TODO-stub, and is easy to ratchet up later without touching call
+    sites.
+
+    Raises:
+        HTTPException(403): when the user's email isn't in the allowlist
+            (or the allowlist is empty, which deliberately denies all).
+    """
+    allow = get_settings().admin_email_set
+    email = (user.email or "").strip().lower()
+    if not email or email not in allow:
+        logger.warning(
+            "admin-gate denied user=%s email=%s allowlist_size=%d",
+            user.id,
+            email or "<unset>",
+            len(allow),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return user
+
+
+__all__ = ["bearer_scheme", "optional_user", "require_admin", "require_user"]

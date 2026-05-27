@@ -9,7 +9,8 @@ Three public surfaces:
 * ``POST /v1/cards/identify/{id}/feedback`` — thumbs-up/down + optional
   correction. Auth required (we want to attribute the signal).
 * ``GET /v1/cards/admin/ocr/metrics`` — rolling accuracy + cost
-  dashboard. Auth required; admin gating is TODO (no role model yet).
+  dashboard. Admin-only: caller must be in the ``ADMIN_EMAILS``
+  allowlist (see :class:`Settings`).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import optional_user, require_user
+from app.auth.dependencies import optional_user, require_admin, require_user
 from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
@@ -215,13 +216,11 @@ async def submit_identify_feedback(
 async def ocr_metrics(
     days: int = Query(30, ge=1, le=180),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_user),
+    _admin: User = Depends(require_admin),
 ) -> IdentifyMetricsResponse:
     """Rolling accuracy/cost metrics over the last ``days`` days.
 
-    .. note::
-       TODO(admin-roles): there is no admin role on :class:`User` yet.
-       For now any signed-in user can hit this endpoint; once roles
-       land, gate with ``Depends(require_admin)``.
+    Gated by :func:`require_admin` — caller's email must be in the
+    ``ADMIN_EMAILS`` allowlist. Returns 403 otherwise.
     """
     return await compute_ocr_metrics(db, days=days)

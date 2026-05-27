@@ -171,6 +171,22 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.1
 
+    # --- Authorization ---
+    # Comma-separated list of email addresses with admin privileges.
+    # Pragmatic stand-in until a proper RBAC model lands on `User`.
+    # Compared case-insensitively against `User.email`. Empty list means
+    # NO admins — admin-gated endpoints will reject every caller.
+    admin_emails: str = ""
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        """Normalised admin email allowlist (lowercased, deduped)."""
+        return {
+            e.strip().lower()
+            for e in self.admin_emails.split(",")
+            if e.strip()
+        }
+
     # --- OpenTelemetry (off by default; flip on once SDK + exporter
     # extras are installed in the runtime image and the IAM role for
     # the target backend is granted).
