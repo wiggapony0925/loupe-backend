@@ -40,6 +40,9 @@ from app.utils.time import utcnow
 logger = get_logger("services.card_search")
 
 MAX_LIMIT = 50
+#: Per-provider deadline for the ``tcg=all`` fan-out so one slow upstream
+#: can't hold the entire interactive search hostage.
+PER_PROVIDER_TIMEOUT = 4.0
 
 #: Providers we *don't* have an upstream for yet — returned gracefully.
 UNSUPPORTED_TCGS = {"onepiece", "lorcana", "sports"}
@@ -499,8 +502,27 @@ async def _cache_set(key: str, value: dict[str, Any], ttl: int) -> None:
 # -------------------------------------------------------------- per-provider
 
 
+# Pokémon TCG (Lucene-style) does NOT honour `*` inside quotes — quoted
+# strings are treated as exact phrases, so `name:"pikachu*"` matches
+# literally nothing. Build a token list that uses prefix wildcards on every
+# whitespace-separated word, with special chars stripped so we never break
+# the query parser. Falls back to a substring match if the cleaned query is
+# empty (e.g. user typed only punctuation).
+_POKEMON_SAFE_RE = re.compile(r"[^A-Za-z0-9\- ]+")
+
+
+def _build_pokemon_query(q: str) -> str:
+    cleaned = _POKEMON_SAFE_RE.sub(" ", q).strip().lower()
+    if not cleaned:
+        return f'name:"{q}"'
+    tokens = [t for t in cleaned.split() if t]
+    if not tokens:
+        return f'name:"{q}"'
+    return " ".join(f"name:{tok}*" for tok in tokens)
+
+
 async def _search_pokemon(q: str, limit: int) -> list[dict[str, Any]]:
-    raw = await pokemon_tcg.search_cards(f'name:"{q}*"', page=1, page_size=limit)
+    raw = await pokemon_tcg.search_cards(_build_pokemon_query(q), page=1, page_size=limit)
     return [_from_pokemon(c) for c in (raw.get("data") or [])][:limit]
 
 
@@ -560,10 +582,18 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
             body = {"results": items, "total": len(items), "source": "scryfall"}
         else:  # "all" → parallel fan-out
             per = max(3, min(limit, MAX_LIMIT))
+
+            # Cap each provider at PER_PROVIDER_TIMEOUT so one slow upstream
+            # never blocks the response. The interactive search UX needs sub-
+            # second responsiveness; the default httpx timeout (15s) is fine
+            # for background jobs but unacceptable for keystroke search.
+            async def _bounded(coro):
+                return await asyncio.wait_for(coro, timeout=PER_PROVIDER_TIMEOUT)
+
             results = await asyncio.gather(
-                _search_pokemon(q, per),
-                _search_scryfall(q, per),
-                _search_ygoprodeck(q, per),
+                _bounded(_search_pokemon(q, per)),
+                _bounded(_search_scryfall(q, per)),
+                _bounded(_search_ygoprodeck(q, per)),
                 return_exceptions=True,
             )
             lists: list[list[dict[str, Any]]] = []
@@ -763,8 +793,16 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                     resolved, upstream_match = await asyncio.wait_for(
                         _do_resolve(), timeout=4.0
                     )
-                except (TimeoutError, Exception) as exc:
-                    logger.info("upstream resolve skipped for %s (%s)", as_uuid, exc)
+                except TimeoutError:
+                    logger.info(
+                        "upstream resolve skipped for %s (timeout after 4s)", as_uuid
+                    )
+                    resolved = None
+                    upstream_match = None
+                except Exception as exc:
+                    # Use %r so the type+args are always visible — plain %s
+                    # on many provider exceptions renders as empty.
+                    logger.info("upstream resolve skipped for %s (%r)", as_uuid, exc)
                     resolved = None
                     upstream_match = None
 

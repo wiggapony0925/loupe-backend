@@ -54,7 +54,11 @@ async def test_live_search_pokemon(client, monkeypatch):
     async def fake_search(
         query: str, page: int = 1, page_size: int = 25
     ) -> dict[str, Any]:
-        assert "Charizard" in query
+        assert "charizard" in query.lower()
+        # Wildcard MUST live outside the quoted phrase or the Pokémon TCG
+        # API treats `*` as a literal character and returns no matches.
+        assert '"' not in query
+        assert query.endswith("*")
         return {
             "data": [
                 {

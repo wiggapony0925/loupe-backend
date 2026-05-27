@@ -285,8 +285,15 @@ def _summary_from_market(snapshot: dict[str, Any] | None) -> dict[str, Any]:
 async def _safe(coro: Any, *, label: str, errors: list[str]) -> Any:
     try:
         return await asyncio.wait_for(coro, timeout=_FANOUT_TIMEOUT_S)
+    except TimeoutError:
+        # Bare TimeoutError has no message — logging `%s` produced empty
+        # strings ("canonical compose market failed: ") that made these
+        # very common failures impossible to spot in production logs.
+        logger.info("canonical compose %s failed: timeout after %ss", label, _FANOUT_TIMEOUT_S)
+        errors.append(f"{label}:Timeout")
+        return None
     except Exception as exc:
-        logger.info("canonical compose %s failed: %s", label, exc)
+        logger.info("canonical compose %s failed: %r", label, exc)
         errors.append(f"{label}:{type(exc).__name__}")
         return None
 

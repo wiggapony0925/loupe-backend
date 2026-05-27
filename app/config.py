@@ -108,8 +108,13 @@ class Settings(BaseSettings):
     # JustTCG — https://justtcg.com/api (aggregated TCG prices, free tier)
     justtcg_api_key: str | None = None
     # TCGCSV — https://tcgcsv.com (free daily TCGplayer mirror, no key needed).
-    # Set to false to disable the background download.
-    tcgcsv_enabled: bool = True
+    # Disabled by default: tcgcsv.com no longer publishes the per-group
+    # `products.csv` / `prices.csv` dumps we rely on (every fetch 404s),
+    # and the loader synchronously downloads the entire TCGplayer
+    # catalog on first request, which can starve the card-detail fan-out
+    # within its 4s budget and leave the in-memory cache empty for 6h.
+    # Re-enable explicitly via env once a working source/loader is wired.
+    tcgcsv_enabled: bool = False
 
     # --- Google Cloud Platform (production infra) ---
     # Path to service-account JSON. Standard env var the google-* SDKs read

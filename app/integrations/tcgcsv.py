@@ -110,6 +110,8 @@ class TcgCsvProvider(BaseProvider):
                 return
             client = await get_http_client()
             by_name: dict[str, dict[str, Any]] = {}
+            total_groups = 0
+            failed_groups = 0
             for tcg, cat_id in _CATEGORIES.items():
                 try:
                     groups_resp = await client.get(
@@ -127,6 +129,7 @@ class TcgCsvProvider(BaseProvider):
                     gid = group.get("groupId")
                     if gid is None:
                         continue
+                    total_groups += 1
                     try:
                         prod_csv = await client.get(
                             f"{_BASE}/{cat_id}/{gid}/products.csv", timeout=30.0
@@ -135,11 +138,34 @@ class TcgCsvProvider(BaseProvider):
                             f"{_BASE}/{cat_id}/{gid}/prices.csv", timeout=30.0
                         )
                         if prod_csv.status_code >= 400 or price_csv.status_code >= 400:
+                            failed_groups += 1
                             continue
                         _merge_group(by_name, prod_csv.text, price_csv.text)
                     except Exception as exc:
+                        failed_groups += 1
                         logger.debug("tcgcsv group %s/%s failed: %s", cat_id, gid, exc)
                         continue
+
+            # If the upstream is wholesale broken (e.g. tcgcsv.com no longer
+            # publishes per-group CSVs and every fetch 404s) we MUST NOT
+            # mark the cache fresh with an empty dict — doing so would
+            # poison lookups for the full 6h TTL and the UI would silently
+            # show no prices. Instead, leave the cache untouched, log loudly
+            # so on-call sees it, and let the next request retry. The lock
+            # still prevents a thundering herd within the same process.
+            if not by_name:
+                logger.warning(
+                    "tcgcsv produced 0 products (groups_attempted=%d, failed=%d) — "
+                    "cache NOT marked fresh; consider disabling via TCGCSV_ENABLED=false",
+                    total_groups,
+                    failed_groups,
+                )
+                # Short circuit further loads in this process for 5 minutes
+                # so we don't spend every card-detail request re-attempting
+                # hundreds of doomed CSV downloads. Stamp the cache as
+                # "recently attempted" but keep _by_name empty.
+                _cache._loaded_at = time.time() - _CACHE_TTL_SECONDS + 300
+                return
 
             _cache._by_name = by_name
             _cache._loaded_at = time.time()

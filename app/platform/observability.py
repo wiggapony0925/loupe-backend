@@ -163,7 +163,7 @@ def capture_integration_error(
     only. Never raises.
     """
     _log.warning(
-        "integration-fallback integration=%s op=%s err=%s",
+        "integration-fallback integration=%s op=%s err=%r",
         integration,
         operation,
         exc,
