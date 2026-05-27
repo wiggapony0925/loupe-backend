@@ -26,7 +26,10 @@ from app.utils.logger import get_logger
 
 logger = get_logger("integrations.registry")
 
-_FANOUT_TIMEOUT_S = 4.0
+# Per-provider hard cap inside a fan-out. Kept tight because card-detail
+# pages issue 5+ fan-outs concurrently — every extra second is paid by
+# every endpoint that depends on it.
+_FANOUT_TIMEOUT_S = 2.5
 
 
 class ProviderRegistry:

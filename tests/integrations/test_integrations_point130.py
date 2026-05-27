@@ -8,6 +8,7 @@ import respx
 
 from app.integrations.base import close_http_client
 from app.integrations.point130 import Point130Provider
+from app.integrations import point130 as point130_module
 
 _HTML = """
 <html><body><table>
@@ -22,6 +23,9 @@ _HTML = """
 
 @pytest.fixture(autouse=True)
 async def _close():
+    # Reset the process-wide 403 circuit breaker so prior tests can't
+    # leave it open and short-circuit these scrapes to empty.
+    point130_module._BREAKER_OPEN_UNTIL[0] = 0.0
     yield
     await close_http_client()
 

@@ -52,6 +52,12 @@ logger = logging.getLogger(__name__)
 MAX_LIMIT = 100
 DEFAULT_LIMIT = 24
 
+# Hard cap per upstream provider when building the trending feed. The
+# default `http_timeout_seconds` (15s) can occasionally hang under load,
+# and the public `/cards/trending` endpoint must stay snappy because the
+# home screen blocks on it. 5s is enough for healthy responses.
+_PROVIDER_TIMEOUT_S = 5.0
+
 # Per-provider trending queries. Chosen for: (a) high variety so the
 # rail doesn't look like one card type, (b) low upstream cost, (c)
 # alignment with what collectors actually chase right now.
@@ -189,17 +195,17 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     cards: list[dict[str, Any]] = []
     try:
         if tcg == "pokemon":
-            cards = (await _trending_pokemon(limit))[:limit]
+            cards = (await asyncio.wait_for(_trending_pokemon(limit), _PROVIDER_TIMEOUT_S))[:limit]
         elif tcg == "magic":
-            cards = (await _trending_magic(limit))[:limit]
+            cards = (await asyncio.wait_for(_trending_magic(limit), _PROVIDER_TIMEOUT_S))[:limit]
         elif tcg == "yugioh":
-            cards = (await _trending_yugioh(limit))[:limit]
+            cards = (await asyncio.wait_for(_trending_yugioh(limit), _PROVIDER_TIMEOUT_S))[:limit]
         else:
             per = max(4, (limit // 3) + 2)
             results = await asyncio.gather(
-                _trending_pokemon(per),
-                _trending_magic(per),
-                _trending_yugioh(per),
+                asyncio.wait_for(_trending_pokemon(per), _PROVIDER_TIMEOUT_S),
+                asyncio.wait_for(_trending_magic(per), _PROVIDER_TIMEOUT_S),
+                asyncio.wait_for(_trending_yugioh(per), _PROVIDER_TIMEOUT_S),
                 return_exceptions=True,
             )
             lists: list[list[dict[str, Any]]] = []

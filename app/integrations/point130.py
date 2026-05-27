@@ -28,6 +28,15 @@ _MIN_INTERVAL_S = 1.0
 _CACHE_PREFIX = "loupe:point130:sold"
 _CACHE_TTL = 86400  # 24h
 
+# Process-wide circuit breaker. 130point.com routinely returns 403 to
+# data-center IPs (e.g. dev machines, Cloud Run egress). Each blocked
+# call still costs the polite ~1s rate-limit wait + TCP/TLS, so a single
+# slow card-detail page used to burn 4-6s waiting on guaranteed-403s
+# from four different fan-outs. When we see a 403, trip the breaker for
+# `_BREAKER_COOLDOWN_S` and have every consumer fast-fail with `[]`.
+_BREAKER_COOLDOWN_S = 600.0  # 10 minutes
+_BREAKER_OPEN_UNTIL: list[float] = [0.0]
+
 
 class Point130Provider(BaseProvider):
     id = "130point"
@@ -66,18 +75,30 @@ class Point130Provider(BaseProvider):
         return rows
 
     async def _scrape(self, query: str, *, limit: int) -> list[SoldComp]:
+        import time
+
+        # Fast-fail when the breaker is open.
+        if time.time() < _BREAKER_OPEN_UNTIL[0]:
+            return []
         url = f"{_BASE}?q={quote(query)}"
         async with _RATE_LIMIT:
             # Politeness: ensure ~1s between outbound requests.
-            import time
-
             wait = _MIN_INTERVAL_S - (time.time() - _LAST_REQ_AT[0])
             if wait > 0:
                 await asyncio.sleep(wait)
             try:
-                resp = await self._call_with_retry("GET", url, retries=1)
+                resp = await self._call_with_retry("GET", url, retries=0)
                 _LAST_REQ_AT[0] = time.time()
-                if resp is None or resp.status_code >= 400:
+                if resp is None:
+                    return []
+                if resp.status_code == 403:
+                    _BREAKER_OPEN_UNTIL[0] = time.time() + _BREAKER_COOLDOWN_S
+                    logger.warning(
+                        "point130 403 — tripping circuit breaker for %.0fs",
+                        _BREAKER_COOLDOWN_S,
+                    )
+                    return []
+                if resp.status_code >= 400:
                     return []
                 return self._parse(resp.text, limit=limit)
             except Exception as exc:
