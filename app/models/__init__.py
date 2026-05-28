@@ -28,6 +28,7 @@ from app.models.scanner import Scanner
 from app.models.sealed import SealedHolding, SealedProduct
 from app.models.user import User, UserSettings
 from app.models.user_report import UserReport
+from app.models.watchlist import WatchlistItem
 
 __all__ = [
     "ApiKey",
@@ -61,4 +62,5 @@ __all__ = [
     "User",
     "UserReport",
     "UserSettings",
+    "WatchlistItem",
 ]

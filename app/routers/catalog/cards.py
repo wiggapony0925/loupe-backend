@@ -229,7 +229,7 @@ async def get_market(card_id: str) -> dict[str, Any]:
 )
 async def get_prices(
     card_id: str,
-    range: str = Query("30d", pattern="^(7d|30d|90d|180d|1y|365d)$"),
+    range: str = Query("30d", pattern="^(7d|30d|90d|180d|1y|365d|all)$"),
     house: str = Query("raw"),
     grade: str | None = Query(None),
 ) -> dict[str, Any]:
@@ -237,15 +237,15 @@ async def get_prices(
 
     Currently synthesizes a deterministic walk around the live market
     price (seeded by card id) so the chart is stable across refreshes.
+    When ``house``/``grade`` are supplied the walk is scaled by the same
+    drift × multiplier math that drives the per-house market table, so
+    tap-a-grade-row → chart-filters-by-tier works without a second API.
     """
-    result = await card_search_service.get_price_history(card_id, range_=range)
+    result = await card_search_service.get_price_history(
+        card_id, range_=range, house=house, grade=grade
+    )
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
-    # ``house``/``grade`` are accepted (and reserved) for forward-compat;
-    # current synthesizer treats every request as raw/ungraded.
-    result["house"] = house
-    if grade:
-        result["grade"] = grade
     return result
 
 

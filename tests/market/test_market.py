@@ -71,7 +71,7 @@ async def test_market_shape(client, monkeypatch):
     body = assert_envelope_ok(resp)
     assert body["card_id"] == _COMPOSITE
     snap = body["snapshot"]
-    assert set(snap["history"].keys()) == {"30d", "90d", "1y", "all"}
+    assert set(snap["history"].keys()) == {"7d", "30d", "90d", "1y", "all"}
 
     houses = snap["houses"]
     assert len(houses) == 5

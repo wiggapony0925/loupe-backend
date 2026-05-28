@@ -39,7 +39,10 @@ _HOUSE_DRIFT: dict[str, float] = {
 }
 _HOUSES: tuple[str, ...] = ("psa", "cgc", "bgs", "sgc", "tag")
 _GRADES: tuple[float, ...] = (10, 9.5, 9, 8.5, 8, 7, 6, 5, 4, 3)
-_RANGES: tuple[str, ...] = ("30d", "90d", "1y", "all")
+# Note: "7d" is here so the card-detail chart can render a real "1W"
+# range instead of showing "Intraday history coming soon". Synthetic
+# history is daily-granular, so 7d is the shortest useful window.
+_RANGES: tuple[str, ...] = ("7d", "30d", "90d", "1y", "all")
 
 # Stable reference timestamp for synthesized last-sale dates (deterministic).
 _LAST_SALE_EPOCH = datetime(2025, 1, 1, tzinfo=UTC)

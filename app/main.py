@@ -20,7 +20,7 @@ from app.routers.analytics import reports
 from app.routers.auth import auth, users
 from app.routers.catalog import card_sets as sets
 from app.routers.catalog import cards, identify, image_proxy, providers
-from app.routers.collection import collections, grades, scans, sealed
+from app.routers.collection import collections, grades, scans, sealed, watchlist
 from app.routers.collection import scan_devices as scanners
 from app.routers.market import alerts, market, prices
 from app.routers.ops import app_config
@@ -101,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(prices.router, prefix=api_prefix)
     app.include_router(alerts.router, prefix=api_prefix)
     app.include_router(collections.router, prefix=api_prefix)
+    app.include_router(watchlist.router, prefix=api_prefix)
     app.include_router(market.router, prefix=api_prefix)
     app.include_router(providers.router, prefix=api_prefix)
     app.include_router(reports.router, prefix=api_prefix)

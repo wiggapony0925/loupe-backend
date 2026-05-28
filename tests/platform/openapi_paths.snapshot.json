@@ -205,6 +205,13 @@
   "/v1/sets/progress": [
     "GET"
   ],
+  "/v1/watchlist": [
+    "GET",
+    "POST"
+  ],
+  "/v1/watchlist/{card_id}": [
+    "DELETE"
+  ],
   "/version": [
     "GET"
   ]

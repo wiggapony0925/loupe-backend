@@ -57,7 +57,11 @@ CATALOG: dict[str, dict] = {
     "vintage_pokemon": {
         "set": {
             "name": "Base Set",
-            "code": "BS",
+            # Real pokemontcg.io ``set.id`` so the resolver's strict
+            # ``name + set.id + number`` query matches on the first try.
+            # The friendly "BS" code we used to seed forced the resolver
+            # to fall back through two slower queries and often time out.
+            "code": "base1",
             "tcg": TcgEnum.pokemon,
             "release_date": date(1999, 1, 9),
             "total": 102,
@@ -110,7 +114,11 @@ CATALOG: dict[str, dict] = {
     "modern_pokemon": {
         "set": {
             "name": "Crown Zenith",
-            "code": "CRZ",
+            # Real pokemontcg.io ``set.id``. Crown Zenith also has a
+            # parallel "Galarian Gallery" set (``swsh12pt5gg``); the
+            # GG-numbered cards in this list will resolve via the
+            # resolver's ``name + number`` fallback.
+            "code": "swsh12pt5",
             "tcg": TcgEnum.pokemon,
             "release_date": date(2023, 1, 20),
             "total": 230,
@@ -554,6 +562,12 @@ async def _seed_vault(
     cards = _cards_for(persona, catalog)
     if not cards:
         return 0
+
+    # Re-seed the RNG per persona so different accounts get different
+    # vault contents instead of every test user showing the SAME 200
+    # cards and the SAME $144,512.60 total. Still deterministic across
+    # re-runs (same persona name → same seed → same vault).
+    random.seed(f"loupe-vault::{persona.name}")
 
     house_mix = HOUSE_MIX.get(persona.archetype, HOUSE_MIX["mixed"])
 

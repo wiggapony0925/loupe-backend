@@ -310,6 +310,13 @@ async def history(
     # Establish the earliest reference date for ALL range.
     earliest_dates: list[date] = []
     per_card_history: list[tuple[Decimal | None, list[tuple[date, float]]]] = []
+    # Today's live total — reuses the same per-card market lookup the
+    # vault summary endpoint uses so the Command Center hero value and
+    # the Vault portfolio value always agree. Without this, history's
+    # last bucket sums the synthetic `price_history` while summary sums
+    # `pricing_summary.market.amount`, and the two screens show
+    # different numbers for the same portfolio.
+    live_today_total = 0.0
     for g, c in rows:
         hist = _extract_price_history(c)
         if hist:
@@ -317,6 +324,11 @@ async def history(
         if g.graded_at is not None:
             earliest_dates.append(g.graded_at.date())
         per_card_history.append((g.estimated_value_usd, hist))
+        live = _current_market_value(c)
+        if live is not None:
+            live_today_total += float(live)
+        elif g.estimated_value_usd is not None:
+            live_today_total += float(g.estimated_value_usd)
     earliest = (
         min(earliest_dates)
         if earliest_dates
@@ -325,7 +337,17 @@ async def history(
 
     buckets = _bucket_dates(range_, earliest)
     points: list[PortfolioPoint] = []
+    today = datetime.now(UTC).date()
     for b in buckets:
+        # The terminal bucket ("today") is pinned to the same live total
+        # the vault summary returns so both screens agree to the cent.
+        # Past buckets still use the per-card recorded history so the
+        # line shape reflects actual price movement.
+        if b >= today:
+            points.append(
+                PortfolioPoint(date=b.isoformat(), price_usd=round(live_today_total, 2))
+            )
+            continue
         total = 0.0
         for est, hist in per_card_history:
             total += _value_on(est, hist, b)

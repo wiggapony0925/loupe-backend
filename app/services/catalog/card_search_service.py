@@ -707,22 +707,45 @@ async def resolve_pricing_for_local(
         return None
     try:
         if tcg == "pokemon":
-            q_parts = [f'name:"{name}"']
+            bare_number = number.split("/", 1)[0].strip() if number else None
+            # Try progressively-looser queries. Locally-seeded cards
+            # often have set codes that don't match pokemontcg.io's
+            # ``set.id`` slugs (e.g. "BS" vs. "base1"), and the
+            # "8/102" collector-form throws off ``number:`` matching
+            # when paired with the wrong set. Always start strict so a
+            # well-formed row resolves precisely; fall back to
+            # name+number, then name-only, so a mis-formatted seed
+            # row still finds today's market price instead of poisoning
+            # the negative cache for 5 minutes.
+            attempts: list[list[str]] = []
+            strict = [f'name:"{name}"']
             if set_code:
-                q_parts.append(f"set.id:{set_code}")
-            if number:
-                # Pokémon TCG API expects the bare card number (e.g. "8"),
-                # not a "collector/total" form like "8/102". Strip any
-                # trailing "/total" before querying.
-                bare_number = number.split("/", 1)[0].strip()
-                if bare_number:
-                    q_parts.append(f"number:{bare_number}")
-            body = await pokemon_tcg.search_cards(
-                " ".join(q_parts), page=1, page_size=1
-            )
-            data = (body.get("data") or []) if isinstance(body, dict) else []
-            if data:
-                return _from_pokemon(data[0])
+                strict.append(f"set.id:{set_code}")
+            if bare_number:
+                strict.append(f"number:{bare_number}")
+            attempts.append(strict)
+            if set_code and bare_number:
+                attempts.append([f'name:"{name}"', f"number:{bare_number}"])
+            attempts.append([f'name:"{name}"'])
+            seen: set[str] = set()
+            for q_parts in attempts:
+                q = " ".join(q_parts)
+                if q in seen:
+                    continue
+                seen.add(q)
+                # Per-attempt budget: a relaxed query (e.g. plain
+                # ``name:"Blastoise"``) can be slow upstream, and we'd
+                # rather skip it than blow the user's 4s outer budget.
+                try:
+                    body = await asyncio.wait_for(
+                        pokemon_tcg.search_cards(q, page=1, page_size=1),
+                        timeout=2.5,
+                    )
+                except (TimeoutError, httpx.HTTPError):
+                    continue
+                data = (body.get("data") or []) if isinstance(body, dict) else []
+                if data:
+                    return _from_pokemon(data[0])
         elif tcg == "magic":
             q_parts = [f'!"{name}"']
             if set_code:
@@ -885,9 +908,13 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                     await _cache_set(neg_cache_key, {"reason": "error"}, 300)
 
                 if resolved is None:
-                    # Even a successful-but-empty resolve is worth caching
-                    # to avoid hammering upstream for the same dead card.
-                    await _cache_set(neg_cache_key, {"reason": "empty"}, 300)
+                    # Successful-but-empty resolves get a SHORT TTL so a
+                    # mis-formatted seed row (e.g. set_code "BS" vs the
+                    # upstream's "base1") can be retried after the next
+                    # pull-to-refresh instead of staying blank for 5
+                    # minutes. Real upstream errors keep the longer 300s
+                    # TTL (set above) so we don't hammer a flaky API.
+                    await _cache_set(neg_cache_key, {"reason": "empty"}, 30)
 
                 if resolved is not None:
                     cached_pricing = resolved.get("pricing_summary")
@@ -1068,17 +1095,32 @@ def _step_days(days: int) -> int:
     return 7
 
 
-async def get_price_history(card_id: str, range_: str = "30d") -> dict[str, Any] | None:
+async def get_price_history(
+    card_id: str,
+    range_: str = "30d",
+    house: str = "raw",
+    grade: str | None = None,
+) -> dict[str, Any] | None:
     """Return a stable, shape-correct synthesized price series.
 
     Until we have a real historical-prices upstream, we walk a deterministic
     random walk around the current ``pricing_summary.market`` so the chart
     is steady across refreshes (seeded by card id).
+
+    When ``house``/``grade`` are supplied (e.g. ``house="psa"``, ``grade="10"``)
+    the series is scaled by the same ``_HOUSE_DRIFT`` × grade-multiplier
+    math that produces the per-house table on the card-detail screen, so
+    tapping a grade row filters the chart to that specific tier instead
+    of showing the raw market line.
     """
     range_ = (range_ or "30d").lower()
     days = _RANGE_DAYS.get(range_, 30)
 
-    cache_key = f"loupe:cards:prices:{card_id}:{range_}"
+    house_key = (house or "raw").lower()
+    grade_key = (grade or "").strip()
+    cache_key = (
+        f"loupe:cards:prices:{card_id}:{range_}:{house_key}:{grade_key or 'all'}"
+    )
     cached = await _cache_get(cache_key)
     if cached is not None:
         return cached
@@ -1099,6 +1141,8 @@ async def get_price_history(card_id: str, range_: str = "30d") -> dict[str, Any]
             "points": [],
             "granularity": _granularity(days),
             "range": range_,
+            "house": house_key,
+            "grade": grade_key or None,
             "summary": {
                 "min": None,
                 "max": None,
@@ -1111,12 +1155,19 @@ async def get_price_history(card_id: str, range_: str = "30d") -> dict[str, Any]
         await _cache_set(cache_key, body, PRICE_HISTORY_TTL)
         return body
 
-    seed = int(hashlib.sha256(card_id.encode()).hexdigest(), 16) % (2**32)
+    # Seed the walk with house+grade so each filtered series gets its
+    # own deterministic shape (otherwise tapping PSA 10 would just
+    # rescale the raw walk and look identical).
+    seed_key = hashlib.sha256(
+        f"{card_id}|{house_key}|{grade_key}".encode()
+    ).hexdigest()
+    seed = int(seed_key, 16) % (2**32)
     rng = random.Random(seed)
     step = _step_days(days)
     n_points = max(2, days // step)
 
-    base = float(market_amt)
+    raw_base = float(market_amt)
+    base = _scaled_base(card, raw_base, house_key, grade_key, rng)
     drift = (rng.random() - 0.5) * 0.20  # overall trend up/down ±10%
 
     end_dt = utcnow()
@@ -1138,7 +1189,7 @@ async def get_price_history(card_id: str, range_: str = "30d") -> dict[str, Any]
         t = i / max(1, n_points - 1)
         price = base * (1.0 + drift * (1.0 - t)) * (1.0 + raw)
         if i == n_points - 1:
-            price = base  # pin the tail to the live market price
+            price = base  # pin the tail to the live (house, grade) price
         price = round(max(0.01, price), 2)
         values.append(price)
         ts = (start_dt + timedelta(days=i * step)).isoformat()
@@ -1164,6 +1215,8 @@ async def get_price_history(card_id: str, range_: str = "30d") -> dict[str, Any]
         "points": points,
         "granularity": _granularity(days),
         "range": range_,
+        "house": house_key,
+        "grade": grade_key or None,
         "summary": {
             "min": pmin,
             "max": pmax,
@@ -1175,6 +1228,88 @@ async def get_price_history(card_id: str, range_: str = "30d") -> dict[str, Any]
     }
     await _cache_set(cache_key, body, PRICE_HISTORY_TTL)
     return body
+
+
+# ---- house/grade scaling (mirrors market_service per-row math) ------
+
+# Kept in-module to avoid an import cycle with market_service (which
+# also pulls helpers from this module via its synthesizer chain).
+_HOUSE_DRIFT_HISTORY: dict[str, float] = {
+    "raw": 1.00,
+    "psa": 1.00,
+    "cgc": 0.95,
+    "bgs": 1.05,
+    "sgc": 0.92,
+    "tag": 0.85,
+}
+_GRADE_MULT_HISTORY: dict[float, tuple[float, float]] = {
+    10: (10.0, 18.0),
+    9.5: (5.0, 8.0),
+    9: (2.5, 4.0),
+    8.5: (1.6, 2.2),
+    8: (1.2, 1.6),
+    7: (0.9, 1.1),
+    6: (0.70, 0.78),
+    5: (0.55, 0.62),
+    4: (0.45, 0.52),
+    3: (0.35, 0.40),
+}
+
+
+def _parse_grade(grade_key: str) -> float | None:
+    """Accept ``"10"``, ``"9.5"``, ``"PSA 10"``, ``"10 BLACK"`` → float."""
+    if not grade_key:
+        return None
+    s = grade_key.strip().lower()
+    # Strip a leading house token like "psa 10".
+    for h in ("psa", "cgc", "bgs", "sgc", "tag"):
+        if s.startswith(h):
+            s = s[len(h):].strip()
+            break
+    # Drop trailing labels like "black" on "10 BLACK".
+    parts = s.split()
+    if not parts:
+        return None
+    try:
+        return float(parts[0])
+    except ValueError:
+        return None
+
+
+def _vintage_factor_year(year: int | None) -> float:
+    if not year:
+        return 0.4
+    if year <= 1995:
+        return 1.0
+    if year >= 2020:
+        return 0.0
+    return max(0.0, min(1.0, (2020 - year) / 25.0))
+
+
+def _scaled_base(
+    card: dict[str, Any],
+    raw_base: float,
+    house_key: str,
+    grade_key: str,
+    rng: random.Random,
+) -> float:
+    """Apply house drift × grade multiplier to the raw market price."""
+    if house_key == "raw" or not house_key:
+        return raw_base
+    drift = _HOUSE_DRIFT_HISTORY.get(house_key, 1.0)
+    grade = _parse_grade(grade_key)
+    if grade is None or grade not in _GRADE_MULT_HISTORY:
+        # House supplied without a usable grade — just apply house drift.
+        return raw_base * drift
+    lo, hi = _GRADE_MULT_HISTORY[grade]
+    vf = _vintage_factor_year(card.get("year"))
+    # Mirror market_service._house_grade_row's blend so the chart's
+    # current/tail value aligns with the table row the user tapped.
+    mult = lo + (hi - lo) * (0.25 + 0.75 * vf) * (0.85 + 0.30 * rng.random())
+    # BGS 10 BLACK premium — only when explicitly tapped.
+    if house_key == "bgs" and "black" in grade_key.lower():
+        mult *= 1.4 + rng.random() * 0.6
+    return raw_base * mult * drift
 
 
 # ------------------------------------------------------------------ set list
