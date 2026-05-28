@@ -247,11 +247,30 @@ def _value_on(
     estimated_value_usd: Decimal | None,
     history: list[tuple[date, float]],
     on: date,
+    live_fallback: float | None = None,
 ) -> float:
-    """Return the card's estimated value as of *on* using last-known-price."""
+    """Return the card's estimated value as of *on* using last-known-price.
+
+    When *history* contains no point on-or-before *on* we can't honestly
+    say what the card was worth back then. Two fallbacks are tried in
+    order:
+
+    1. ``live_fallback`` (today's live market price). This is the
+       correct behaviour for delta calculations — a card with no
+       historical pricing contributes **zero** to a range's delta
+       because we treat it as flat at today's value rather than
+       fabricating a starting price from the scan-time estimate.
+    2. ``estimated_value_usd`` (the user's scan-time estimate). Only
+       used when no live market price is available either, so a card
+       still appears on the historical curve at *some* value.
+
+    If even that is missing we fall through to the earliest known
+    price point. The function never returns ``None``.
+    """
     if not history:
+        if live_fallback is not None:
+            return live_fallback
         return float(estimated_value_usd or 0)
-    # last point on-or-before `on`
     last = None
     for d, p in history:
         if d <= on:
@@ -259,7 +278,10 @@ def _value_on(
         else:
             break
     if last is None:
-        # all history is after the requested date — fall back to first known
+        # History exists but its earliest point is AFTER `on`.
+        # Extrapolate that earliest known price backward — it's a
+        # real recorded data point, just from after the requested
+        # date, so it's a more honest signal than today's live value.
         last = history[0][1]
     return float(last)
 
@@ -280,11 +302,17 @@ def _bucket_dates(range_: PortfolioRange, earliest: date) -> list[date]:
     out: list[date] = []
     cur = start
     if granularity == "hour":
-        # 1D bucketed by hour: emit one point per hour for the last 24h.
-        # We don't actually have intraday price data, so for 1D we emit
-        # *now* twice with the same value — the frontend renders it flat,
-        # which is the honest representation.
-        return [now, now]
+        # 1D: we don't have intraday tick data, but the per-card
+        # `price_history` table is keyed by day, so we can still surface
+        # a real day-over-day delta. Emit yesterday + today. The caller
+        # values the "today" bucket from the live market total (so the
+        # Command Center hero matches the Vault summary to the cent),
+        # and the "yesterday" bucket from each card's last-known price
+        # on-or-before yesterday — giving us the "+$X.XX since
+        # yesterday's close" semantics Robinhood/Collectr users expect
+        # without backfilling minute-level snapshots.
+        yesterday = now - timedelta(days=1)
+        return [yesterday, now]
     if granularity == "day":
         step = timedelta(days=1)
     elif granularity == "week":
@@ -309,7 +337,10 @@ async def history(
 
     # Establish the earliest reference date for ALL range.
     earliest_dates: list[date] = []
-    per_card_history: list[tuple[Decimal | None, list[tuple[date, float]]]] = []
+    # (estimated_value_usd, price_history, live_today_value_for_this_card)
+    per_card_history: list[
+        tuple[Decimal | None, list[tuple[date, float]], float]
+    ] = []
     # Today's live total — reuses the same per-card market lookup the
     # vault summary endpoint uses so the Command Center hero value and
     # the Vault portfolio value always agree. Without this, history's
@@ -323,12 +354,15 @@ async def history(
             earliest_dates.append(hist[0][0])
         if g.graded_at is not None:
             earliest_dates.append(g.graded_at.date())
-        per_card_history.append((g.estimated_value_usd, hist))
         live = _current_market_value(c)
         if live is not None:
-            live_today_total += float(live)
+            live_value = float(live)
         elif g.estimated_value_usd is not None:
-            live_today_total += float(g.estimated_value_usd)
+            live_value = float(g.estimated_value_usd)
+        else:
+            live_value = 0.0
+        per_card_history.append((g.estimated_value_usd, hist, live_value))
+        live_today_total += live_value
     earliest = (
         min(earliest_dates)
         if earliest_dates
@@ -349,8 +383,8 @@ async def history(
             )
             continue
         total = 0.0
-        for est, hist in per_card_history:
-            total += _value_on(est, hist, b)
+        for est, hist, live_value in per_card_history:
+            total += _value_on(est, hist, b, live_fallback=live_value)
         points.append(PortfolioPoint(date=b.isoformat(), price_usd=round(total, 2)))
 
     first = points[0].price_usd if points else 0.0

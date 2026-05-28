@@ -1,0 +1,7 @@
+filter: severity>=ERROR AND (jsonPayload.message=~"CircuitOpenError" OR textPayload=~"CircuitOpenError")
+metricDescriptor:
+  metricKind: DELTA
+  valueType: INT64
+  unit: "1"
+  displayName: Loupe circuit breaker opens
+description: Counts log entries emitted when an integration circuit breaker rejects a call (CircuitOpenError).

@@ -313,6 +313,112 @@ async def test_history_empty_when_user_has_no_cards(client, auth_headers):
     assert body["deltaPct"] == 0.0
 
 
+@pytest.mark.asyncio
+async def test_history_1d_reflects_yesterday_to_today_movement(
+    client, auth_headers, db_session, created_user
+):
+    """1D must surface the day-over-day delta from per-card price history.
+
+    Regression guard: the original implementation emitted ``[now, now]``
+    which made the Command Center hero always read "Quiet day, +$0.00"
+    regardless of what cards actually did overnight. We now bucket
+    yesterday + today and rely on each card's ``price_history`` for the
+    yesterday-close value (the today bucket is pinned to the live total
+    so the hero matches the vault summary).
+    """
+    today = datetime.now(UTC).date()
+    yesterday = today - timedelta(days=1)
+    await _seed_user_with_priced_card(
+        db_session,
+        created_user,
+        [(yesterday, 100.0), (today, 150.0)],
+        "150.00",
+    )
+
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/history?range=1D", headers=auth_headers)
+    )
+    assert len(body["points"]) == 2, "1D must emit yesterday + today"
+    assert body["points"][0]["date"] == yesterday.isoformat()
+    assert body["points"][1]["date"] == today.isoformat()
+    assert body["points"][0]["priceUsd"] == pytest.approx(100.0)
+    assert body["points"][1]["priceUsd"] == pytest.approx(150.0)
+    assert body["deltaUsd"] == pytest.approx(50.0)
+    assert body["deltaPct"] == pytest.approx(50.0)
+
+
+@pytest.mark.asyncio
+async def test_history_1d_zero_delta_when_card_unchanged(
+    client, auth_headers, db_session, created_user
+):
+    """A truly flat day still legitimately reads as +$0.00 \u2014 the
+    "Quiet day" copy is only correct when the underlying prices
+    actually didn't move."""
+    today = datetime.now(UTC).date()
+    yesterday = today - timedelta(days=1)
+    await _seed_user_with_priced_card(
+        db_session,
+        created_user,
+        [(yesterday, 100.0), (today, 100.0)],
+        "100.00",
+    )
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/history?range=1D", headers=auth_headers)
+    )
+    assert body["deltaUsd"] == pytest.approx(0.0)
+    assert body["deltaPct"] == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("range_", ["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"])
+async def test_history_no_price_history_reports_zero_delta(
+    client, auth_headers, db_session, created_user, range_
+):
+    """Regression: a card with a live market price but no recorded
+    ``price_history`` must NOT inflate the delta with the gap between
+    ``GradedCard.estimated_value_usd`` (scan-time guess) and today's
+    live market value.
+
+    The pre-fix behaviour treated the scan-time estimate as
+    "yesterday's price" for every historical bucket, producing
+    nonsense deltas like ``+284%`` for accounts whose price-history
+    table hadn't been backfilled yet. The honest answer is ``0`` \u2014
+    "we don't have historical pricing for this card so we can't tell
+    you how it moved".
+    """
+    # Card has pricing_summary (live market = $1500) but no price_history.
+    card = await make_card(db_session, name="No-History Chase Card")
+    card.card_metadata = {"pricing_summary": {"market": {"amount": 1500.0}}}
+    db_session.add(card)
+    # Add to user's vault with a low scan-time estimate (e.g. user
+    # guessed $100 at scan time; real market is $1500).
+    db_session.add(
+        GradedCard(
+            user_id=created_user.id,
+            card_id=card.id,
+            grade=Decimal("9.0"),
+            house=GradeHouseEnum.loupe,
+            estimated_value_usd=Decimal("100.00"),
+        )
+    )
+    await db_session.commit()
+
+    body = assert_envelope_ok(
+        await client.get(f"/v1/grades/history?range={range_}", headers=auth_headers)
+    )
+    assert body["deltaUsd"] == pytest.approx(0.0), (
+        f"{range_}: a card with no price_history must contribute 0 delta, "
+        f"got {body['deltaUsd']}"
+    )
+    assert body["deltaPct"] == pytest.approx(0.0)
+    # Today's bucket still reflects live market value, not the estimate.
+    last_point = body["points"][-1]["priceUsd"]
+    assert last_point == pytest.approx(1500.0), (
+        f"{range_}: today bucket must equal live market ($1500), "
+        f"got ${last_point}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sparklines
 # ---------------------------------------------------------------------------

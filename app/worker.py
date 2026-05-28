@@ -65,6 +65,13 @@ async def image_index(ctx: dict[str, Any]) -> dict[str, Any]:
     return await index_card_images(ctx)
 
 
+async def price_snapshot(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Append today's live market price to each card's price_history."""
+    from app.tasks.price_snapshot import snapshot_prices
+
+    return await snapshot_prices(ctx)
+
+
 def _redis_settings() -> Any:
     if RedisSettings is None:  # pragma: no cover
         return None
@@ -80,11 +87,20 @@ class WorkerSettings:
         arq app.worker.WorkerSettings
     """
 
-    functions = [process_scan, catalog_sync, price_backfill, image_index]
+    functions = [
+        process_scan,
+        catalog_sync,
+        price_backfill,
+        price_snapshot,
+        image_index,
+    ]
     cron_jobs = (
         [
             cron(catalog_sync, hour={3}, minute={0}),
             cron(price_backfill, hour={4}, minute={0}),
+            # Snapshot AFTER price_backfill so today's row reflects
+            # whatever upstream refresh landed at 04:00.
+            cron(price_snapshot, hour={4}, minute={30}),
             cron(image_index, hour={5}, minute={0}),
         ]
         if cron is not None
@@ -102,6 +118,7 @@ __all__ = [
     "catalog_sync",
     "image_index",
     "price_backfill",
+    "price_snapshot",
     "process_scan",
     "shutdown",
     "startup",

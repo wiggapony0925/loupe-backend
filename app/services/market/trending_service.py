@@ -33,10 +33,10 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
-
 from app.integrations._http import pokemon_tcg
+from app.integrations._http._resilient import request_json
 from app.platform.cache_config import TRENDING_TTL
+from app.platform.circuit_breaker import CircuitOpenError
 from app.services.catalog import card_search_service
 from app.services.catalog.card_search_service import (
     _cache_get,
@@ -55,9 +55,11 @@ DEFAULT_LIMIT = 24
 # Hard cap per upstream provider when building the trending feed. The
 # default `http_timeout_seconds` (15s) can occasionally hang under load,
 # and the public `/cards/trending` endpoint must stay snappy because the
-# home screen blocks on it. 3s is enough for healthy responses; the
-# Redis cache TTL (15 min) covers transient blips.
-_PROVIDER_TIMEOUT_S = 3.0
+# home screen blocks on it. 2s is enough for healthy responses; the
+# Redis cache TTL (15 min) covers transient blips. Tightened from 3s
+# while pokemontcg.io is flaking — a failing provider shouldn't add a
+# full second of latency to every home-screen load.
+_PROVIDER_TIMEOUT_S = 2.0
 
 # Per-provider trending queries. Chosen for: (a) high variety so the
 # rail doesn't look like one card type, (b) low upstream cost, (c)
@@ -89,6 +91,9 @@ def _now_iso() -> str:
 
 
 async def _trending_pokemon(limit: int) -> list[dict[str, Any]]:
+    # `pokemon_tcg.search_cards` is already wrapped in the
+    # ``"pokemontcg"`` circuit breaker at the integration layer
+    # (see app/integrations/_http/pokemon_tcg.py).
     raw = await pokemon_tcg.search_cards(
         POKEMON_TRENDING_QUERY, page=1, page_size=limit
     )
@@ -96,43 +101,47 @@ async def _trending_pokemon(limit: int) -> list[dict[str, Any]]:
 
 
 async def _trending_magic(limit: int) -> list[dict[str, Any]]:
-    # Scryfall accepts `order` via the search endpoint; the existing
-    # client only forwards `q` so we issue the request inline here.
+    # Scryfall's `order` query param isn't surfaced by the shared
+    # `scryfall.search_cards`, so we issue the request through the
+    # resilient helper directly under the same ``"scryfall"`` breaker.
     from app.config import get_settings
 
     s = get_settings()
-    async with httpx.AsyncClient(timeout=s.http_timeout_seconds) as client:
-        resp = await client.get(
-            "https://api.scryfall.com/cards/search",
-            params={
-                "q": SCRYFALL_TRENDING_QUERY,
-                "order": "edhrec",
-                "page": 1,
-            },
-            headers={"Accept": "application/json"},
-        )
-        if resp.status_code == 404:
-            return []
-        resp.raise_for_status()
-        data = resp.json()
-    return [_from_scryfall(c) for c in (data.get("data") or [])][:limit]
+    body = await request_json(
+        integration="scryfall",
+        method="GET",
+        url="https://api.scryfall.com/cards/search",
+        params={
+            "q": SCRYFALL_TRENDING_QUERY,
+            "order": "edhrec",
+            "page": 1,
+        },
+        headers={"Accept": "application/json"},
+        timeout_s=s.http_timeout_seconds,
+        not_found_ok=True,
+    )
+    if body is None:
+        return []
+    return [_from_scryfall(c) for c in (body.get("data") or [])][:limit]
 
 
 async def _trending_yugioh(limit: int) -> list[dict[str, Any]]:
     from app.config import get_settings
 
     s = get_settings()
-    async with httpx.AsyncClient(timeout=s.http_timeout_seconds) as client:
-        resp = await client.get(
-            "https://db.ygoprodeck.com/api/v7/cardinfo.php",
-            params={"num": limit, "offset": 0, "sort": "new"},
-            headers={"Accept": "application/json"},
-        )
-        if resp.status_code in (400, 404):
-            return []
-        resp.raise_for_status()
-        data = resp.json()
-    return [_from_yugioh(c) for c in (data.get("data") or [])][:limit]
+    body = await request_json(
+        integration="ygoprodeck",
+        method="GET",
+        url="https://db.ygoprodeck.com/api/v7/cardinfo.php",
+        params={"num": limit, "offset": 0, "sort": "new"},
+        headers={"Accept": "application/json"},
+        timeout_s=s.http_timeout_seconds,
+        not_found_ok=True,
+        extra_ok_statuses=(400,),
+    )
+    if not body:
+        return []
+    return [_from_yugioh(c) for c in (body.get("data") or [])][:limit]
 
 
 async def _fallback_cards(limit: int) -> list[dict[str, Any]]:
@@ -221,6 +230,13 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
                 results,
                 strict=False,
             ):
+                if isinstance(res, CircuitOpenError):
+                    logger.debug(
+                        "trending upstream %s skipped (circuit open): %s",
+                        label,
+                        res,
+                    )
+                    continue
                 if isinstance(res, BaseException):
                     logger.warning("trending upstream %s failed: %s", label, res)
                     continue

@@ -33,6 +33,7 @@ from app.platform.cache_config import (
     PRICE_HISTORY_TTL,
     SET_LIST_TTL,
 )
+from app.platform.circuit_breaker import CircuitOpenError
 from app.platform.redis_client import get_redis
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
@@ -669,7 +670,7 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
                 # cards because the cached partial response is reused on
                 # every retry.
                 body["partial"] = True
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, CircuitOpenError) as exc:
         logger.warning("upstream search failed (%s): %s", tcg, exc)
         return _empty(tcg, error=str(exc))
     except Exception as exc:  # pragma: no cover - defensive
@@ -741,7 +742,7 @@ async def resolve_pricing_for_local(
                         pokemon_tcg.search_cards(q, page=1, page_size=1),
                         timeout=2.5,
                     )
-                except (TimeoutError, httpx.HTTPError):
+                except (TimeoutError, httpx.HTTPError, CircuitOpenError):
                     continue
                 data = (body.get("data") or []) if isinstance(body, dict) else []
                 if data:
@@ -761,7 +762,7 @@ async def resolve_pricing_for_local(
             data = (body.get("data") or []) if isinstance(body, dict) else []
             if data:
                 return _from_yugioh(data[0])
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
+    except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
         logger.info("resolve_pricing_for_local(%s/%s) failed: %s", tcg, name, exc)
         return None
     return None
@@ -855,7 +856,11 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                         .scalars()
                         .all()
                     )
-                    priority = {"pokemontcg": 0, "scryfall": 1, "ygoprodeck": 2}
+                    # NOTE: pokemontcg.io was 404-ing for valid queries
+                    # in May 2026; demoted to last-resort so canonical
+                    # resolves prefer the healthier scryfall /
+                    # ygoprodeck mirrors when a card has refs on both.
+                    priority = {"scryfall": 0, "ygoprodeck": 1, "pokemontcg": 2}
                     preferred = sorted(
                         ref_rows, key=lambda r: priority.get(r.source, 99)
                     )
@@ -990,7 +995,7 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             result = _from_yugioh(raw) if raw else None
         else:
             return None
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, CircuitOpenError) as exc:
         logger.warning("upstream get_card failed (%s): %s", source, exc)
         # Fallback 1: serve the last-known-good copy if we have one.
         stale = await _cache_get(stale_key)
@@ -1376,7 +1381,7 @@ async def list_sets(tcg: str) -> dict[str, Any]:
             sets = await scryfall.list_sets()
             items = [_scryfall_set(s) for s in sets]
             body = {"results": items, "total": len(items), "source": "scryfall"}
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, CircuitOpenError) as exc:
         logger.warning("upstream list_sets failed (%s): %s", tcg, exc)
         return {
             "results": [],
