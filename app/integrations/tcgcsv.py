@@ -76,7 +76,7 @@ class TcgCsvProvider(BaseProvider):
     name = "TCGCSV (TCGplayer mirror)"
 
     def is_configured(self) -> bool:
-        return bool(getattr(get_settings(), "tcgcsv_enabled", True))
+        return bool(getattr(get_settings(), "tcgcsv_enabled", False))
 
     async def get_market_price(self, query: str) -> MarketPrice | None:
         if not self.is_configured() or not query:

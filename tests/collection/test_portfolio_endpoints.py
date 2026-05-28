@@ -419,6 +419,50 @@ async def test_history_no_price_history_reports_zero_delta(
     )
 
 
+@pytest.mark.asyncio
+async def test_history_1d_ignores_stale_price_history(
+    client, auth_headers, db_session, created_user
+):
+    """Regression: a card whose only ``price_history`` entry is months
+    old must not anchor the "yesterday" bucket. With stale carry-
+    forward enabled, yesterday's bucket would use the ancient $50
+    point while today's bucket uses the fresh $500 live price,
+    producing a fake +900% intraday delta. The cap on carry-forward
+    age forces yesterday to fall back to the live total → 0 delta.
+    """
+    today = datetime.now(UTC).date()
+    sixty_days_ago = today - timedelta(days=60)
+    card = await make_card_with_price_history(
+        db_session, [(sixty_days_ago, 50.0)], name="Stale History Card"
+    )
+    # Live market is 10x the stale recorded point.
+    card.card_metadata = {
+        **(card.card_metadata or {}),
+        "pricing_summary": {"market": {"amount": 500.0}},
+    }
+    db_session.add(card)
+    db_session.add(
+        GradedCard(
+            user_id=created_user.id,
+            card_id=card.id,
+            grade=Decimal("9.0"),
+            house=GradeHouseEnum.loupe,
+            estimated_value_usd=Decimal("500.00"),
+        )
+    )
+    await db_session.commit()
+
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/history?range=1D", headers=auth_headers)
+    )
+    assert body["points"][-1]["priceUsd"] == pytest.approx(500.0)
+    assert body["deltaUsd"] == pytest.approx(0.0), (
+        f"stale (>2d) price_history must not anchor yesterday's bucket; "
+        f"got points={body['points']}"
+    )
+    assert body["deltaPct"] == pytest.approx(0.0)
+
+
 # ---------------------------------------------------------------------------
 # Sparklines
 # ---------------------------------------------------------------------------

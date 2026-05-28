@@ -99,7 +99,8 @@ class ProviderRegistry:
         if not providers:
             return []
         results = await self._gather(
-            [p.search_listings(query, limit=limit) for p in providers]
+            [(p.id, p.search_listings(query, limit=limit)) for p in providers],
+            operation="fan_out_listings",
         )
         merged: list[Listing] = []
         for r in results:
@@ -115,7 +116,11 @@ class ProviderRegistry:
         if not providers:
             return []
         results = await self._gather(
-            [p.search_sold_comps(query, days=days, limit=limit) for p in providers]
+            [
+                (p.id, p.search_sold_comps(query, days=days, limit=limit))
+                for p in providers
+            ],
+            operation="fan_out_comps",
         )
         merged: list[SoldComp] = []
         for r in results:
@@ -129,7 +134,8 @@ class ProviderRegistry:
         if not providers:
             return []
         results = await self._gather(
-            [p.get_population(spec_or_query) for p in providers]
+            [(p.id, p.get_population(spec_or_query)) for p in providers],
+            operation="fan_out_population",
         )
         out: list[PopulationReport] = []
         for r in results:
@@ -141,7 +147,10 @@ class ProviderRegistry:
         providers = self.by_capability("market_price")
         if not providers:
             return []
-        results = await self._gather([p.get_market_price(query) for p in providers])
+        results = await self._gather(
+            [(p.id, p.get_market_price(query)) for p in providers],
+            operation="fan_out_market_price",
+        )
         out: list[MarketPrice] = []
         for r in results:
             if isinstance(r, MarketPrice):
@@ -149,29 +158,23 @@ class ProviderRegistry:
         return out
 
     @staticmethod
-    async def _gather(coros: list[Any]) -> list[Any]:
-        async def safe(coro: Any) -> Any:
+    async def _gather(
+        tagged: list[tuple[str, Any]], *, operation: str = "fan_out"
+    ) -> list[Any]:
+        async def safe(provider_id: str, coro: Any) -> Any:
             try:
                 return await asyncio.wait_for(coro, timeout=_FANOUT_TIMEOUT_S)
             except Exception as exc:
-                # Per-provider fan-out failures used to vanish at DEBUG; now
-                # they're reported with the provider tagged so dashboards can
-                # show "PSA error rate" without log spelunking.
                 from app.platform.observability import capture_integration_error
 
-                provider_name = getattr(
-                    getattr(coro, "cr_frame", None), "f_locals", {}
-                ).get("self", None)
                 capture_integration_error(
                     exc,
-                    integration=type(provider_name).__name__
-                    if provider_name is not None
-                    else "unknown",
-                    operation="fan_out",
+                    integration=provider_id,
+                    operation=operation,
                 )
                 return None
 
-        return await asyncio.gather(*(safe(c) for c in coros))
+        return await asyncio.gather(*(safe(pid, c) for pid, c in tagged))
 
 
 @lru_cache(maxsize=1)

@@ -37,6 +37,23 @@ _RANGE_BUCKETS: dict[str, tuple[timedelta | None, str]] = {
     "ALL": (None, "month"),  # no lower bound
 }
 
+# Per-range cap on how stale a carry-forward `price_history` point may
+# be before we treat it as "no signal" for the bucket and fall back to
+# the live value (which makes that bucket contribute 0 to the delta).
+# Without this, a card whose only recorded price is months old gets
+# its ancient price summed into yesterday's bucket while today's
+# bucket uses the fresh live total — producing wildly inflated 1D
+# deltas like "+347% today".
+_RANGE_MAX_CARRY_DAYS: dict[str, int | None] = {
+    "1D": 2,
+    "1W": 7,
+    "1M": 14,
+    "3M": 30,
+    "YTD": 30,
+    "1Y": 60,
+    "ALL": None,
+}
+
 
 @dataclass(slots=True)
 class PortfolioPoint:
@@ -248,6 +265,7 @@ def _value_on(
     history: list[tuple[date, float]],
     on: date,
     live_fallback: float | None = None,
+    max_carry_days: int | None = None,
 ) -> float:
     """Return the card's estimated value as of *on* using last-known-price.
 
@@ -266,15 +284,25 @@ def _value_on(
 
     If even that is missing we fall through to the earliest known
     price point. The function never returns ``None``.
+
+    ``max_carry_days`` caps how far back the most-recent point
+    on-or-before *on* may be before it's considered too stale to
+    represent the bucket's value. Stale points behave like an empty
+    history: live_fallback is used instead. This prevents a single
+    months-old recording from anchoring the "yesterday" bucket while
+    the "today" bucket pulls fresh live prices, which would mint a
+    huge fake intraday delta.
     """
     if not history:
         if live_fallback is not None:
             return live_fallback
         return float(estimated_value_usd or 0)
     last = None
+    last_date: date | None = None
     for d, p in history:
         if d <= on:
             last = p
+            last_date = d
         else:
             break
     if last is None:
@@ -283,6 +311,14 @@ def _value_on(
         # real recorded data point, just from after the requested
         # date, so it's a more honest signal than today's live value.
         last = history[0][1]
+    elif (
+        max_carry_days is not None
+        and last_date is not None
+        and (on - last_date).days > max_carry_days
+    ):
+        if live_fallback is not None:
+            return live_fallback
+        return float(estimated_value_usd or 0)
     return float(last)
 
 
@@ -370,6 +406,7 @@ async def history(
     )
 
     buckets = _bucket_dates(range_, earliest)
+    max_carry_days = _RANGE_MAX_CARRY_DAYS.get(range_)
     points: list[PortfolioPoint] = []
     today = datetime.now(UTC).date()
     for b in buckets:
@@ -384,7 +421,13 @@ async def history(
             continue
         total = 0.0
         for est, hist, live_value in per_card_history:
-            total += _value_on(est, hist, b, live_fallback=live_value)
+            total += _value_on(
+                est,
+                hist,
+                b,
+                live_fallback=live_value,
+                max_carry_days=max_carry_days,
+            )
         points.append(PortfolioPoint(date=b.isoformat(), price_usd=round(total, 2)))
 
     first = points[0].price_usd if points else 0.0
