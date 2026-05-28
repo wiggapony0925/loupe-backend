@@ -34,8 +34,15 @@ _CACHE_TTL = 86400  # 24h
 # slow card-detail page used to burn 4-6s waiting on guaranteed-403s
 # from four different fan-outs. When we see a 403, trip the breaker for
 # `_BREAKER_COOLDOWN_S` and have every consumer fast-fail with `[]`.
+#
+# We mirror the open-state into Redis as `loupe:point130:breaker_open_until`
+# (a unix timestamp) so a server restart doesn't "forget" that 130point
+# is blocking us and re-incur the same 1.5s 403 round-trip on the next
+# card-detail page. The local list is a fast in-process short-circuit;
+# Redis is consulted on cold reads.
 _BREAKER_COOLDOWN_S = 600.0  # 10 minutes
 _BREAKER_OPEN_UNTIL: list[float] = [0.0]
+_BREAKER_REDIS_KEY = "loupe:point130:breaker_open_until"
 
 
 class Point130Provider(BaseProvider):
@@ -77,9 +84,24 @@ class Point130Provider(BaseProvider):
     async def _scrape(self, query: str, *, limit: int) -> list[SoldComp]:
         import time
 
-        # Fast-fail when the breaker is open.
+        # Fast-fail when the breaker is open. Check the in-process flag
+        # first (zero-cost) and only consult Redis when it's clear, so a
+        # warm process never pays the round-trip.
         if time.time() < _BREAKER_OPEN_UNTIL[0]:
             return []
+        try:
+            r = await get_redis()
+            raw = await r.get(_BREAKER_REDIS_KEY)
+            if raw:
+                try:
+                    until = float(raw)
+                except (TypeError, ValueError):
+                    until = 0.0
+                if until > time.time():
+                    _BREAKER_OPEN_UNTIL[0] = until
+                    return []
+        except Exception as exc:
+            logger.debug("point130 breaker read failed: %s", exc)
         url = f"{_BASE}?q={quote(query)}"
         async with _RATE_LIMIT:
             # Politeness: ensure ~1s between outbound requests.
@@ -92,11 +114,21 @@ class Point130Provider(BaseProvider):
                 if resp is None:
                     return []
                 if resp.status_code == 403:
-                    _BREAKER_OPEN_UNTIL[0] = time.time() + _BREAKER_COOLDOWN_S
+                    until = time.time() + _BREAKER_COOLDOWN_S
+                    _BREAKER_OPEN_UNTIL[0] = until
                     logger.warning(
                         "point130 403 — tripping circuit breaker for %.0fs",
                         _BREAKER_COOLDOWN_S,
                     )
+                    try:
+                        r = await get_redis()
+                        await r.setex(
+                            _BREAKER_REDIS_KEY,
+                            int(_BREAKER_COOLDOWN_S),
+                            str(until),
+                        )
+                    except Exception as exc:
+                        logger.debug("point130 breaker write failed: %s", exc)
                     return []
                 if resp.status_code >= 400:
                     return []

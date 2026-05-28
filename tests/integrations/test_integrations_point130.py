@@ -26,6 +26,16 @@ async def _close():
     # Reset the process-wide 403 circuit breaker so prior tests can't
     # leave it open and short-circuit these scrapes to empty.
     point130_module._BREAKER_OPEN_UNTIL[0] = 0.0
+    # Also clear the Redis-persisted breaker key — a prior production
+    # run (or earlier test) may have written a future timestamp there
+    # that would otherwise re-trip the in-process flag on first read.
+    try:
+        from app.platform.redis_client import get_redis as _get_redis
+
+        r = await _get_redis()
+        await r.delete(point130_module._BREAKER_REDIS_KEY)
+    except Exception:
+        pass
     yield
     await close_http_client()
 

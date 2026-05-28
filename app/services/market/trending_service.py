@@ -55,8 +55,9 @@ DEFAULT_LIMIT = 24
 # Hard cap per upstream provider when building the trending feed. The
 # default `http_timeout_seconds` (15s) can occasionally hang under load,
 # and the public `/cards/trending` endpoint must stay snappy because the
-# home screen blocks on it. 5s is enough for healthy responses.
-_PROVIDER_TIMEOUT_S = 5.0
+# home screen blocks on it. 3s is enough for healthy responses; the
+# Redis cache TTL (15 min) covers transient blips.
+_PROVIDER_TIMEOUT_S = 3.0
 
 # Per-provider trending queries. Chosen for: (a) high variety so the
 # rail doesn't look like one card type, (b) low upstream cost, (c)

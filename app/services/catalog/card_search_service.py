@@ -40,9 +40,23 @@ from app.utils.time import utcnow
 logger = get_logger("services.card_search")
 
 MAX_LIMIT = 50
-#: Per-provider deadline for the ``tcg=all`` fan-out so one slow upstream
-#: can't hold the entire interactive search hostage.
-PER_PROVIDER_TIMEOUT = 4.0
+#: Hard ceiling per provider in the ``tcg=all`` fan-out. Healthy upstream
+#: responses come back in 300–800 ms; this cap exists purely to keep one
+#: misbehaving provider from holding the entire keystroke hostage.
+#: Partial failures are NOT cached for long (see ``PARTIAL_RESULT_TTL``)
+#: so a brief blip self-heals on the next keystroke.
+PER_PROVIDER_TIMEOUT = 3.0
+
+#: Soft deadline: once this elapses, if at least two providers have
+#: already returned we ship the response and cancel the laggard.
+#: This means a slow Pokemon TCG no longer blocks Magic+Yu-Gi-Oh
+#: from rendering — the user sees something within ~1.5s instead of 3s+.
+FAST_SETTLE_DEADLINE = 1.5
+
+#: Cache TTL when one or more providers in a ``tcg=all`` fan-out failed.
+#: Short enough that a recovered provider shows up on the next keystroke,
+#: long enough that rapid retyping doesn't hammer the upstream.
+PARTIAL_RESULT_TTL = 20
 
 #: Providers we *don't* have an upstream for yet — returned gracefully.
 UNSUPPORTED_TCGS = {"onepiece", "lorcana", "sports"}
@@ -580,28 +594,64 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
         elif tcg == "magic":
             items = await _search_scryfall(q, limit)
             body = {"results": items, "total": len(items), "source": "scryfall"}
-        else:  # "all" → parallel fan-out
+        else:  # "all" → parallel fan-out with early-settle
             per = max(3, min(limit, MAX_LIMIT))
 
-            # Cap each provider at PER_PROVIDER_TIMEOUT so one slow upstream
-            # never blocks the response. The interactive search UX needs sub-
-            # second responsiveness; the default httpx timeout (15s) is fine
-            # for background jobs but unacceptable for keystroke search.
-            async def _bounded(coro):
-                return await asyncio.wait_for(coro, timeout=PER_PROVIDER_TIMEOUT)
+            # Kick off all three providers as named tasks so we can tell
+            # which one returned what after `asyncio.wait` resolves.
+            provider_labels = ("pokemontcg", "scryfall", "ygoprodeck")
+            tasks: dict[str, asyncio.Task[list[dict[str, Any]]]] = {
+                "pokemontcg": asyncio.create_task(_search_pokemon(q, per)),
+                "scryfall": asyncio.create_task(_search_scryfall(q, per)),
+                "ygoprodeck": asyncio.create_task(_search_ygoprodeck(q, per)),
+            }
 
-            results = await asyncio.gather(
-                _bounded(_search_pokemon(q, per)),
-                _bounded(_search_scryfall(q, per)),
-                _bounded(_search_ygoprodeck(q, per)),
-                return_exceptions=True,
+            # Phase 1: "fast settle". Wait up to FAST_SETTLE_DEADLINE.
+            # If at least two providers have returned (success or failure)
+            # we ship what we have and cancel the slowpoke. This is the
+            # main perceived-latency win: one chronically-slow upstream
+            # no longer blocks the entire response.
+            await asyncio.wait(
+                tasks.values(),
+                timeout=FAST_SETTLE_DEADLINE,
+                return_when=asyncio.ALL_COMPLETED,
             )
+            done_count = sum(1 for t in tasks.values() if t.done())
+
+            # Phase 2: if we don't have enough yet, wait the rest of the
+            # per-provider budget for the stragglers.
+            if done_count < 2:
+                remaining = [t for t in tasks.values() if not t.done()]
+                if remaining:
+                    await asyncio.wait(
+                        remaining,
+                        timeout=max(
+                            0.0, PER_PROVIDER_TIMEOUT - FAST_SETTLE_DEADLINE
+                        ),
+                        return_when=asyncio.ALL_COMPLETED,
+                    )
+
+            # Cancel anything still running and collect results.
             lists: list[list[dict[str, Any]]] = []
-            for label, res in zip(
-                ("pokemontcg", "scryfall", "ygoprodeck"), results, strict=False
-            ):
-                if isinstance(res, BaseException):
-                    logger.warning("multi-search upstream %s failed: %s", label, res)
+            any_failed = False
+            for label in provider_labels:
+                task = tasks[label]
+                if not task.done():
+                    task.cancel()
+                    any_failed = True
+                    logger.info(
+                        "multi-search upstream %s cancelled (slow > %ss)",
+                        label,
+                        PER_PROVIDER_TIMEOUT,
+                    )
+                    continue
+                try:
+                    res = task.result()
+                except (asyncio.CancelledError, Exception) as exc:
+                    any_failed = True
+                    logger.warning(
+                        "multi-search upstream %s failed: %s", label, exc
+                    )
                     continue
                 if isinstance(res, list):
                     lists.append(res)
@@ -611,6 +661,14 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
                 "total": len(merged),
                 "source": "mixed",
             }
+            if any_failed:
+                # Mark partial so the cache layer below uses the short TTL.
+                # Without this, a single slow upstream blip would silently
+                # hide an entire TCG's results for the full CARD_SEARCH_TTL
+                # (5 min) — e.g. searching "raichu" returns only Magic
+                # cards because the cached partial response is reused on
+                # every retry.
+                body["partial"] = True
     except httpx.HTTPError as exc:
         logger.warning("upstream search failed (%s): %s", tcg, exc)
         return _empty(tcg, error=str(exc))
@@ -618,7 +676,12 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
         logger.exception("unexpected error in search_cards: %s", exc)
         return _empty(tcg, error="upstream error")
 
-    await _cache_set(cache_key, body, CARD_SEARCH_TTL)
+    # Don't poison the cache with partial fan-out results. If pokemontcg
+    # (or any provider) timed out, write a much shorter TTL so the next
+    # keystroke can pick up a recovered provider instead of being stuck
+    # showing only the surviving TCGs for the next 5 minutes.
+    ttl = PARTIAL_RESULT_TTL if body.get("partial") else CARD_SEARCH_TTL
+    await _cache_set(cache_key, body, ttl)
     return body
 
 
@@ -727,7 +790,20 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
 
             # If we have nothing cached, try once to resolve upstream and
             # persist whatever we get back. Failures are non-fatal.
-            if not cached_pricing:
+            #
+            # NEGATIVE CACHE: when an upstream resolve times out or errors
+            # we record a short-lived marker so the next request for the
+            # same UUID doesn't pay the 4s timeout penalty again. Without
+            # this, opening a single card detail screen fires 6+ parallel
+            # routes (canonical/market/comps/listings/…) and each one
+            # individually waits the full 4s on the dead provider, turning
+            # a 4s blip into a 24s page load.
+            neg_cache_key = f"loupe:resolve_neg:{as_uuid}"
+            if not cached_pricing and await _cache_get(neg_cache_key) is not None:
+                # Skip the upstream resolve entirely and serve what we
+                # have from the local DB. Negative TTL is 5 min.
+                pass
+            elif not cached_pricing:
                 resolved = None
                 upstream_match: tuple[str, str] | None = None
 
@@ -799,12 +875,19 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                     )
                     resolved = None
                     upstream_match = None
+                    await _cache_set(neg_cache_key, {"reason": "timeout"}, 300)
                 except Exception as exc:
                     # Use %r so the type+args are always visible — plain %s
                     # on many provider exceptions renders as empty.
                     logger.info("upstream resolve skipped for %s (%r)", as_uuid, exc)
                     resolved = None
                     upstream_match = None
+                    await _cache_set(neg_cache_key, {"reason": "error"}, 300)
+
+                if resolved is None:
+                    # Even a successful-but-empty resolve is worth caching
+                    # to avoid hammering upstream for the same dead card.
+                    await _cache_set(neg_cache_key, {"reason": "empty"}, 300)
 
                 if resolved is not None:
                     cached_pricing = resolved.get("pricing_summary")
@@ -860,6 +943,10 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
     cached = await _cache_get(cache_key)
     if cached is not None:
         return cached
+    # Long-lived "last-known-good" cache. Survives normal TTL expiry so a
+    # transient upstream blip (network reset, 5xx) can serve a slightly
+    # stale card body instead of returning 404 to the UI.
+    stale_key = f"loupe:cards:item_lkg:{source}:{upstream_id}"
 
     try:
         if source == "pokemontcg":
@@ -878,11 +965,79 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             return None
     except httpx.HTTPError as exc:
         logger.warning("upstream get_card failed (%s): %s", source, exc)
-        return None
+        # Fallback 1: serve the last-known-good copy if we have one.
+        stale = await _cache_get(stale_key)
+        if stale is not None:
+            return stale
+        # Fallback 2: build a minimal response from the local Card row
+        # linked by CardExternalRef. Better to show a card with no
+        # pricing than to 404 the detail page on a network blip.
+        return await _local_card_from_external_ref(source, upstream_id)
 
     if result is not None:
         await _cache_set(cache_key, result, CARD_DETAIL_TTL)
+        # Mirror to the LKG cache with a much longer TTL (24h). Worst
+        # case the UI shows a day-old name/image while pricing endpoints
+        # serve fresh numbers on their own.
+        await _cache_set(stale_key, result, 86400)
+    else:
+        # Upstream returned nothing — try the local DB before giving up.
+        local = await _local_card_from_external_ref(source, upstream_id)
+        if local is not None:
+            return local
     return result
+
+
+async def _local_card_from_external_ref(
+    source: str, upstream_id: str
+) -> dict[str, Any] | None:
+    """Build a minimal card payload from the local DB by external ref.
+
+    Used as a fallback when an upstream provider is unreachable so the
+    card detail page degrades gracefully instead of returning 404.
+    """
+    from sqlalchemy import select as _select
+
+    from app.db.session import get_sessionmaker
+    from app.models.card_external_ref import CardExternalRef
+    from app.services.catalog import card_catalog_service
+
+    try:
+        maker = get_sessionmaker()
+        async with maker() as session:
+            ref = (
+                await session.execute(
+                    _select(CardExternalRef).where(
+                        CardExternalRef.source == source,
+                        CardExternalRef.external_id == upstream_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if ref is None:
+                return None
+            row = await card_catalog_service.get_card(session, ref.card_id)
+            if row is None:
+                return None
+            card_set = getattr(row, "card_set", None)
+            meta = row.card_metadata if isinstance(row.card_metadata, dict) else {}
+            tcg_str = row.tcg.value if hasattr(row.tcg, "value") else str(row.tcg)
+            return {
+                "id": f"{source}:{upstream_id}",
+                "name": row.name,
+                "tcg": tcg_str,
+                "set_name": card_set.name if card_set is not None else None,
+                "set_code": card_set.code if card_set is not None else None,
+                "number": row.number,
+                "rarity": row.rarity,
+                "image_url": meta.get("image_url") or row.image_url,
+                "images": meta.get("images"),
+                "year": row.year,
+                "source": "loupe-db",
+                "pricing_summary": meta.get("pricing_summary"),
+            }
+    except Exception as exc:  # pragma: no cover - best effort fallback
+        logger.debug("local fallback for %s:%s failed: %s", source, upstream_id, exc)
+        return None
 
 
 # ----------------------------------------------------------- price history

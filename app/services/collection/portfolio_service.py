@@ -90,6 +90,32 @@ async def _load_grades_with_cards(
     return [(g, c) for (g, c) in rows]
 
 
+def _current_market_value(card: Card | None) -> Decimal | None:
+    """Pull the latest known market price from ``Card.card_metadata``.
+
+    Returns the live ``pricing_summary.market.amount`` when present so
+    the vault total tracks today's price instead of the value frozen
+    into ``GradedCard.estimated_value_usd`` at scan time. Returns
+    ``None`` when no fresh price is available — callers should fall
+    back to the stored estimate.
+    """
+    if card is None or not isinstance(card.card_metadata, dict):
+        return None
+    pricing = card.card_metadata.get("pricing_summary")
+    if not isinstance(pricing, dict):
+        return None
+    market = pricing.get("market")
+    if not isinstance(market, dict):
+        return None
+    amount = market.get("amount")
+    if amount is None:
+        return None
+    try:
+        return Decimal(str(amount))
+    except (ValueError, ArithmeticError):
+        return None
+
+
 async def summary(db: AsyncSession, user: User) -> dict:
     """Aggregate the user's vault into a single hero card payload."""
     rows = await _load_grades_with_cards(db, user)
@@ -104,8 +130,15 @@ async def summary(db: AsyncSession, user: User) -> dict:
     # `Set(c.set)` and `count(c.house == 'loupe')` in JS.
     unique_card_ids: set = set()
     loupe_graded_count = 0
-    for g, _card in rows:
-        if g.estimated_value_usd is not None:
+    for g, card in rows:
+        # Prefer the live market price from the linked Card row so the
+        # vault total tracks today's market instead of the snapshot
+        # captured at scan time. Fall back to the stored estimate when
+        # no fresh price exists yet.
+        live = _current_market_value(card)
+        if live is not None:
+            total += live
+        elif g.estimated_value_usd is not None:
             total += g.estimated_value_usd
         if g.purchase_price_usd is not None:
             cost += g.purchase_price_usd

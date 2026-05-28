@@ -118,10 +118,17 @@ scan_create_limit = rate_limit(limit=30, window_seconds=60, name="scans.create")
 # heavy DB queries; 120/min/IP is generous for genuine usage and tight
 # enough to stop scrapers cold.
 catalog_read_limit = rate_limit(limit=120, window_seconds=60, name="cards.read")
+# Image proxy is idempotent, cached at the CDN + locally, and a single
+# screen of cards can legitimately fan out to 30-60 image requests in
+# one second. Sharing the 120/min catalog limit caused bursts of 429s
+# that masqueraded as "slow detail loads". This limit is set high
+# enough to absorb a full vault refresh while still stopping scrapers.
+image_proxy_limit = rate_limit(limit=1500, window_seconds=60, name="cards.image")
 
 
 __all__ = [
     "catalog_read_limit",
+    "image_proxy_limit",
     "rate_limit",
     "resolve_limit",
     "scan_create_limit",

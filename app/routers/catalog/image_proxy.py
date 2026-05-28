@@ -34,7 +34,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.integrations.base import get_http_client
-from app.platform.rate_limit import catalog_read_limit
+from app.platform.rate_limit import image_proxy_limit
 from app.utils.logger import get_logger
 
 logger = get_logger("routers.image_proxy")
@@ -85,6 +85,15 @@ _PUBLIC_CACHE_SECONDS = 60 * 60 * 24 * 30  # 30 days
 _cache: OrderedDict[str, tuple[bytes, str]] = OrderedDict()
 _cache_lock = asyncio.Lock()
 
+# Negative cache: URLs that returned 404/410 upstream. Holding these for
+# ~10 min stops the mobile client from re-requesting (and us from re-
+# fetching) the same dead URL every time the tile is rendered. Pokemon
+# TCG occasionally yanks `_hires.png` variants and we don't want to spam
+# them with retries.
+_NEG_CACHE_MAX = 512
+_NEG_CACHE_TTL_SECONDS = 600
+_neg_cache: OrderedDict[str, float] = OrderedDict()
+
 
 async def _cache_get(url: str) -> tuple[bytes, str] | None:
     async with _cache_lock:
@@ -128,7 +137,7 @@ def _validate_url(raw: str) -> str:
 @router.get(
     "",
     summary="Proxy a card image (public)",
-    dependencies=[Depends(catalog_read_limit)],
+    dependencies=[Depends(image_proxy_limit)],
     response_class=Response,
 )
 async def proxy_image(
@@ -154,12 +163,37 @@ async def proxy_image(
             },
         )
 
+    # Short-circuit recently-404'd URLs so we don't keep beating on the
+    # upstream CDN — and so the mobile retry budget isn't wasted.
+    import time as _time
+
+    async with _cache_lock:
+        exp = _neg_cache.get(url)
+        if exp is not None and exp > _time.time():
+            _neg_cache.move_to_end(url)
+            raise HTTPException(status_code=404, detail="upstream_not_found")
+        elif exp is not None:
+            # Expired — evict and fall through.
+            _neg_cache.pop(url, None)
+
     client = await get_http_client()
     try:
         resp = await client.get(url, timeout=_UPSTREAM_TIMEOUT, follow_redirects=True)
     except httpx.HTTPError as exc:
         logger.warning("image_proxy upstream error url=%s err=%s", url, exc)
         raise HTTPException(status_code=502, detail="upstream_unreachable") from exc
+
+    if resp.status_code in (404, 410):
+        # Upstream definitively says this image doesn't exist. Surface that
+        # to the client as 404 (not 502) so it falls back to placeholder /
+        # alternate URL instead of treating it as a transient failure and
+        # retrying forever. Negative-cache for 10 min.
+        async with _cache_lock:
+            _neg_cache[url] = _time.time() + _NEG_CACHE_TTL_SECONDS
+            _neg_cache.move_to_end(url)
+            while len(_neg_cache) > _NEG_CACHE_MAX:
+                _neg_cache.popitem(last=False)
+        raise HTTPException(status_code=404, detail="upstream_not_found")
 
     if resp.status_code != 200:
         logger.warning("image_proxy non-200 url=%s status=%s", url, resp.status_code)
