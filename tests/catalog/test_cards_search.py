@@ -565,3 +565,72 @@ async def test_endpoints_are_public_no_auth_required(client):
     resp = await client.get("/v1/cards/search", params={"q": "", "tcg": "all"})
     assert_envelope_ok(resp)
     assert "WWW-Authenticate" not in resp.headers
+
+
+@pytest.mark.asyncio
+async def test_precise_search_pins_collector_number(monkeypatch):
+    """A clean name + number query targets the exact printing."""
+    seen: list[str] = []
+
+    async def fake_search(
+        query: str, page: int = 1, page_size: int = 25
+    ) -> dict[str, Any]:
+        seen.append(query)
+        assert "number:58" in query
+        assert "name:pikachu*" in query
+        return {
+            "data": [
+                {
+                    "id": "base1-58",
+                    "name": "Pikachu",
+                    "number": "58",
+                    "set": {"id": "base1", "name": "Base Set",
+                            "releaseDate": "1999/01/09"},
+                    "images": {"small": "https://img/58.png"},
+                }
+            ]
+        }
+
+    monkeypatch.setattr(card_search_service.pokemon_tcg, "search_cards", fake_search)
+    out = await card_search_service.search_cards_precise(
+        tcg="pokemon", name="Pikachu", number="58/102"
+    )
+    assert [c["id"] for c in out] == ["pokemontcg:base1-58"]
+    # Name+number matched on the first call — no fallback fan-out.
+    assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_precise_search_falls_back_to_number_only(monkeypatch):
+    """When OCR garbles the name so the name query whiffs, the bare
+    collector number still recovers the candidate pool."""
+    queries: list[str] = []
+
+    async def fake_search(
+        query: str, page: int = 1, page_size: int = 25
+    ) -> dict[str, Any]:
+        queries.append(query)
+        if "name:" in query and "number:" in query:
+            # Garbled name wildcard matches nothing upstream.
+            return {"data": []}
+        # Number-only fallback returns every printing with that number.
+        assert query == "number:6"
+        return {
+            "data": [
+                {"id": "base1-6", "name": "Gyarados", "number": "6",
+                 "set": {"id": "base1", "name": "Base Set",
+                         "releaseDate": "1999/01/09"}},
+                {"id": "ru1-6", "name": "Gyarados", "number": "6",
+                 "set": {"id": "ru1", "name": "Pokémon Rumble",
+                         "releaseDate": "2009/12/02"}},
+            ]
+        }
+
+    monkeypatch.setattr(card_search_service.pokemon_tcg, "search_cards", fake_search)
+    out = await card_search_service.search_cards_precise(
+        tcg="pokemon", name="Gyarado5", number="6/102"
+    )
+    ids = {c["id"] for c in out}
+    assert ids == {"pokemontcg:base1-6", "pokemontcg:ru1-6"}
+    # First the name+number attempt, then the number-only rescue.
+    assert len(queries) == 2

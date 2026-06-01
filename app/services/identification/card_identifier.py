@@ -438,13 +438,42 @@ class CardIdentifier:
         """Run catalog text search across each title candidate."""
         if not parsed.title_candidates and not parsed.title:
             return []
-        # Try the top title; only fall through to runner-ups if it yields
-        # nothing. Avoids tripling upstream cost on every call.
         seen: dict[str, dict[str, Any]] = {}
         titles = [t for t, _ in parsed.title_candidates] or [parsed.title or ""]
+        titles = [t for t in titles if t]
+        if not titles:
+            return []
+
+        def _merge(results: list[dict[str, Any]] | None) -> None:
+            for result in results or []:
+                key = (
+                    result.get("id")
+                    or f"{result.get('name')}::{(result.get('set') or {}).get('id')}"
+                )
+                if key and key not in seen:
+                    seen[key] = result
+
+        # Pass 1 — field-aware precise lookup. When OCR gave us a collector
+        # number, pin it so the exact printing surfaces even if a name-only
+        # search would bury it under promos (e.g. Base Set Pikachu #58 never
+        # appears in the top 10 of a plain "Pikachu" search). One upstream
+        # call; degrades to [] on failure so we still keep the fuzzy hits.
+        if parsed.card_number:
+            try:
+                precise = await card_search_service.search_cards_precise(
+                    tcg=tcg,
+                    name=titles[0],
+                    number=parsed.card_number,
+                    set_code=parsed.set_code,
+                    limit=10,
+                )
+                _merge(precise)
+            except Exception:
+                logger.exception("precise search failed for title=%r", titles[0])
+
+        # Pass 2 — name-only fuzzy search for carousel breadth. Try the top
+        # title; only fall through to runner-ups if nothing has matched yet.
         for title in titles:
-            if not title:
-                continue
             try:
                 body = await card_search_service.search_cards(
                     q=title, tcg=tcg, limit=10
@@ -452,13 +481,7 @@ class CardIdentifier:
             except Exception:
                 logger.exception("text search failed for title=%r tcg=%s", title, tcg)
                 continue
-            for result in body.get("results", []) or []:
-                key = (
-                    result.get("id")
-                    or f"{result.get('name')}::{(result.get('set') or {}).get('id')}"
-                )
-                if key and key not in seen:
-                    seen[key] = result
+            _merge(body.get("results", []))
             if seen:
                 break  # don't blow upstream budget on backups when we found hits
         return list(seen.values())

@@ -63,6 +63,11 @@ _W_FIELDS = 0.20
 _W_PHASH = 0.15
 _W_FEEDBACK = 0.10
 
+# Extra confidence when the title *and* the collector number both match.
+# Calibrated so a confirmed (title + number) match clears the client lock
+# threshold while a name-only match stays in carousel territory.
+_SYNERGY_TITLE_NUMBER = 0.18
+
 
 def _string_similarity(a: str, b: str) -> float:
     """Normalized fuzzy similarity in ``[0, 1]``.
@@ -87,6 +92,20 @@ def _string_similarity(a: str, b: str) -> float:
         return SequenceMatcher(None, a_norm, b_norm).ratio()
 
 
+def _number_matches(parsed: ParsedCard, candidate: dict[str, Any]) -> bool:
+    """True when the parsed collector number matches the candidate's.
+
+    Compares the bare left-hand digits ("58/102" → "58") with leading
+    zeros stripped so "008" and "8" are treated as equal.
+    """
+    cand_num = candidate.get("number") or (candidate.get("set") or {}).get("number")
+    if not parsed.card_number or not cand_num:
+        return False
+    parsed_left = parsed.card_number.split("/", 1)[0].lstrip("0")
+    cand_left = str(cand_num).split("/", 1)[0].lstrip("0")
+    return bool(parsed_left) and parsed_left == cand_left
+
+
 def _field_bonus(parsed: ParsedCard, candidate: dict[str, Any]) -> float:
     """Award up to 1.0 for matching structured fields between parse+card.
 
@@ -101,12 +120,8 @@ def _field_bonus(parsed: ParsedCard, candidate: dict[str, Any]) -> float:
     if parsed.set_code and cand_set and parsed.set_code.upper() == cand_set.upper():
         bonus += 0.5
     # Card number ("123/198" → match against the candidate "number" field).
-    cand_num = candidate.get("number") or (candidate.get("set") or {}).get("number")
-    if parsed.card_number and cand_num:
-        parsed_left = parsed.card_number.split("/", 1)[0].lstrip("0")
-        cand_left = str(cand_num).split("/", 1)[0].lstrip("0")
-        if parsed_left and parsed_left == cand_left:
-            bonus += 0.3
+    if _number_matches(parsed, candidate):
+        bonus += 0.3
     # HP (Pokémon). Tolerate ±10 because OCR sometimes misreads 100 as 700.
     if parsed.hp is not None:
         cand_hp_raw = candidate.get("hp") or candidate.get("hit_points")
@@ -160,6 +175,16 @@ def score_candidate(
         + _W_PHASH * (1.0 if phash_hit else 0.0)
         + _W_FEEDBACK * clamped_prior
     )
+    # Synergy bonus: a near-exact title match *and* an exact collector
+    # number is a near-certain identification — that pair pins a single
+    # printing. The plain weighted sum tops out around 0.64 for such a
+    # match (OCR confidence is never 1.0, set codes rarely OCR cleanly on
+    # vintage cards), which sits below the client lock threshold and made
+    # the scanner feel like it "never recognised" obvious cards. The
+    # bonus lifts a confirmed match clear of the carousel noise so it
+    # locks, while cards that share a name but not the number stay put.
+    if text_sim >= 0.85 and _number_matches(parsed, candidate):
+        final += _SYNERGY_TITLE_NUMBER
     return ScoreBreakdown(
         text_similarity=round(text_sim, 4),
         ocr_quality=round(clamped_ocr, 4),

@@ -68,6 +68,32 @@ def mock_search(monkeypatch):
     from app.services.catalog import card_search_service
 
     monkeypatch.setattr(card_search_service, "search_cards", fake_search_cards)
+
+    async def fake_search_cards_precise(
+        *,
+        tcg: str,
+        name: str,
+        number: str | None = None,
+        set_code: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        # Field-aware pass: pin the exact Base Set Charizard #4 so the
+        # pipeline's precise-recall path stays hermetic (no network).
+        return [
+            {
+                "id": "pokemontcg:base1-4",
+                "name": "Charizard",
+                "set": {"id": "base1", "code": "BS", "name": "Base Set"},
+                "number": "4/102",
+                "hp": "120",
+                "images": {"large": "https://example.test/charizard.png"},
+                "tcg": "pokemon",
+            }
+        ]
+
+    monkeypatch.setattr(
+        card_search_service, "search_cards_precise", fake_search_cards_precise
+    )
     return fake_search_cards
 
 

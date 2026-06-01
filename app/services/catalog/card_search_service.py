@@ -541,6 +541,86 @@ async def _search_pokemon(q: str, limit: int) -> list[dict[str, Any]]:
     return [_from_pokemon(c) for c in (raw.get("data") or [])][:limit]
 
 
+def _bare_number(number: str | None) -> str | None:
+    """Strip a collector number to its bare left-hand digits.
+
+    ``"58/102"`` → ``"58"``, ``"008/165"`` → ``"8"``. Returns ``None``
+    when there's nothing usable to pin a search on.
+    """
+    if not number:
+        return None
+    left = str(number).split("/", 1)[0].strip().lstrip("0")
+    return left if left.isdigit() else None
+
+
+async def search_cards_precise(
+    *,
+    tcg: str,
+    name: str,
+    number: str | None = None,
+    set_code: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Field-aware catalog lookup for the identification pipeline.
+
+    Unlike :func:`search_cards` (title-only fuzzy search), this pins the
+    *collector number* — and the set when known — so the exact printing
+    surfaces even when a name-only search buries it under promos. The
+    canonical example: a name-only search for "Pikachu" never returns
+    Base Set #58 in the top 10, but ``name:pikachu* number:58`` returns
+    it precisely.
+
+    Returns a list of unified card dicts (possibly empty). Never raises —
+    upstream failures degrade to an empty list so the pipeline keeps the
+    name-only candidates it already has.
+    """
+    name = (name or "").strip()
+    if not name:
+        return []
+    tcg = (tcg or "all").lower()
+    bare = _bare_number(number)
+    if not bare:
+        # Nothing to pin on — the name-only path already covers this.
+        return []
+    try:
+        if tcg == "pokemon":
+            tokens = [
+                t for t in _POKEMON_SAFE_RE.sub(" ", name).strip().lower().split() if t
+            ]
+            if not tokens:
+                return []
+            parts = [f"name:{tok}*" for tok in tokens]
+            parts.append(f"number:{bare}")
+            raw = await pokemon_tcg.search_cards(
+                " ".join(parts), page=1, page_size=limit
+            )
+            cards = [_from_pokemon(c) for c in (raw.get("data") or [])]
+            if cards:
+                return cards[:limit]
+            # Fallback — the name wildcard matched nothing, almost always
+            # because OCR garbled a character ("Gyarados" → "Gyarado5",
+            # so name:gyarado5* hits zero). The collector number is a
+            # strong key on its own: pull every printing with that number
+            # and let name-similarity + HP/year scoring pick the right one
+            # downstream. Widen the page so the correct set is in the pool.
+            raw = await pokemon_tcg.search_cards(
+                f"number:{bare}", page=1, page_size=max(limit, 30)
+            )
+            return [_from_pokemon(c) for c in (raw.get("data") or [])]
+        if tcg == "magic":
+            q_parts = [name]
+            q_parts.append(f"cn:{number}")
+            if set_code:
+                q_parts.append(f"set:{set_code}")
+            raw = await scryfall.search_cards(" ".join(q_parts), page=1)
+            return [_from_scryfall(c) for c in (raw.get("data") or [])][:limit]
+        # YGOPRODeck has no clean collector-number filter on the name
+        # endpoint, so precise lookups don't help there — fall through.
+    except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
+        logger.info("precise search failed (%s/%s #%s): %s", tcg, name, bare, exc)
+    return []
+
+
 async def _search_scryfall(q: str, limit: int) -> list[dict[str, Any]]:
     raw = await scryfall.search_cards(q, page=1)
     return [_from_scryfall(c) for c in (raw.get("data") or [])][:limit]
