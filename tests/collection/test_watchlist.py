@@ -39,9 +39,7 @@ async def test_add_list_delete_watchlist_roundtrip(
     assert rows[0]["id"] == pin_id
 
     # DELETE by card_id removes it.
-    resp = await client.delete(
-        f"/v1/watchlist/{card.id}", headers=auth_headers
-    )
+    resp = await client.delete(f"/v1/watchlist/{card.id}", headers=auth_headers)
     assert resp.status_code == 204
 
     resp = await client.get("/v1/watchlist", headers=auth_headers)
@@ -49,9 +47,7 @@ async def test_add_list_delete_watchlist_roundtrip(
 
 
 @pytest.mark.asyncio
-async def test_add_is_idempotent(
-    client, db_session, created_user, auth_headers
-):
+async def test_add_is_idempotent(client, db_session, created_user, auth_headers):
     card = await make_card(db_session)
 
     resp1 = await client.post(
@@ -77,9 +73,7 @@ async def test_add_is_idempotent(
 
 @pytest.mark.asyncio
 async def test_delete_unknown_card_returns_404(client, auth_headers):
-    resp = await client.delete(
-        f"/v1/watchlist/{uuid.uuid4()}", headers=auth_headers
-    )
+    resp = await client.delete(f"/v1/watchlist/{uuid.uuid4()}", headers=auth_headers)
     assert_envelope_error(resp, expected_status=404)
 
 
@@ -93,16 +87,10 @@ async def test_watchlist_requires_auth(client):
 async def test_is_watching_helper(db_session, created_user):
     card = await make_card(db_session)
 
-    assert not await watchlist_service.is_watching(
-        db_session, created_user, card.id
-    )
+    assert not await watchlist_service.is_watching(db_session, created_user, card.id)
 
     await watchlist_service.add(db_session, created_user, card.id)
-    assert await watchlist_service.is_watching(
-        db_session, created_user, card.id
-    )
+    assert await watchlist_service.is_watching(db_session, created_user, card.id)
 
     await watchlist_service.remove(db_session, created_user, card.id)
-    assert not await watchlist_service.is_watching(
-        db_session, created_user, card.id
-    )
+    assert not await watchlist_service.is_watching(db_session, created_user, card.id)

@@ -42,7 +42,7 @@ logger = get_logger("services.card_search")
 
 MAX_LIMIT = 50
 #: Hard ceiling per provider in the ``tcg=all`` fan-out. Healthy upstream
-#: responses come back in 300–800 ms; this cap exists purely to keep one
+#: responses come back in 300-800 ms; this cap exists purely to keep one
 #: misbehaving provider from holding the entire keystroke hostage.
 #: Partial failures are NOT cached for long (see ``PARTIAL_RESULT_TTL``)
 #: so a brief blip self-heals on the next keystroke.
@@ -537,7 +537,9 @@ def _build_pokemon_query(q: str) -> str:
 
 
 async def _search_pokemon(q: str, limit: int) -> list[dict[str, Any]]:
-    raw = await pokemon_tcg.search_cards(_build_pokemon_query(q), page=1, page_size=limit)
+    raw = await pokemon_tcg.search_cards(
+        _build_pokemon_query(q), page=1, page_size=limit
+    )
     return [_from_pokemon(c) for c in (raw.get("data") or [])][:limit]
 
 
@@ -706,9 +708,7 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
                 if remaining:
                     await asyncio.wait(
                         remaining,
-                        timeout=max(
-                            0.0, PER_PROVIDER_TIMEOUT - FAST_SETTLE_DEADLINE
-                        ),
+                        timeout=max(0.0, PER_PROVIDER_TIMEOUT - FAST_SETTLE_DEADLINE),
                         return_when=asyncio.ALL_COMPLETED,
                     )
 
@@ -730,9 +730,7 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
                     res = task.result()
                 except (asyncio.CancelledError, Exception) as exc:
                     any_failed = True
-                    logger.warning(
-                        "multi-search upstream %s failed: %s", label, exc
-                    )
+                    logger.warning("multi-search upstream %s failed: %s", label, exc)
                     continue
                 if isinstance(res, list):
                     lists.append(res)
@@ -1243,9 +1241,7 @@ async def get_price_history(
     # Seed the walk with house+grade so each filtered series gets its
     # own deterministic shape (otherwise tapping PSA 10 would just
     # rescale the raw walk and look identical).
-    seed_key = hashlib.sha256(
-        f"{card_id}|{house_key}|{grade_key}".encode()
-    ).hexdigest()
+    seed_key = hashlib.sha256(f"{card_id}|{house_key}|{grade_key}".encode()).hexdigest()
     seed = int(seed_key, 16) % (2**32)
     rng = random.Random(seed)
     step = _step_days(days)
@@ -1349,7 +1345,7 @@ def _parse_grade(grade_key: str) -> float | None:
     # Strip a leading house token like "psa 10".
     for h in ("psa", "cgc", "bgs", "sgc", "tag"):
         if s.startswith(h):
-            s = s[len(h):].strip()
+            s = s[len(h) :].strip()
             break
     # Drop trailing labels like "black" on "10 BLACK".
     parts = s.split()

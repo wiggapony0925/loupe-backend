@@ -32,7 +32,8 @@ success.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import httpx
 
@@ -102,22 +103,21 @@ async def request_json(
     # as a breaker *success* rather than tripping the failure counter.
     result: dict[str, Any] = {"value": None}
 
-    async with breaker.guard():
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
-            resp = await client.request(
-                method,
-                url,
-                params=dict(params) if params else None,
-                headers=dict(headers) if headers else None,
-            )
-            status = resp.status_code
-            if not_found_ok and status == 404:
-                result["value"] = None
-            elif status in extra_ok_statuses:
-                result["value"] = {"data": []}
-            else:
-                resp.raise_for_status()
-                result["value"] = resp.json()
+    async with breaker.guard(), httpx.AsyncClient(timeout=timeout_s) as client:
+        resp = await client.request(
+            method,
+            url,
+            params=dict(params) if params else None,
+            headers=dict(headers) if headers else None,
+        )
+        status = resp.status_code
+        if not_found_ok and status == 404:
+            result["value"] = None
+        elif status in extra_ok_statuses:
+            result["value"] = {"data": []}
+        else:
+            resp.raise_for_status()
+            result["value"] = resp.json()
 
     return result["value"]
 

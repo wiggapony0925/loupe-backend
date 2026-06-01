@@ -172,7 +172,7 @@ async def proxy_image(
         if exp is not None and exp > _time.time():
             _neg_cache.move_to_end(url)
             raise HTTPException(status_code=404, detail="upstream_not_found")
-        elif exp is not None:
+        if exp is not None:
             # Expired — evict and fall through.
             _neg_cache.pop(url, None)
 

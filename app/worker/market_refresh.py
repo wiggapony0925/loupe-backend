@@ -7,22 +7,25 @@ can serve instantly from cache, not by fanning out to slow providers.
 import asyncio
 import logging
 
-from app.services.catalog.card_refresh_utils import get_all_card_ids, refresh_market_data
 from app.platform.db import get_session
+from app.services.catalog.card_refresh_utils import (
+    get_all_card_ids,
+    refresh_market_data,
+)
 
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 100
 
+
 async def refresh_all_cards():
     async with get_session() as session:
         card_ids = await get_all_card_ids(session)
         for i in range(0, len(card_ids), BATCH_SIZE):
-            batch = card_ids[i:i+BATCH_SIZE]
-            results = await asyncio.gather(*[
-                refresh_market_data(card_id, session)
-                for card_id in batch
-            ])
+            batch = card_ids[i : i + BATCH_SIZE]
+            results = await asyncio.gather(
+                *[refresh_market_data(card_id, session) for card_id in batch]
+            )
             await session.commit()
             logger.info(
                 "Refreshed %d/%d cards (success: %d)",
@@ -30,6 +33,7 @@ async def refresh_all_cards():
                 len(card_ids),
                 sum(results),
             )
+
 
 if __name__ == "__main__":
     asyncio.run(refresh_all_cards())

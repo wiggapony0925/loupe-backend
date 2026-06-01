@@ -1,13 +1,14 @@
+from sqlalchemy import select
 
 from app.models.card import Card
 from app.services.catalog import card_search_service
-from sqlalchemy import select
-import asyncio
+
 
 async def get_all_card_ids(session):
     # Returns a list of all card UUIDs in the catalog.
     result = await session.execute(select(Card.id))
     return [str(row[0]) for row in result.fetchall()]
+
 
 async def refresh_market_data(card_id, session):
     # Calls the same logic as the API to update pricing_summary for card_id.

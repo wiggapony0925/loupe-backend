@@ -584,8 +584,11 @@ async def test_precise_search_pins_collector_number(monkeypatch):
                     "id": "base1-58",
                     "name": "Pikachu",
                     "number": "58",
-                    "set": {"id": "base1", "name": "Base Set",
-                            "releaseDate": "1999/01/09"},
+                    "set": {
+                        "id": "base1",
+                        "name": "Base Set",
+                        "releaseDate": "1999/01/09",
+                    },
                     "images": {"small": "https://img/58.png"},
                 }
             ]
@@ -617,12 +620,26 @@ async def test_precise_search_falls_back_to_number_only(monkeypatch):
         assert query == "number:6"
         return {
             "data": [
-                {"id": "base1-6", "name": "Gyarados", "number": "6",
-                 "set": {"id": "base1", "name": "Base Set",
-                         "releaseDate": "1999/01/09"}},
-                {"id": "ru1-6", "name": "Gyarados", "number": "6",
-                 "set": {"id": "ru1", "name": "Pokémon Rumble",
-                         "releaseDate": "2009/12/02"}},
+                {
+                    "id": "base1-6",
+                    "name": "Gyarados",
+                    "number": "6",
+                    "set": {
+                        "id": "base1",
+                        "name": "Base Set",
+                        "releaseDate": "1999/01/09",
+                    },
+                },
+                {
+                    "id": "ru1-6",
+                    "name": "Gyarados",
+                    "number": "6",
+                    "set": {
+                        "id": "ru1",
+                        "name": "Pokémon Rumble",
+                        "releaseDate": "2009/12/02",
+                    },
+                },
             ]
         }
 

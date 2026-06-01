@@ -414,8 +414,7 @@ async def test_history_no_price_history_reports_zero_delta(
     # Today's bucket still reflects live market value, not the estimate.
     last_point = body["points"][-1]["priceUsd"]
     assert last_point == pytest.approx(1500.0), (
-        f"{range_}: today bucket must equal live market ($1500), "
-        f"got ${last_point}"
+        f"{range_}: today bucket must equal live market ($1500), got ${last_point}"
     )
 
 

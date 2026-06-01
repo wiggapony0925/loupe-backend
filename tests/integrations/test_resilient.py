@@ -32,7 +32,9 @@ def _patch_httpx(monkeypatch: pytest.MonkeyPatch, handler) -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_json_returns_body_on_200(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_request_json_returns_body_on_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _patch_httpx(monkeypatch, lambda req: httpx.Response(200, json={"ok": True}))
 
     body = await _resilient.request_json(

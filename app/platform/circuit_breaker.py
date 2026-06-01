@@ -50,9 +50,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import AsyncIterator
 
 logger = logging.getLogger("loupe.circuit_breaker")
 
@@ -101,9 +101,7 @@ class CircuitBreaker:
     # State predicates
     # ------------------------------------------------------------------
     def _is_open(self, now: float) -> bool:
-        return (
-            self.opened_at is not None and now - self.opened_at < self.cooldown_s
-        )
+        return self.opened_at is not None and now - self.opened_at < self.cooldown_s
 
     def _retry_after(self, now: float) -> float:
         if self.opened_at is None:

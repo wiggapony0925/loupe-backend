@@ -374,9 +374,7 @@ async def history(
     # Establish the earliest reference date for ALL range.
     earliest_dates: list[date] = []
     # (estimated_value_usd, price_history, live_today_value_for_this_card)
-    per_card_history: list[
-        tuple[Decimal | None, list[tuple[date, float]], float]
-    ] = []
+    per_card_history: list[tuple[Decimal | None, list[tuple[date, float]], float]] = []
     # Today's live total — reuses the same per-card market lookup the
     # vault summary endpoint uses so the Command Center hero value and
     # the Vault portfolio value always agree. Without this, history's

@@ -121,7 +121,9 @@ async def test_snapshot_appends_today_for_cards_with_live_price(db_session):
     card_a = await make_card(db_session, name="Has Market")
     card_a.card_metadata = _meta_with_market(42.0)
     flag_modified(card_a, "card_metadata")
-    card_b = await make_card(db_session, name="No Market")  # skipped
+    # A second card with no market metadata — created so the snapshot has
+    # something to skip; we never reference it again.
+    await make_card(db_session, name="No Market")
     await db_session.commit()
 
     result = await snapshot_prices()

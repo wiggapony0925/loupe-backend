@@ -289,7 +289,9 @@ async def _safe(coro: Any, *, label: str, errors: list[str]) -> Any:
         # Bare TimeoutError has no message — logging `%s` produced empty
         # strings ("canonical compose market failed: ") that made these
         # very common failures impossible to spot in production logs.
-        logger.info("canonical compose %s failed: timeout after %ss", label, _FANOUT_TIMEOUT_S)
+        logger.info(
+            "canonical compose %s failed: timeout after %ss", label, _FANOUT_TIMEOUT_S
+        )
         errors.append(f"{label}:Timeout")
         return None
     except Exception as exc:

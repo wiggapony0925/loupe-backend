@@ -39,10 +39,26 @@ LOCK = 0.70  # frontend LOCK_CONFIDENCE
 # Chase / iconic names that exist across MANY printings. The number is the
 # only thing that disambiguates them — exactly the case that broke before.
 HARD_NAMES = [
-    "Charizard", "Pikachu", "Mewtwo", "Mew", "Rayquaza", "Umbreon",
-    "Gengar", "Lugia", "Blastoise", "Gyarados", "Eevee", "Snorlax",
-    "Gardevoir", "Sylveon", "Lucario", "Greninja", "Dragonite",
-    "Tyranitar", "Garchomp", "Zard",
+    "Charizard",
+    "Pikachu",
+    "Mewtwo",
+    "Mew",
+    "Rayquaza",
+    "Umbreon",
+    "Gengar",
+    "Lugia",
+    "Blastoise",
+    "Gyarados",
+    "Eevee",
+    "Snorlax",
+    "Gardevoir",
+    "Sylveon",
+    "Lucario",
+    "Greninja",
+    "Dragonite",
+    "Tyranitar",
+    "Garchomp",
+    "Zard",
 ]
 
 # Deterministic so reruns are comparable.
@@ -51,10 +67,10 @@ random.seed(1337)
 
 @dataclass
 class Truth:
-    card_id: str          # "base1-58"
-    set_id: str           # "base1"
+    card_id: str  # "base1-58"
+    set_id: str  # "base1"
     name: str
-    number: str           # "58"
+    number: str  # "58"
     hp: int | None
     year: int | None
 
@@ -69,7 +85,7 @@ async def _fetch(query: str, page_size: int) -> dict[str, Any]:
             raw = await pokemon_tcg.search_cards(query, page=1, page_size=page_size)
             if raw.get("data"):
                 return raw
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         await asyncio.sleep(0.6 * (attempt + 1))
     return {"data": []}
@@ -131,8 +147,8 @@ def _parsed_for(t: Truth, idx: int) -> ParsedCard:
     return ParsedCard(
         title=title,
         title_candidates=[(title, 0.9)],
-        set_code=None,            # vintage set codes rarely OCR cleanly
-        card_number=t.number,     # the key signal
+        set_code=None,  # vintage set codes rarely OCR cleanly
+        card_number=t.number,  # the key signal
         hp=t.hp,
         year=t.year,
         tcg_hints=["pokemon"],
@@ -211,8 +227,10 @@ async def main() -> None:
     print(f"  {'top-1 exact match':<26}{base_hit}/{n:<18}{loupe_hit}/{n}")
     print(f"  {'top-1 AND locks (>=.70)':<26}{base_lock}/{n:<18}{loupe_lock}/{n}")
     print("=" * 64)
-    print(f"  LOUPE lock accuracy: {100 * loupe_lock / n:.1f}%  "
-          f"(baseline {100 * base_lock / n:.1f}%)")
+    print(
+        f"  LOUPE lock accuracy: {100 * loupe_lock / n:.1f}%  "
+        f"(baseline {100 * base_lock / n:.1f}%)"
+    )
     if failures:
         print(f"\n  Did NOT lock ({len(failures)}):")
         for f in failures:

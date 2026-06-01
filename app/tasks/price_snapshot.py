@@ -131,12 +131,7 @@ async def snapshot_prices(
     async with sm() as session:
         offset = 0
         while True:
-            stmt = (
-                select(Card)
-                .order_by(Card.id)
-                .offset(offset)
-                .limit(batch_size)
-            )
+            stmt = select(Card).order_by(Card.id).offset(offset).limit(batch_size)
             rows = (await session.execute(stmt)).scalars().all()
             if not rows:
                 break
@@ -144,7 +139,9 @@ async def snapshot_prices(
             batch_updated = 0
             for card in rows:
                 scanned += 1
-                meta = card.card_metadata if isinstance(card.card_metadata, dict) else {}
+                meta = (
+                    card.card_metadata if isinstance(card.card_metadata, dict) else {}
+                )
                 price = _extract_market_amount(meta)
                 if price is None:
                     skipped += 1
@@ -174,4 +171,4 @@ async def snapshot_prices(
     return result
 
 
-__all__ = ["snapshot_prices", "MAX_HISTORY_POINTS", "DEFAULT_BATCH_SIZE"]
+__all__ = ["DEFAULT_BATCH_SIZE", "MAX_HISTORY_POINTS", "snapshot_prices"]

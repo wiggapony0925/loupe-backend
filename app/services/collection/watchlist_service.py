@@ -28,9 +28,7 @@ def _to_read(row: WatchlistItem, card: Card | None) -> WatchlistItemRead:
     return out
 
 
-async def list_for_user(
-    db: AsyncSession, user: User
-) -> list[WatchlistItemRead]:
+async def list_for_user(db: AsyncSession, user: User) -> list[WatchlistItemRead]:
     rows = (
         await db.execute(
             select(WatchlistItem, Card)
@@ -42,9 +40,7 @@ async def list_for_user(
     return [_to_read(w, c) for (w, c) in rows]
 
 
-async def add(
-    db: AsyncSession, user: User, card_id: uuid.UUID
-) -> WatchlistItemRead:
+async def add(db: AsyncSession, user: User, card_id: uuid.UUID) -> WatchlistItemRead:
     """Idempotent add — returns the existing row when already pinned."""
     existing = (
         await db.execute(
@@ -88,9 +84,7 @@ async def add(
     return _to_read(row, card)
 
 
-async def remove(
-    db: AsyncSession, user: User, card_id: uuid.UUID
-) -> bool:
+async def remove(db: AsyncSession, user: User, card_id: uuid.UUID) -> bool:
     row = (
         await db.execute(
             select(WatchlistItem).where(
@@ -106,9 +100,7 @@ async def remove(
     return True
 
 
-async def is_watching(
-    db: AsyncSession, user: User, card_id: uuid.UUID
-) -> bool:
+async def is_watching(db: AsyncSession, user: User, card_id: uuid.UUID) -> bool:
     row = (
         await db.execute(
             select(WatchlistItem.id).where(
