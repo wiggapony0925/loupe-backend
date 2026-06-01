@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.config import get_settings
 from app.services.identification.text_parser import ParsedCard
 
 # Order matters: when two TCG signals fire (e.g. HP *and* mana cost from a
@@ -17,20 +18,70 @@ from app.services.identification.text_parser import ParsedCard
 # because Vision occasionally hallucinates {X} from card-border glyphs.
 _HINT_PRIORITY: tuple[str, ...] = ("pokemon", "yugioh", "magic", "onepiece")
 
+# Every game we can route to. Keep in sync with the catalog providers in
+# ``card_search_service`` and the router ``pattern=`` validators.
+_VALID_TCGS: frozenset[str] = frozenset(
+    {"pokemon", "magic", "yugioh", "onepiece", "lorcana", "sports"}
+)
+
+
+def _has_fraction_number(parsed: ParsedCard) -> bool:
+    """True if OCR found a ``NNN/NNN`` collector number.
+
+    Pokémon and Magic print a ``set-size`` fraction (e.g. ``058/198``);
+    Yu-Gi-Oh uses a hyphenated set code (``LOB-001``) and One Piece uses
+    ``OP01-001``. So a bare fraction is soft evidence *against* those and
+    *for* the fraction-numbered games.
+    """
+    num = parsed.card_number
+    return bool(num and "/" in num)
+
+
+# Soft-evidence predicates per game. Used only as a tie-breaker when no
+# decisive OCR hint fired, to bias toward the app's primary TCG instead of
+# fanning out to every catalog. Add an entry here when onboarding a new
+# focus game — the rest of ``infer_tcg`` is game-agnostic.
+_SOFT_SIGNALS: dict[str, Any] = {
+    "pokemon": _has_fraction_number,
+    "magic": _has_fraction_number,
+}
+
+
+def _soft_match(tcg: str, parsed: ParsedCard) -> bool:
+    """Whether ``parsed`` carries soft (non-decisive) evidence for ``tcg``."""
+    predicate = _SOFT_SIGNALS.get(tcg)
+    return bool(predicate and predicate(parsed))
+
 
 def infer_tcg(parsed: ParsedCard, *, user_hint: str | None = None) -> str:
     """Best-guess TCG from parsed OCR + an optional client-provided hint.
 
+    Resolution order (first decisive signal wins):
+
+      1. Explicit ``user_hint`` from the client (the TCG pill).
+      2. A decisive OCR signal — HP (Pokémon), ATK/DEF (Yu-Gi-Oh), or a
+         mana glyph (Magic) — by :data:`_HINT_PRIORITY`.
+      3. **Primary-TCG bias.** With no decisive signal we'd otherwise fan
+         out to *every* catalog, which lets an unrelated game win on a
+         poor read. Instead, if there's soft corroborating evidence for
+         the configured ``identify_primary_tcg`` (e.g. a ``NNN/NNN``
+         collector number for a Pokémon-focused app), prefer it. This is
+         config-driven so it scales as the product adds games — flip
+         ``settings.identify_primary_tcg`` (or set it to ``"all"`` to
+         disable the bias) with no code changes.
+      4. Fall back to ``"all"`` (fan out to every catalog).
+
     Returns one of ``"pokemon"``, ``"magic"``, ``"yugioh"``,
-    ``"onepiece"``, ``"lorcana"``, ``"sports"``, or ``"all"`` (the
-    catch-all that fans out to every catalog).
+    ``"onepiece"``, ``"lorcana"``, ``"sports"``, or ``"all"``.
     """
-    valid = {"pokemon", "magic", "yugioh", "onepiece", "lorcana", "sports"}
-    if user_hint and user_hint.lower() in valid:
+    if user_hint and user_hint.lower() in _VALID_TCGS:
         return user_hint.lower()
     for hint in _HINT_PRIORITY:
         if hint in parsed.tcg_hints:
             return hint
+    primary = get_settings().identify_primary_tcg.lower()
+    if primary in _VALID_TCGS and _soft_match(primary, parsed):
+        return primary
     return "all"
 
 

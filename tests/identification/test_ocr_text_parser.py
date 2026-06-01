@@ -87,6 +87,35 @@ def test_infer_tcg_defaults_to_all_when_no_signal():
     assert infer_tcg(parsed) == "all"
 
 
+def test_infer_tcg_biases_to_primary_on_fraction_number():
+    # No decisive game signal (no HP / ATK-DEF / mana), but a NNN/NNN
+    # collector number is soft evidence for the fraction-numbered games.
+    # With the default primary TCG = "pokemon" this should resolve to
+    # pokemon instead of fanning out to "all" (where a Yu-Gi-Oh result
+    # could win on a poor read).
+    parsed = parse_ocr_text("Some Card Name\n058/198\n")
+    assert parsed.card_number == "058/198"
+    assert infer_tcg(parsed) == "pokemon"
+
+
+def test_infer_tcg_primary_bias_respects_decisive_signal():
+    # A decisive ATK/DEF footer must still win over the primary bias.
+    parsed = parse_ocr_text("Dark Magician\nATK/2500 DEF/2100\n")
+    assert infer_tcg(parsed) == "yugioh"
+
+
+def test_infer_tcg_primary_bias_disabled_when_set_to_all(monkeypatch):
+    # Flipping the focus TCG to "all" turns the bias off — the scalable
+    # escape hatch for a truly multi-game catalog.
+    from app.services.identification import confidence as conf
+
+    monkeypatch.setattr(
+        conf.get_settings(), "identify_primary_tcg", "all", raising=False
+    )
+    parsed = parse_ocr_text("Some Card Name\n058/198\n")
+    assert infer_tcg(parsed) == "all"
+
+
 def test_score_candidate_rewards_exact_name_match():
     parsed = parse_ocr_text("Charizard\nHP 120\nBS 4/102\n")
     candidate = {

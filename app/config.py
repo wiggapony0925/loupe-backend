@@ -85,6 +85,18 @@ class Settings(BaseSettings):
     scryfall_base_url: str = "https://api.scryfall.com"
     ygoprodeck_base_url: str = "https://db.ygoprodeck.com/api/v7"
 
+    # --- Identification: focus TCG ---
+    # The trading-card game the app is currently focused on. When OCR
+    # yields no decisive game signal (no HP / ATK-DEF / mana glyph), the
+    # identifier biases toward this game *if* there is soft corroborating
+    # evidence (see ``identify.confidence._soft_match``) instead of fanning
+    # out to every catalog — which is what let a Pokémon card occasionally
+    # resolve as Yu-Gi-Oh on a poor read. Set to ``"all"`` to disable the
+    # bias entirely once the app is truly multi-game. Scalable: flip this
+    # one value (or the ``EXPO``-style env var ``IDENTIFY_PRIMARY_TCG``)
+    # as the product's focus shifts; no code changes required.
+    identify_primary_tcg: str = "pokemon"
+
     # --- Pricing APIs (optional) ---
     tcgplayer_client_id: str = ""
     tcgplayer_client_secret: str = ""
