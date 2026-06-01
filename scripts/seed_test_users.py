@@ -125,7 +125,9 @@ CATALOG: dict[str, dict] = {
         },
         "cards": [
             (
-                "Charizard VSTAR",
+                # GG44/GG70 in Crown Zenith Galarian Gallery is Mewtwo VSTAR;
+                # Charizard appears only as the illustration backdrop.
+                "Mewtwo VSTAR",
                 "GG44/GG70",
                 "Trainer Gallery",
                 2023,
