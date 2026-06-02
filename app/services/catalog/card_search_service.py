@@ -21,7 +21,7 @@ import hashlib
 import json
 import random
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -1175,7 +1175,11 @@ def _granularity(days: int) -> str:
 def _step_days(days: int) -> int:
     if days <= 90:
         return 1
-    return 7
+    if days <= 730:
+        return 7
+    # Multi-year "ALL" windows (e.g. a 1999 card) would otherwise mint
+    # thousands of points; sample monthly so the series stays light.
+    return 30
 
 
 async def get_price_history(
@@ -1211,6 +1215,16 @@ async def get_price_history(
     card = await get_card(card_id)
     if card is None:
         return None
+
+    # "ALL" means the card's entire lifetime — walk back to its release
+    # year (Jan 1) instead of the flat 730-day fallback, so a 1999 card
+    # shows ~25y of history rather than stopping ~2 years ago. We cap the
+    # lookback so a bad/missing year can't request a 1000-year window.
+    if range_ == "all":
+        card_year = card.get("year")
+        if isinstance(card_year, int) and 1900 < card_year <= utcnow().year:
+            lifetime_days = (utcnow().date() - date(card_year, 1, 1)).days
+            days = max(_RANGE_DAYS["all"], min(lifetime_days, 60 * 365))
 
     pricing = card.get("pricing_summary") or {}
     market_obj = pricing.get("market") if pricing else None
