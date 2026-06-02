@@ -70,6 +70,8 @@ CREATE TABLE cards (
 	year INTEGER, 
 	image_url VARCHAR(1024), 
 	metadata JSON, 
+	image_phash VARCHAR(64), 
+	image_dhash VARCHAR(64), 
 	created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	updated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, 
 	CONSTRAINT pk_cards PRIMARY KEY (id), 
@@ -78,6 +80,8 @@ CREATE TABLE cards (
 CREATE INDEX ix_cards_tcg_name ON cards (tcg, name);
 CREATE INDEX ix_cards_set_id ON cards (set_id);
 CREATE INDEX ix_cards_tcg ON cards (tcg);
+CREATE INDEX ix_cards_image_phash ON cards (image_phash);
+CREATE INDEX ix_cards_image_dhash ON cards (image_dhash);
 
 CREATE TABLE collections (
 	id UUID NOT NULL, 

@@ -61,6 +61,16 @@ class Card(Base):
     card_metadata: Mapped[dict | None] = mapped_column(
         "metadata", JsonCol, nullable=True
     )
+    # Perceptual image hashes of the card's reference art, computed by the
+    # image-index worker (16x16 imagehash -> 64 hex chars / 256 bits). A
+    # live scan's frame hash is matched against these by Hamming distance
+    # to identify the card even when OCR is weak. Indexed for prefix scans.
+    image_phash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    image_dhash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

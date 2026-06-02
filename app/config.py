@@ -183,6 +183,17 @@ class Settings(BaseSettings):
     # ``POST /v1/cards/identify/text``. Set ≤0 to disable the cap.
     ocr_monthly_budget_usd: float = 50.0
 
+    # --- Perceptual-hash (pHash) image matching ---
+    # Master switch for matching a scanned frame's perceptual hash against
+    # the catalog's precomputed art hashes. When off, identification falls
+    # back to OCR/text only.
+    phash_enabled: bool = True
+    # Maximum Hamming distance (in bits, over the 256-bit 16x16 hash) for a
+    # catalog match to count as a hit. Lower = stricter / fewer false
+    # positives; a live photo of a card differs more from clean catalog art
+    # than two scans of each other, so we allow a little slack here.
+    phash_max_distance: int = 12
+
     # --- Observability (optional; no-ops when DSN is missing) ---
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.1

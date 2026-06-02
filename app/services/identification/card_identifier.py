@@ -489,11 +489,20 @@ class CardIdentifier:
     async def _search_phash(
         self, db: AsyncSession, *, phash: str | None
     ) -> dict[str, Any] | None:
-        """Try the existing phash resolver; ``None`` when no match."""
+        """Match the frame's perceptual hash against the catalog.
+
+        Tries the catalog art hashes first (``cards.image_phash``, the
+        strongest identity signal for a fresh scan) and falls back to the
+        user-submission fingerprints. ``None`` when neither matches.
+        """
         if not phash:
             return None
+        if not get_settings().phash_enabled:
+            return None
         try:
-            resolved = await card_resolver_service.resolve_by_phash(db, phash)
+            resolved = await card_resolver_service.resolve_catalog_by_phash(db, phash)
+            if resolved is None:
+                resolved = await card_resolver_service.resolve_by_phash(db, phash)
         except Exception:
             logger.exception("phash resolve failed")
             return None

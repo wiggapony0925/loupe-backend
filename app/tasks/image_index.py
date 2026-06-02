@@ -47,12 +47,16 @@ async def index_card_images(
             .order_by(Card.updated_at.asc())
             .limit(batch_size)
         )
+        if not force:
+            # Only pull cards we haven't hashed yet so each batch makes
+            # forward progress instead of re-scanning the same head rows.
+            stmt = stmt.where(Card.image_phash.is_(None))
         rows = (await session.execute(stmt)).scalars().all()
 
         for row in rows:
             scanned += 1
             meta = row.card_metadata if isinstance(row.card_metadata, dict) else {}
-            if not force and meta.get("image_hash"):
+            if not force and (row.image_phash or meta.get("image_hash")):
                 continue
             image_url = (
                 (meta.get("image_url") or row.image_url) if meta else row.image_url
@@ -71,6 +75,11 @@ async def index_card_images(
                     "hash_size": 16,
                 }
                 row.card_metadata = new_meta
+                # Promote the hashes to indexed columns so the identity
+                # resolver can match a live scan to this card by Hamming
+                # distance (see ``resolve_catalog_by_phash``).
+                row.image_phash = fp.phash
+                row.image_dhash = fp.dhash
                 updated += 1
 
             await asyncio.sleep(_INTER_CALL_DELAY_SEC)

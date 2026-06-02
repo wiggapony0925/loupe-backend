@@ -27,6 +27,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
 from app.models.enums import TcgEnum
@@ -193,6 +194,65 @@ async def resolve_by_phash(
         unified=resolved.unified,
         source="fingerprint",
         confidence=round(confidence, 2),
+    )
+
+
+async def resolve_catalog_by_phash(
+    db: AsyncSession, phash: str, *, max_distance: int | None = None
+) -> ResolvedCard | None:
+    """Match a scanned frame's pHash against the *catalog* art hashes.
+
+    Unlike :func:`resolve_by_phash` (which only sees hashes of cards users
+    have already submitted, via the ``fingerprints`` table) this scans the
+    ``cards.image_phash`` column the image-index worker backfills for every
+    catalog card. That makes a brand-new scan identifiable purely from its
+    artwork even when OCR is weak or absent.
+
+    Picks the catalog card with the smallest Hamming distance and accepts
+    it only when that distance is within ``phash_max_distance``. Loads just
+    ``(id, image_phash)`` for the distance pass to keep the scan cheap;
+    swap to a BK-tree / pgvector index when the catalog outgrows a linear
+    scan.
+    """
+    settings = get_settings()
+    if not settings.phash_enabled:
+        return None
+    if not phash or len(phash) < 8:
+        return None
+    threshold = settings.phash_max_distance if max_distance is None else max_distance
+
+    rows = (
+        await db.execute(
+            select(Card.id, Card.image_phash).where(Card.image_phash.is_not(None))
+        )
+    ).all()
+    if not rows:
+        return None
+
+    best_id: uuid.UUID | None = None
+    best_distance = len(phash) * 4 + 1  # one worse than the theoretical max
+    for card_id, cand_hash in rows:
+        if not cand_hash or len(cand_hash) != len(phash):
+            continue
+        distance = _hamming(phash, cand_hash)
+        if distance < best_distance:
+            best_distance = distance
+            best_id = card_id
+
+    if best_id is None or best_distance > threshold:
+        return None
+
+    resolved = await resolve_by_uuid(db, best_id)
+    if resolved is None:
+        return None
+    bits = len(phash) * 4
+    confidence = max(0.0, 1.0 - (best_distance / bits))
+    return ResolvedCard(
+        card_id=resolved.card_id,
+        upstream_id=resolved.upstream_id,
+        unified=resolved.unified,
+        source="fingerprint",
+        confidence=round(confidence, 3),
     )
 
 
