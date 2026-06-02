@@ -30,21 +30,28 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("cards", sa.Column("image_phash", sa.String(length=64), nullable=True))
-    op.add_column("cards", sa.Column("image_dhash", sa.String(length=64), nullable=True))
+    op.add_column(
+        "cards", sa.Column("image_phash", sa.String(length=64), nullable=True)
+    )
+    op.add_column(
+        "cards", sa.Column("image_dhash", sa.String(length=64), nullable=True)
+    )
     op.create_index("ix_cards_image_phash", "cards", ["image_phash"])
     op.create_index("ix_cards_image_dhash", "cards", ["image_dhash"])
 
     # Backfill from hashes already computed into the metadata JSON blob so
     # existing indexed catalogs become matchable without re-hashing images.
+    # ``cards.metadata`` is a ``json`` column (not ``jsonb``), and the key
+    # existence operator ``?`` plus ``->``/``->>`` chaining require ``jsonb``,
+    # so we cast explicitly.
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute(
             """
             UPDATE cards
-               SET image_phash = metadata -> 'image_hash' ->> 'phash',
-                   image_dhash = metadata -> 'image_hash' ->> 'dhash'
-             WHERE metadata ? 'image_hash'
+               SET image_phash = (metadata::jsonb) -> 'image_hash' ->> 'phash',
+                   image_dhash = (metadata::jsonb) -> 'image_hash' ->> 'dhash'
+             WHERE (metadata::jsonb) ? 'image_hash'
             """
         )
 
