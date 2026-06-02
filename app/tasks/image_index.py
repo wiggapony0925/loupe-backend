@@ -33,24 +33,40 @@ async def index_card_images(
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
     force: bool = False,
+    offset: int = 0,
+    stable: bool = False,
 ) -> dict[str, int]:
-    """Index up to ``batch_size`` cards. Returns counters."""
+    """Index up to ``batch_size`` cards. Returns counters.
+
+    Two paging modes:
+
+    * Default (``stable=False``) — pulls the oldest cards still missing a
+      hash (``image_phash IS NULL``). Each call makes forward progress, so
+      the daily cron drains the backlog one batch at a time.
+    * Stable sweep (``stable=True``) — pages the whole ``cards`` table by a
+      fixed ``id`` order using ``offset``, skipping rows that are already
+      hashed in-loop. The backfill script uses this to walk the entire
+      catalogue once without re-downloading hashed art or looping forever on
+      un-hashable rows (which keep ``image_phash`` NULL).
+    """
     scanned = 0
     updated = 0
     missed = 0
 
     sm = get_sessionmaker()
     async with sm() as session:
-        stmt = (
-            select(Card)
-            .where(Card.image_url.is_not(None))
-            .order_by(Card.updated_at.asc())
-            .limit(batch_size)
-        )
-        if not force:
-            # Only pull cards we haven't hashed yet so each batch makes
-            # forward progress instead of re-scanning the same head rows.
-            stmt = stmt.where(Card.image_phash.is_(None))
+        stmt = select(Card).where(Card.image_url.is_not(None))
+        if stable:
+            # Fixed ordering + offset gives a deterministic full sweep that
+            # is unaffected by hashes being filled in mid-run.
+            stmt = stmt.order_by(Card.id.asc()).offset(offset)
+        else:
+            stmt = stmt.order_by(Card.updated_at.asc())
+            if not force:
+                # Only pull cards we haven't hashed yet so each batch makes
+                # forward progress instead of re-scanning the same head rows.
+                stmt = stmt.where(Card.image_phash.is_(None))
+        stmt = stmt.limit(batch_size)
         rows = (await session.execute(stmt)).scalars().all()
 
         for row in rows:

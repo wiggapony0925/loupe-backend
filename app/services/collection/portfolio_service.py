@@ -107,7 +107,7 @@ async def _load_grades_with_cards(
     return [(g, c) for (g, c) in rows]
 
 
-def _current_market_value(card: Card | None) -> Decimal | None:
+def current_market_value(card: Card | None) -> Decimal | None:
     """Pull the latest known market price from ``Card.card_metadata``.
 
     Returns the live ``pricing_summary.market.amount`` when present so
@@ -152,7 +152,7 @@ async def summary(db: AsyncSession, user: User) -> dict:
         # vault total tracks today's market instead of the snapshot
         # captured at scan time. Fall back to the stored estimate when
         # no fresh price exists yet.
-        live = _current_market_value(card)
+        live = current_market_value(card)
         if live is not None:
             total += live
         elif g.estimated_value_usd is not None:
@@ -388,7 +388,7 @@ async def history(
             earliest_dates.append(hist[0][0])
         if g.graded_at is not None:
             earliest_dates.append(g.graded_at.date())
-        live = _current_market_value(c)
+        live = current_market_value(c)
         if live is not None:
             live_value = float(live)
         elif g.estimated_value_usd is not None:

@@ -1,4 +1,4 @@
-.PHONY: install run worker test lint fmt typecheck migrate revision fresh-db docker-up docker-down ocr-eval
+.PHONY: install run worker test lint fmt typecheck migrate revision fresh-db docker-up docker-down ocr-eval index-images
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -48,3 +48,8 @@ docker-down:
 # Override with `make ocr-eval PROVIDER=google_vision`.
 ocr-eval:
 	$(PY) scripts/ocr_eval.py $(if $(PROVIDER),--provider $(PROVIDER),)
+
+# Backfill perceptual hashes for every catalog card image (full sweep).
+# Talks to the DB directly, no Redis/arq needed. Tune with INDEX_BATCH_SIZE.
+index-images:
+	$(PY) -m scripts.index_card_images
