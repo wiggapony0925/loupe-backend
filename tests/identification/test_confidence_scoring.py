@@ -77,3 +77,72 @@ def test_no_synergy_without_number_match() -> None:
     # Without a parsed number there's no synergy bonus, so a name-only
     # match stays below lock.
     assert score.final < 0.7
+
+
+# ── Wrong-match guard ──────────────────────────────────────────────────
+# Regression for the live "Pikachu read as Energizer #285" bug: an attack
+# name ("Energize") fuzzy-matches a different card ("Energizer") whose
+# printed number contradicts the number read off the card. A number
+# conflict must sink the look-alike well below both the real card and the
+# lock threshold, no matter how close the names read.
+
+# Mirrors a Pikachu #049 frame where OCR mis-promoted the attack name.
+_PIKACHU_FRAME = ParsedCard(
+    title="Pikachu",
+    title_candidates=[("Pikachu", 1.0), ("Energize", 0.82)],
+    set_code=None,
+    card_number="49/203",
+    year=2021,
+    hp=60,
+)
+_REAL_PIKACHU = {
+    "id": "pokemontcg:cel25-49",
+    "name": "Pikachu",
+    "number": "49",
+    "set": {"code": "cel25"},
+    "hp": "60",
+    "year": 2021,
+}
+# The wrong card the scanner locked onto: right-ish name, wrong number.
+_ENERGIZER_LOOKALIKE = {
+    "id": "pokemontcg:sv4-285",
+    "name": "Energizer",
+    "number": "285",
+    "set": {"code": "sv4"},
+    "hp": None,
+    "year": 2023,
+}
+
+
+def test_number_conflict_sinks_name_lookalike() -> None:
+    real = score_candidate(
+        parsed=_PIKACHU_FRAME,
+        candidate=_REAL_PIKACHU,
+        ocr_confidence=0.9,
+        phash_hit=False,
+    )
+    lookalike = score_candidate(
+        parsed=_PIKACHU_FRAME,
+        candidate=_ENERGIZER_LOOKALIKE,
+        ocr_confidence=0.9,
+        phash_hit=False,
+    )
+    # The real card must win decisively and the look-alike must stay far
+    # below the lock threshold so the scanner never commits to it.
+    assert real.final > lookalike.final
+    assert lookalike.final < 0.5
+    assert real.final >= 0.7
+
+
+def test_missing_candidate_number_is_not_a_conflict() -> None:
+    # A candidate with no number is "unknown", not a conflict — it must
+    # not be penalised just because the catalog omitted its number.
+    no_number_card = {"id": "x", "name": "Pikachu", "set": {"code": "cel25"}}
+    score = score_candidate(
+        parsed=_PIKACHU_FRAME,
+        candidate=no_number_card,
+        ocr_confidence=0.9,
+        phash_hit=False,
+    )
+    # Name matches, no number to conflict → stays a respectable score.
+    assert score.final >= 0.44

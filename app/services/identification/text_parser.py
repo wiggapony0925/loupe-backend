@@ -74,6 +74,22 @@ _TITLE_BLACKLIST_TOKENS = (
     "draw",
     "search",
     "your deck",
+    # Common attack / ability verbs and rules phrasing. Attack names sit
+    # mid-card and OCR often ranks them near the title; without these an
+    # attack like "Energize" can beat the real card name ("Pikachu").
+    "attach",
+    "damage",
+    "flip a coin",
+    "heads",
+    "tails",
+    "knocked out",
+    "active pokemon",
+    "benched",
+    "energy card",
+    "prize card",
+    "put it",
+    "during your",
+    "you may",
 )
 
 
@@ -131,22 +147,63 @@ def _clean_line(line: str) -> str:
     return line.strip()
 
 
-def _title_score(line: str, idx: int, total_lines: int) -> float:
+# Modern Pokémon print the name and HP on the same top row, e.g.
+# "Pikachu 60" or "Pikachu HP 60". Recognising this lets us (a) keep the
+# name as a strong title candidate instead of penalising it for the HP
+# digit, and (b) surface the bare name ("Pikachu") for matching.
+_NAME_HP_RE = re.compile(
+    r"^(?P<name>[A-Za-z][A-Za-z'.\-\s]{1,28}?)\s+(?P<hp_token>HP\s*)?(?P<num>\d{1,3})$"
+)
+
+
+def _strip_trailing_hp(line: str, expected_hp: int | None = None) -> str | None:
+    """Return the bare name from a "Name HP" top row, else ``None``.
+
+    Guards against "AttackName Damage" lines (e.g. "Fire Spin 100"), which
+    share the "<words> <number>" shape: only treat the line as a name+HP
+    row when the trailing number is explicitly tagged ``HP`` or equals the
+    HP value parsed elsewhere on the card.
+    """
+    m = _NAME_HP_RE.match(line.strip())
+    if not m:
+        return None
+    name = m.group("name").strip()
+    if len(name) < 2:
+        return None
+    if m.group("hp_token"):
+        return name
+    num = m.group("num")
+    if expected_hp is not None and num and int(num) == expected_hp:
+        return name
+    return None
+
+
+def _title_score(
+    line: str, idx: int, total_lines: int, expected_hp: int | None = None
+) -> float:
     """Score how likely a line is the card title.
 
-    Higher = better. Top-of-card lines win ties; mixed-case names beat
-    SHOUTING; lines with a digit get a small penalty.
+    Higher = better. Top-of-card lines win decisively (the name is almost
+    always the first text on the card); mixed-case names beat SHOUTING;
+    lines with a stray digit get a small penalty unless that digit is the
+    HP printed on the same row as the name.
     """
     score = 1.0
-    # Position prior: titles are almost always in the top 35% of the card.
+    # Position prior: titles are at the very top of the card. Weight this
+    # heavily so mid-card attack names (which OCR may read with high
+    # word-confidence) can't outrank the real name on the first row.
     if total_lines > 0:
         pos = idx / max(1, total_lines - 1)
-        score += max(0.0, 1.0 - pos) * 0.6
+        score += max(0.0, 1.0 - pos) * 1.1
     # Mixed case is more name-like than ALL CAPS.
     if not line.isupper():
         score += 0.15
-    # Penalize lines with digits (those are usually HP / damage / set numbers).
-    if any(c.isdigit() for c in line):
+    # A "Name HP" top row is a textbook Pokémon title — reward it and skip
+    # the digit penalty (the only digit is the HP value beside the name).
+    if _strip_trailing_hp(line, expected_hp) is not None:
+        score += 0.35
+    elif any(c.isdigit() for c in line):
+        # Penalize stray digits (usually HP / damage / set numbers).
         score -= 0.3
     # Penalize all-uppercase short tokens (set logos like "SV1").
     if line.isupper() and len(line) <= 4:
@@ -231,7 +288,10 @@ def parse_ocr_text(raw_text: str) -> ParsedCard:
     for idx, line in enumerate(cleaned):
         if not _looks_like_title(line):
             continue
-        scored.append((line, _title_score(line, idx, total)))
+        # Prefer the bare name when the line is a "Name HP" top row so the
+        # catalog search and fuzzy match see "Pikachu", not "Pikachu 60".
+        title_text = _strip_trailing_hp(line, hp) or line
+        scored.append((title_text, _title_score(line, idx, total, hp)))
     # Normalize scores to [0,1] for downstream consumers.
     if scored:
         top = max(s for _, s in scored)

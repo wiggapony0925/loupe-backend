@@ -108,16 +108,30 @@ class ScoreBreakdown:
 
 # Weights sum to 1.0 by construction. Tuned against the 50-card eval
 # fixture set; revisit if accuracy regresses on a future eval run.
-_W_TEXT = 0.45
-_W_OCR = 0.10
-_W_FIELDS = 0.20
+#
+# Structured fields (the collector number above all) carry more weight
+# than fuzzy name similarity on purpose: the printed number uniquely
+# identifies a card within its set, whereas a fuzzy name match cannot
+# tell an attack name ("Energize") from a look-alike card ("Energizer").
+# The number is the disambiguator real scanners rely on, so we lean on it.
+_W_TEXT = 0.40
+_W_OCR = 0.05
+_W_FIELDS = 0.35
 _W_PHASH = 0.15
-_W_FEEDBACK = 0.10
+_W_FEEDBACK = 0.05
 
 # Extra confidence when the title *and* the collector number both match.
 # Calibrated so a confirmed (title + number) match clears the client lock
 # threshold while a name-only match stays in carousel territory.
 _SYNERGY_TITLE_NUMBER = 0.18
+
+# Penalty when we read a collector number cleanly off the card but the
+# candidate's printed number contradicts it. A number conflict is strong
+# evidence the candidate is the WRONG card (e.g. a fuzzy name look-alike
+# from a different set), so we push it well below the lock threshold even
+# if its name scores high. This is the core guard against locking onto an
+# attack-name look-alike like "Energizer" when the card is "Pikachu #058".
+_NUMBER_CONFLICT_PENALTY = 0.45
 
 
 def _string_similarity(a: str, b: str) -> float:
@@ -155,6 +169,25 @@ def _number_matches(parsed: ParsedCard, candidate: dict[str, Any]) -> bool:
     parsed_left = parsed.card_number.split("/", 1)[0].lstrip("0")
     cand_left = str(cand_num).split("/", 1)[0].lstrip("0")
     return bool(parsed_left) and parsed_left == cand_left
+
+
+def _number_conflicts(parsed: ParsedCard, candidate: dict[str, Any]) -> bool:
+    """True when we read a number off the card but the candidate's differs.
+
+    Only fires when *both* sides have a usable number — a missing number
+    on either side is "unknown", not a conflict, so we never penalise a
+    candidate just because its printed number didn't come back from the
+    catalog. A genuine mismatch ("058" read vs candidate "285") is strong
+    evidence the candidate is the wrong card.
+    """
+    cand_num = candidate.get("number") or (candidate.get("set") or {}).get("number")
+    if not parsed.card_number or not cand_num:
+        return False
+    parsed_left = parsed.card_number.split("/", 1)[0].lstrip("0")
+    cand_left = str(cand_num).split("/", 1)[0].lstrip("0")
+    if not parsed_left or not cand_left:
+        return False
+    return parsed_left != cand_left
 
 
 def _field_bonus(parsed: ParsedCard, candidate: dict[str, Any]) -> float:
@@ -236,6 +269,15 @@ def score_candidate(
     # locks, while cards that share a name but not the number stay put.
     if text_sim >= 0.85 and _number_matches(parsed, candidate):
         final += _SYNERGY_TITLE_NUMBER
+    # Number conflict guard: if we read a number off the card and the
+    # candidate's printed number contradicts it, this is almost certainly
+    # the wrong card (a fuzzy name look-alike from another set). Push it
+    # well below the lock threshold no matter how close the name reads, so
+    # the scanner never commits to e.g. "Energizer #285" for a "Pikachu
+    # #058" frame. A phash hit is trusted more than OCR, so soften the
+    # penalty there to avoid fighting a strong image-hash identification.
+    if _number_conflicts(parsed, candidate):
+        final -= _NUMBER_CONFLICT_PENALTY * (0.4 if phash_hit else 1.0)
     return ScoreBreakdown(
         text_similarity=round(text_sim, 4),
         ocr_quality=round(clamped_ocr, 4),
