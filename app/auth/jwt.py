@@ -48,17 +48,24 @@ def _ensure_ephemeral_keys() -> tuple[bytes, bytes]:
         return _ephemeral_private_pem, _ephemeral_public_pem
 
 
+def _configured_pem(value: str) -> bytes | None:
+    value = value.strip()
+    if not value or value.startswith("#"):
+        return None
+    return value.replace("\\n", "\n").encode("utf-8")
+
+
 def _private_key() -> bytes:
     s = get_settings()
-    if s.jwt_private_key_pem:
-        return s.jwt_private_key_pem.encode("utf-8")
+    if pem := _configured_pem(s.jwt_private_key_pem):
+        return pem
     return _ensure_ephemeral_keys()[0]
 
 
 def _public_key() -> bytes:
     s = get_settings()
-    if s.jwt_public_key_pem:
-        return s.jwt_public_key_pem.encode("utf-8")
+    if pem := _configured_pem(s.jwt_public_key_pem):
+        return pem
     return _ensure_ephemeral_keys()[1]
 
 
