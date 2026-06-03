@@ -101,6 +101,27 @@ async def identify_card(
         # already swallowed inside the pipeline.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    top = outcome.candidates[0] if outcome.candidates else None
+    logger.info(
+        "identify summary id=%s user=%s hint=%s inferred=%s provider=%s "
+        "latency_ms=%s ocr_conf=%.3f parsed_title=%r parsed_number=%r "
+        "candidates=%s top=%r top_conf=%.3f source=%s fallback=%s",
+        outcome.identification_id,
+        user.id if user else None,
+        tcg,
+        outcome.tcg_inferred,
+        outcome.ocr.provider,
+        outcome.latency_ms,
+        outcome.ocr.mean_confidence,
+        outcome.parsed.title,
+        outcome.parsed.card_number,
+        len(outcome.candidates),
+        top.name if top else None,
+        top.confidence if top else 0.0,
+        top.source if top else "none",
+        outcome.fallback_required,
+    )
+
     return IdentifyResponse(
         identification_id=outcome.identification_id,
         candidates=[
