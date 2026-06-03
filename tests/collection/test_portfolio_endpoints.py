@@ -94,6 +94,43 @@ async def test_summary_pnl_math_when_cost_basis_set(
 
 
 @pytest.mark.asyncio
+async def test_grade_patch_can_clear_nullable_value_fields(
+    client, auth_headers, db_session, created_user
+):
+    card = await make_card(db_session)
+    row = GradedCard(
+        user_id=created_user.id,
+        card_id=card.id,
+        grade=Decimal("9.0"),
+        house=GradeHouseEnum.loupe,
+        estimated_value_usd=Decimal("125.00"),
+        purchase_price_usd=Decimal("80.00"),
+        purchase_date=date(2024, 1, 15),
+        notes="keep clean",
+    )
+    db_session.add(row)
+    await db_session.commit()
+    await db_session.refresh(row)
+
+    body = assert_envelope_ok(
+        await client.patch(
+            f"/v1/grades/{row.id}",
+            json={
+                "estimated_value_usd": None,
+                "purchase_price_usd": None,
+                "purchase_date": None,
+                "notes": None,
+            },
+            headers=auth_headers,
+        )
+    )
+    assert body["estimated_value_usd"] is None
+    assert body["purchase_price_usd"] is None
+    assert body["purchase_date"] is None
+    assert body["notes"] is None
+
+
+@pytest.mark.asyncio
 async def test_summary_pnl_only_counts_cards_with_recorded_cost(
     client, auth_headers, db_session, created_user
 ):

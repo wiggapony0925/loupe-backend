@@ -9,8 +9,8 @@ persistence → response path.
 
 from __future__ import annotations
 
-import io
 import asyncio
+import io
 import time
 from typing import Any
 
@@ -176,7 +176,9 @@ async def test_identify_times_out_slow_catalog_lookup(client, monkeypatch):
         await asyncio.sleep(0.2)
         return {"results": [], "total": 0, "source": "pokemontcg"}
 
-    monkeypatch.setattr(card_search_service, "search_cards_precise", slow_precise_search)
+    monkeypatch.setattr(
+        card_search_service, "search_cards_precise", slow_precise_search
+    )
     monkeypatch.setattr(card_search_service, "search_cards", slow_text_search)
     get_mock_provider().set_default(
         OcrResult(

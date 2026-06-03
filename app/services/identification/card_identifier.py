@@ -36,9 +36,10 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC
-from typing import Any, Awaitable, TypeVar
+from typing import Any, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -479,9 +480,7 @@ class CardIdentifier:
         for title in titles:
             body = await self._catalog_lookup(
                 "text",
-                card_search_service.search_cards(
-                    q=title, tcg=tcg, limit=10
-                ),
+                card_search_service.search_cards(q=title, tcg=tcg, limit=10),
                 {"results": []},
             )
             _merge(body.get("results", []))

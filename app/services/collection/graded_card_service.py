@@ -224,17 +224,18 @@ async def update(
         row.grade = payload.grade
     if payload.house is not None:
         row.house = payload.house
-    if payload.condition is not None:
+    fields = payload.model_fields_set
+    if "condition" in fields:
         row.condition = payload.condition
-    if payload.subgrades is not None:
+    if "subgrades" in fields:
         row.subgrades = payload.subgrades
-    if payload.notes is not None:
+    if "notes" in fields:
         row.notes = payload.notes
-    if payload.estimated_value_usd is not None:
+    if "estimated_value_usd" in fields:
         row.estimated_value_usd = payload.estimated_value_usd
-    if payload.purchase_price_usd is not None:
+    if "purchase_price_usd" in fields:
         row.purchase_price_usd = payload.purchase_price_usd
-    if payload.purchase_date is not None:
+    if "purchase_date" in fields:
         row.purchase_date = payload.purchase_date
     await db.commit()
     await db.refresh(row)

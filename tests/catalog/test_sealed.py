@@ -133,6 +133,39 @@ async def test_update_holding_changes_quantity_and_marks_opened(
 
 
 @pytest.mark.asyncio
+async def test_update_holding_can_clear_nullable_value_fields(
+    client, db_session, created_user, auth_headers
+):
+    product = await _make_product(db_session)
+    holding = SealedHolding(
+        user_id=created_user.id,
+        product_id=product.id,
+        quantity=2,
+        purchase_price_usd=Decimal("150.00"),
+        estimated_value_usd=Decimal("200.00"),
+        notes="shelf copy",
+    )
+    db_session.add(holding)
+    await db_session.commit()
+    await db_session.refresh(holding)
+
+    data = assert_envelope_ok(
+        await client.patch(
+            f"/v1/sealed-holdings/{holding.id}",
+            json={
+                "purchase_price_usd": None,
+                "estimated_value_usd": None,
+                "notes": None,
+            },
+            headers=auth_headers,
+        )
+    )
+    assert data["purchase_price_usd"] is None
+    assert data["estimated_value_usd"] is None
+    assert data["notes"] is None
+
+
+@pytest.mark.asyncio
 async def test_holdings_require_auth(client):
     resp = await client.get("/v1/sealed-holdings")
     assert resp.status_code in (401, 403)

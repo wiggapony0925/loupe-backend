@@ -162,15 +162,16 @@ async def update_holding(
     row = await _load_owned(db, user, holding_id)
     if payload.quantity is not None:
         row.quantity = payload.quantity
-    if payload.purchase_price_usd is not None:
+    fields = payload.model_fields_set
+    if "purchase_price_usd" in fields:
         row.purchase_price_usd = payload.purchase_price_usd
-    if payload.purchase_date is not None:
+    if "purchase_date" in fields:
         row.purchase_date = payload.purchase_date
-    if payload.estimated_value_usd is not None:
+    if "estimated_value_usd" in fields:
         row.estimated_value_usd = payload.estimated_value_usd
-    if payload.notes is not None:
+    if "notes" in fields:
         row.notes = payload.notes
-    if payload.opened_at is not None:
+    if "opened_at" in fields:
         row.opened_at = payload.opened_at
     await db.commit()
     await db.refresh(row)
