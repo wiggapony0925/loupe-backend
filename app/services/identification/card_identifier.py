@@ -38,7 +38,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC
-from typing import Any
+from typing import Any, Awaitable, TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,6 +59,8 @@ from app.services.ocr.budget import is_budget_exceeded, record_spend_increment
 from app.utils.logger import get_logger
 
 logger = get_logger("services.identification")
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,32 +461,47 @@ class CardIdentifier:
         # appears in the top 10 of a plain "Pikachu" search). One upstream
         # call; degrades to [] on failure so we still keep the fuzzy hits.
         if parsed.card_number:
-            try:
-                precise = await card_search_service.search_cards_precise(
+            precise = await self._catalog_lookup(
+                "precise",
+                card_search_service.search_cards_precise(
                     tcg=tcg,
                     name=titles[0],
                     number=parsed.card_number,
                     set_code=parsed.set_code,
                     limit=10,
-                )
-                _merge(precise)
-            except Exception:
-                logger.exception("precise search failed for title=%r", titles[0])
+                ),
+                [],
+            )
+            _merge(precise)
 
         # Pass 2 — name-only fuzzy search for carousel breadth. Try the top
         # title; only fall through to runner-ups if nothing has matched yet.
         for title in titles:
-            try:
-                body = await card_search_service.search_cards(
+            body = await self._catalog_lookup(
+                "text",
+                card_search_service.search_cards(
                     q=title, tcg=tcg, limit=10
-                )
-            except Exception:
-                logger.exception("text search failed for title=%r tcg=%s", title, tcg)
-                continue
+                ),
+                {"results": []},
+            )
             _merge(body.get("results", []))
             if seen:
                 break  # don't blow upstream budget on backups when we found hits
         return list(seen.values())
+
+    async def _catalog_lookup(
+        self, label: str, awaitable: Awaitable[_T], default: _T
+    ) -> _T:
+        timeout = max(0.1, float(card_search_service.PER_PROVIDER_TIMEOUT))
+        try:
+            return await asyncio.wait_for(awaitable, timeout=timeout)
+        except TimeoutError:
+            logger.info(
+                "identify catalog %s lookup timed out after %.1fs", label, timeout
+            )
+        except Exception:
+            logger.exception("identify catalog %s lookup failed", label)
+        return default
 
     async def _search_phash(
         self, db: AsyncSession, *, phash: str | None

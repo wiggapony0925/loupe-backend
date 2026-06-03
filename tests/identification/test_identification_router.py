@@ -10,6 +10,8 @@ persistence → response path.
 from __future__ import annotations
 
 import io
+import asyncio
+import time
 from typing import Any
 
 import pytest
@@ -147,6 +149,57 @@ async def test_identify_returns_ranked_candidates(client, mock_search):
     assert body["accuracy_score"] == top["confidence"]
     assert body["parsed"]["title"] == "Charizard"
     assert body["parsed"]["hp"] == 120
+
+
+@pytest.mark.asyncio
+async def test_identify_times_out_slow_catalog_lookup(client, monkeypatch):
+    from app.services.catalog import card_search_service
+    from app.services.ocr.base import OcrBlock, OcrResult
+
+    monkeypatch.setattr(card_search_service, "PER_PROVIDER_TIMEOUT", 0.01)
+
+    async def slow_precise_search(*args, **kwargs):
+        await asyncio.sleep(0.2)
+        return [
+            {
+                "id": "pokemontcg:base1-58",
+                "name": "Pikachu",
+                "set": {"id": "base1", "code": "BS", "name": "Base Set"},
+                "number": "58/102",
+                "hp": "60",
+                "images": {"large": "https://example.test/pikachu.png"},
+                "tcg": "pokemon",
+            }
+        ]
+
+    async def slow_text_search(*args, **kwargs):
+        await asyncio.sleep(0.2)
+        return {"results": [], "total": 0, "source": "pokemontcg"}
+
+    monkeypatch.setattr(card_search_service, "search_cards_precise", slow_precise_search)
+    monkeypatch.setattr(card_search_service, "search_cards", slow_text_search)
+    get_mock_provider().set_default(
+        OcrResult(
+            full_text="Pikachu\nHP 60\nBS 58/102\n",
+            blocks=[OcrBlock(text="Pikachu", confidence=0.95, bbox=(0, 0, 100, 20))],
+            mean_confidence=0.95,
+            language_codes=["en"],
+            provider="mock",
+            latency_ms=1,
+        )
+    )
+
+    started = time.perf_counter()
+    resp = await client.post(
+        "/v1/cards/identify",
+        files={"image": ("card.jpg", _make_test_jpeg("Pikachu"), "image/jpeg")},
+        data={"tcg": "pokemon"},
+    )
+    elapsed = time.perf_counter() - started
+
+    body = assert_envelope_ok(resp)
+    assert elapsed < 0.5
+    assert body["candidates"] == []
 
 
 @pytest.mark.asyncio
