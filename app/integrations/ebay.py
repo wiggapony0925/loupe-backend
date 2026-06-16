@@ -14,6 +14,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlencode
 
+import httpx
+
 from app.config import get_settings
 from app.integrations.base import (
     BaseProvider,
@@ -129,11 +131,7 @@ class EbayProvider(BaseProvider):
             out: list[Listing] = []
             seen: set[str] = set()
             for resp in responses:
-                if (
-                    isinstance(resp, Exception)
-                    or resp is None
-                    or resp.status_code >= 400
-                ):
+                if not isinstance(resp, httpx.Response) or resp.status_code >= 400:
                     continue
                 data = resp.json() or {}
                 for item in data.get("itemSummaries") or []:
