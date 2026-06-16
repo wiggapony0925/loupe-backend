@@ -12,7 +12,7 @@ import base64
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from app.config import get_settings
 from app.integrations.base import (
@@ -101,39 +101,62 @@ class EbayProvider(BaseProvider):
         headers = await self._headers()
         if not headers:
             return []
-        url = (
-            f"{_BROWSE_URL}?q={quote(query)}&category_ids={_CATEGORY_ID}&limit={limit}"
-        )
         try:
-            resp = await self._call_with_retry("GET", url, headers=headers)
-            if resp is None or resp.status_code >= 400:
-                return []
-            data = resp.json() or {}
+            per_call_limit = min(max(limit, 10), 50)
+            responses = await asyncio.gather(
+                self._call_with_retry(
+                    "GET",
+                    _browse_search_url(
+                        query,
+                        limit=per_call_limit,
+                        buying_options=("FIXED_PRICE",),
+                        sort="price",
+                    ),
+                    headers=headers,
+                ),
+                self._call_with_retry(
+                    "GET",
+                    _browse_search_url(
+                        query,
+                        limit=per_call_limit,
+                        buying_options=("AUCTION",),
+                        sort="endingSoonest",
+                    ),
+                    headers=headers,
+                ),
+                return_exceptions=True,
+            )
             out: list[Listing] = []
-            for item in (data.get("itemSummaries") or [])[:limit]:
-                price_obj = item.get("price") or {}
-                try:
-                    amt = float(price_obj.get("value") or 0)
-                except (TypeError, ValueError):
+            seen: set[str] = set()
+            for resp in responses:
+                if (
+                    isinstance(resp, Exception)
+                    or resp is None
+                    or resp.status_code >= 400
+                ):
                     continue
-                if amt <= 0:
-                    continue
-                buying = item.get("buyingOptions") or []
-                is_auction = "AUCTION" in buying
-                images = item.get("image") or {}
-                out.append(
-                    Listing(
-                        source="ebay",
-                        title=item.get("title") or "",
-                        price=round(amt, 2),
-                        currency=price_obj.get("currency") or "USD",
-                        url=item.get("itemWebUrl") or "",
-                        condition=item.get("condition"),
-                        image_url=images.get("imageUrl"),
-                        is_auction=is_auction,
+                data = resp.json() or {}
+                for item in data.get("itemSummaries") or []:
+                    listing = _parse_listing(item)
+                    if listing is None:
+                        continue
+                    dedupe_key = (
+                        str(item.get("itemId") or item.get("legacyItemId") or "")
+                        or listing.url
+                        or f"{listing.title}:{listing.price}"
                     )
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+                    out.append(listing)
+            out.sort(
+                key=lambda x: (
+                    0 if not x.is_auction else 1,
+                    x.price,
+                    x.time_left_seconds if x.time_left_seconds is not None else 10**12,
                 )
-            return out
+            )
+            return out[:limit]
         except Exception as exc:
             logger.warning("ebay search_listings failed: %s", exc)
             return []
@@ -201,6 +224,81 @@ class EbayProvider(BaseProvider):
             )
         except Exception:
             return None
+
+
+def _browse_search_url(
+    query: str,
+    *,
+    limit: int,
+    buying_options: tuple[str, ...],
+    sort: str | None = None,
+) -> str:
+    filters: list[str] = []
+    if buying_options:
+        filters.append(f"buyingOptions:{{{'|'.join(buying_options)}}}")
+    params = {
+        "q": query[:100],
+        "category_ids": _CATEGORY_ID,
+        "limit": str(limit),
+    }
+    if filters:
+        params["filter"] = ",".join(filters)
+    if sort:
+        params["sort"] = sort
+    return f"{_BROWSE_URL}?{urlencode(params)}"
+
+
+def _parse_listing(item: dict[str, Any]) -> Listing | None:
+    price_obj = (
+        item.get("price")
+        or item.get("currentBidPrice")
+        or item.get("minimumPriceToBid")
+        or {}
+    )
+    try:
+        amt = float(price_obj.get("value") or 0)
+    except (TypeError, ValueError):
+        return None
+    if amt <= 0:
+        return None
+
+    time_left_seconds = _seconds_until(item.get("itemEndDate"))
+    if time_left_seconds is not None and time_left_seconds <= 0:
+        return None
+
+    availabilities = item.get("estimatedAvailabilities") or []
+    if availabilities and all(
+        (x or {}).get("estimatedAvailabilityStatus") == "OUT_OF_STOCK"
+        for x in availabilities
+    ):
+        return None
+
+    buying = item.get("buyingOptions") or []
+    images = item.get("image") or {}
+    return Listing(
+        source="ebay",
+        title=item.get("title") or "",
+        price=round(amt, 2),
+        currency=price_obj.get("currency") or "USD",
+        url=item.get("itemWebUrl") or "",
+        condition=item.get("condition"),
+        image_url=images.get("imageUrl"),
+        is_auction="AUCTION" in buying,
+        time_left_seconds=time_left_seconds,
+    )
+
+
+def _seconds_until(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        end = datetime.fromisoformat(normalized)
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=UTC)
+        return int((end.astimezone(UTC) - datetime.now(UTC)).total_seconds())
+    except ValueError:
+        return None
 
 
 __all__ = ["EbayProvider"]

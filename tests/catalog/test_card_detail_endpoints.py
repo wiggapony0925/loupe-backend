@@ -196,3 +196,22 @@ async def test_marketplace_prices_404_on_unknown_card(client, monkeypatch):
     monkeypatch.setattr(card_search_service.pokemon_tcg, "get_card", fake)
     resp = await client.get(f"/v1/cards/{_COMPOSITE}/marketplace-prices")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_listings_query_includes_nested_set_name(client, monkeypatch):
+    _patch_card(monkeypatch)
+    captured: dict[str, str] = {}
+
+    class _Reg:
+        async def fan_out_listings(self, query, *, limit):
+            captured["query"] = query
+            return [Listing(source="ebay", title=query, price=199.0)]
+
+    monkeypatch.setattr(listings_service, "get_registry", lambda: _Reg())
+
+    resp = await client.get(f"/v1/cards/{_COMPOSITE}/listings")
+    body = assert_envelope_ok(resp)
+
+    assert captured["query"] == "Charizard Base Set #4"
+    assert body["query"] == "Charizard Base Set #4"

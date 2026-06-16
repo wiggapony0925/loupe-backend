@@ -21,7 +21,7 @@ def _build_query(card: dict[str, Any]) -> str:
     name = card.get("name")
     if name:
         parts.append(str(name))
-    set_name = card.get("set_name")
+    set_name = card.get("set_name") or (card.get("set") or {}).get("name")
     if set_name:
         parts.append(str(set_name))
     number = card.get("number")
