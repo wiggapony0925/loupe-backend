@@ -21,6 +21,7 @@ from app.integrations.pokemon_tcg import PokemonTcgProvider
 from app.integrations.pricecharting import PriceChartingProvider
 from app.integrations.psa import PsaProvider
 from app.integrations.tcgcsv import TcgCsvProvider
+from app.integrations.tcgdex import TcgDexProvider
 from app.integrations.tcgplayer import TcgPlayerProvider
 from app.utils.logger import get_logger
 
@@ -190,6 +191,7 @@ def get_registry() -> ProviderRegistry:
             # Free / low-friction fallbacks — keep last so paid/official
             # providers take priority in fan-out aggregations.
             PokemonTcgProvider(),
+            TcgDexProvider(),
             TcgCsvProvider(),
             JustTcgProvider(),
         ]

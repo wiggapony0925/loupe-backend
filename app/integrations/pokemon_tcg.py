@@ -72,7 +72,10 @@ class PokemonTcgProvider(BaseProvider):
         mid: float | None = None
         high: float | None = None
 
+        source = "pokemon_tcg"
+        currency = "USD"
         if variant:
+            source = "tcgplayer"
             market = _f(variant.get("market"))
             low = _f(variant.get("low"))
             mid = _f(variant.get("mid"))
@@ -80,6 +83,8 @@ class PokemonTcgProvider(BaseProvider):
 
         # Fall back to Cardmarket EUR averages when TCGplayer is empty.
         if market is None and cm:
+            source = "cardmarket"
+            currency = "EUR"
             market = _f(cm.get("averageSellPrice") or cm.get("trendPrice"))
             low = low or _f(cm.get("lowPrice"))
 
@@ -87,17 +92,24 @@ class PokemonTcgProvider(BaseProvider):
             return None
 
         return MarketPrice(
-            source="pokemon_tcg",
+            source=source,
             market=market,
             low=low,
             mid=mid,
             high=high,
+            currency=currency,
             extras={
                 "card_id": card.get("id"),
                 "card_name": card.get("name"),
                 "set_id": (card.get("set") or {}).get("id"),
+                "source_provider": "pokemon_tcg",
                 "tcgplayer_url": (card.get("tcgplayer") or {}).get("url"),
                 "cardmarket_url": (card.get("cardmarket") or {}).get("url"),
+                "as_of": (
+                    (card.get("tcgplayer") or {}).get("updatedAt")
+                    if source == "tcgplayer"
+                    else (card.get("cardmarket") or {}).get("updatedAt")
+                ),
             },
         )
 

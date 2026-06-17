@@ -61,7 +61,7 @@ def test_singleton_get_registry():
     a = get_registry()
     b = get_registry()
     assert a is b
-    assert len(a.all) == 9
+    assert len(a.all) == 10
 
 
 def test_by_capability_excludes_unconfigured_and_base():

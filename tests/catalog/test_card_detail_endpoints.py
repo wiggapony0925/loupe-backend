@@ -10,6 +10,7 @@ from app.integrations.base import Listing, SoldComp
 from app.services.catalog import card_search_service
 from app.services.market import (
     listings_service,
+    marketplace_prices_service,
 )
 from app.services.market import (
     sold_comps_service as comps_service,
@@ -31,9 +32,23 @@ def _no_cache(monkeypatch):
     async def _s(*_a, **_kw):
         return None
 
-    for mod in (card_search_service, comps_service, listings_service):
+    for mod in (
+        card_search_service,
+        comps_service,
+        listings_service,
+        marketplace_prices_service,
+    ):
         monkeypatch.setattr(mod, "_cache_get", _g, raising=False)
         monkeypatch.setattr(mod, "_cache_set", _s, raising=False)
+
+    async def _no_tcgdex(*_a, **_kw):
+        return []
+
+    monkeypatch.setattr(
+        marketplace_prices_service.TcgDexProvider,
+        "get_market_prices_for_card_id",
+        _no_tcgdex,
+    )
 
 
 def _patch_card(monkeypatch):
@@ -61,7 +76,11 @@ def _patch_listings(monkeypatch, listings):
         async def fan_out_listings(self, query, *, limit):
             return listings
 
+        async def fan_out_market_price(self, query):
+            return []
+
     monkeypatch.setattr(listings_service, "get_registry", lambda: _Reg())
+    monkeypatch.setattr(marketplace_prices_service, "get_registry", lambda: _Reg())
 
 
 # ----------------------------------------------------------- grade-summary
@@ -186,6 +205,43 @@ async def test_marketplace_prices_empty(client, monkeypatch):
     resp = await client.get(f"/v1/cards/{_COMPOSITE}/marketplace-prices")
     body = assert_envelope_ok(resp)
     assert body["providers"] == []
+
+
+@pytest.mark.asyncio
+async def test_marketplace_prices_include_catalog_market_price(client, monkeypatch):
+    async def fake(_id):
+        return {
+            "id": "pokemontcg:base1-4",
+            "name": "Charizard",
+            "number": "4",
+            "set": {"name": "Base Set"},
+            "source": "pokemontcg",
+            "pricing_summary": {
+                "currency": "EUR",
+                "market": {"amount": 78.46, "currency": "EUR"},
+                "low": {"amount": 25.0, "currency": "EUR"},
+                "as_of": "2026/06/17",
+                "sources": ["cardmarket"],
+            },
+        }
+
+    monkeypatch.setattr(card_search_service, "get_card", fake)
+    _patch_listings(monkeypatch, [])
+
+    resp = await client.get(f"/v1/cards/{_COMPOSITE}/marketplace-prices")
+    body = assert_envelope_ok(resp)
+    providers = body["providers"]
+    assert len(providers) == 1
+    assert providers[0]["source"] == "cardmarket"
+    assert providers[0]["kind"] == "market_price"
+    assert providers[0]["price"]["amount"] == 78.46
+    assert providers[0]["price"]["currency"] == "EUR"
+    assert [a["source"] for a in body["actions"]] == [
+        "tcgplayer",
+        "cardmarket",
+        "pricecharting",
+        "google_shopping",
+    ]
 
 
 @pytest.mark.asyncio
