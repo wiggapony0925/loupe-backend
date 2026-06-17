@@ -21,6 +21,7 @@ async def test_providers_status(client):
         "gocollect",
         "pokemon_tcg",
         "tcgcsv",
+        "tcgdex",
         "justtcg",
     }
     for row in body["providers"]:
