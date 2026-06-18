@@ -35,6 +35,15 @@ from app.platform.cache_config import (
 )
 from app.platform.circuit_breaker import CircuitOpenError
 from app.platform.redis_client import get_redis
+from app.schemas.unified_card import (
+    UnifiedCard,
+    UnifiedImage,
+    UnifiedImageSet,
+    UnifiedMetadata,
+    UnifiedMoney,
+    UnifiedPricingSummary,
+    UnifiedSet,
+)
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 
@@ -101,35 +110,35 @@ def _year(value: Any) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _img(url: str | None, alt: str | None = None) -> dict[str, Any] | None:
+def _img(url: str | None, alt: str | None = None) -> UnifiedImage | None:
     if not url:
         return None
-    return {"url": url, "width": None, "height": None, "alt": alt}
+    return UnifiedImage(url=url, width=None, height=None, alt=alt)
 
 
 def _now_iso() -> str:
     return utcnow().isoformat()
 
 
-def _meta(source: str) -> dict[str, Any]:
-    return {"source": source, "last_synced_at": _now_iso(), "confidence": 1.0}
+def _meta(source: str) -> UnifiedMetadata:
+    return UnifiedMetadata(source=source, last_synced_at=_now_iso(), confidence=1.0)
 
 
-def _money(amount: Any) -> dict[str, Any] | None:
+def _money(amount: Any) -> UnifiedMoney | None:
     try:
         v = float(amount)
     except (TypeError, ValueError):
         return None
     if v <= 0:
         return None
-    return {"amount": round(v, 2), "currency": "USD"}
+    return UnifiedMoney(amount=round(v, 2), currency="USD")
 
 
 # ------------------------------------------------------------------ adapters
 
 
 def _from_pokemon(card: dict[str, Any]) -> dict[str, Any]:
-    """Map a Pokémon TCG API card to the unified rich shape."""
+    """Map a Pokémon TCG API card to the unified rich shape (as a plain dict)."""
     images = card.get("images") or {}
     set_obj = card.get("set") or {}
     set_images = set_obj.get("images") or {}
@@ -182,49 +191,49 @@ def _from_pokemon(card: dict[str, Any]) -> dict[str, Any]:
         attributes["tcgplayer_url"] = tcgp["url"]
 
     # Images
-    image_set = {
-        "small": _img(images.get("small"), alt=name),
-        "normal": _img(images.get("large") or images.get("small"), alt=name),
-        "large": _img(images.get("large"), alt=name),
-        "art_crop": None,
-    }
+    image_set = UnifiedImageSet(
+        small=_img(images.get("small"), alt=name),
+        normal=_img(images.get("large") or images.get("small"), alt=name),
+        large=_img(images.get("large"), alt=name),
+        art_crop=None,
+    )
 
     pricing = _pokemon_pricing(card)
 
-    set_data = {
-        "id": f"pokemontcg:{set_obj.get('id')}" if set_obj.get("id") else None,
-        "code": set_obj.get("id") or set_obj.get("ptcgoCode"),
-        "name": set_obj.get("name"),
-        "series": set_obj.get("series"),
-        "release_date": set_obj.get("releaseDate"),
-        "printed_total": set_obj.get("printedTotal"),
-        "total_cards": set_obj.get("total"),
-        "logo": _img(set_images.get("logo")),
-        "symbol": _img(set_images.get("symbol")),
-    }
+    set_data = UnifiedSet(
+        id=f"pokemontcg:{set_obj.get('id')}" if set_obj.get("id") else None,
+        code=set_obj.get("id") or set_obj.get("ptcgoCode"),
+        name=set_obj.get("name"),
+        series=set_obj.get("series"),
+        release_date=set_obj.get("releaseDate"),
+        printed_total=set_obj.get("printedTotal"),
+        total_cards=set_obj.get("total"),
+        logo=_img(set_images.get("logo")),
+        symbol=_img(set_images.get("symbol")),
+    )
 
     base_image = images.get("small") or images.get("large")
-    return {
-        "id": f"pokemontcg:{card.get('id')}",
-        "name": name,
-        "tcg": "pokemon",
-        "set_name": set_obj.get("name"),
-        "set_code": set_obj.get("id") or set_obj.get("ptcgoCode"),
-        "number": card.get("number"),
-        "rarity": card.get("rarity"),
-        "image_url": base_image,
-        "images": image_set,
-        "year": year,
-        "source": "pokemontcg",
-        "attributes": attributes,
-        "pricing_summary": pricing,
-        "set": set_data,
-        "tags": tags,
-        "metadata": _meta("pokemontcg"),
-    }
+    return UnifiedCard(
+        id=f"pokemontcg:{card.get('id')}",
+        name=name,
+        tcg="pokemon",
+        set_name=set_obj.get("name"),
+        set_code=set_obj.get("id") or set_obj.get("ptcgoCode"),
+        number=card.get("number"),
+        rarity=card.get("rarity"),
+        image_url=base_image,
+        images=image_set,
+        year=year,
+        source="pokemontcg",
+        attributes=attributes,
+        pricing_summary=pricing,
+        set=set_data,
+        tags=tags,
+        metadata=_meta("pokemontcg"),
+    ).model_dump()
 
 
-def _pokemon_pricing(card: dict[str, Any]) -> dict[str, Any] | None:
+def _pokemon_pricing(card: dict[str, Any]) -> UnifiedPricingSummary | None:
     """Extract TCGPlayer (preferred) or Cardmarket pricing into PricingSummary."""
     tcgp = card.get("tcgplayer") or {}
     prices = tcgp.get("prices") or {}
@@ -243,31 +252,31 @@ def _pokemon_pricing(card: dict[str, Any]) -> dict[str, Any] | None:
             chosen = v
             break
     if chosen:
-        return {
-            "card_id": f"pokemontcg:{card.get('id')}",
-            "currency": "USD",
-            "market": _money(chosen.get("market") or chosen.get("mid")),
-            "low": _money(chosen.get("low")),
-            "mid": _money(chosen.get("mid")),
-            "high": _money(chosen.get("high")),
-            "as_of": tcgp.get("updatedAt"),
-            "sample_size": 1,
-            "sources": ["tcgplayer"],
-        }
+        return UnifiedPricingSummary(
+            card_id=f"pokemontcg:{card.get('id')}",
+            currency="USD",
+            market=_money(chosen.get("market") or chosen.get("mid")),
+            low=_money(chosen.get("low")),
+            mid=_money(chosen.get("mid")),
+            high=_money(chosen.get("high")),
+            as_of=tcgp.get("updatedAt"),
+            sample_size=1,
+            sources=["tcgplayer"],
+        )
     cm = (card.get("cardmarket") or {}).get("prices") or {}
     avg = cm.get("averageSellPrice") or cm.get("trendPrice")
     if avg:
-        return {
-            "card_id": f"pokemontcg:{card.get('id')}",
-            "currency": "EUR",
-            "market": _money(avg),
-            "low": _money(cm.get("lowPrice")),
-            "mid": None,
-            "high": None,
-            "as_of": (card.get("cardmarket") or {}).get("updatedAt"),
-            "sample_size": 1,
-            "sources": ["cardmarket"],
-        }
+        return UnifiedPricingSummary(
+            card_id=f"pokemontcg:{card.get('id')}",
+            currency="EUR",
+            market=_money(avg),
+            low=_money(cm.get("lowPrice")),
+            mid=None,
+            high=None,
+            as_of=(card.get("cardmarket") or {}).get("updatedAt"),
+            sample_size=1,
+            sources=["cardmarket"],
+        )
     return None
 
 
@@ -328,61 +337,61 @@ def _from_scryfall(card: dict[str, Any]) -> dict[str, Any]:
         if val not in (None, "", [], {}):
             attributes[key] = val
 
-    image_set = {
-        "small": _img(image_uris.get("small"), alt=name),
-        "normal": _img(image_uris.get("normal"), alt=name),
-        "large": _img(image_uris.get("large"), alt=name),
-        "art_crop": _img(image_uris.get("art_crop"), alt=name),
-    }
+    image_set = UnifiedImageSet(
+        small=_img(image_uris.get("small"), alt=name),
+        normal=_img(image_uris.get("normal"), alt=name),
+        large=_img(image_uris.get("large"), alt=name),
+        art_crop=_img(image_uris.get("art_crop"), alt=name),
+    )
 
     prices = card.get("prices") or {}
     usd = prices.get("usd") or prices.get("usd_foil") or prices.get("usd_etched")
-    pricing: dict[str, Any] | None = None
+    pricing: UnifiedPricingSummary | None = None
     if usd:
         market = _money(usd)
         if market:
-            pricing = {
-                "card_id": f"scryfall:{card.get('id')}",
-                "currency": "USD",
-                "market": market,
-                "low": None,
-                "mid": None,
-                "high": None,
-                "as_of": None,
-                "sample_size": 1,
-                "sources": ["scryfall"],
-            }
+            pricing = UnifiedPricingSummary(
+                card_id=f"scryfall:{card.get('id')}",
+                currency="USD",
+                market=market,
+                low=None,
+                mid=None,
+                high=None,
+                as_of=None,
+                sample_size=1,
+                sources=["scryfall"],
+            )
 
-    set_data = {
-        "id": f"scryfall:{card.get('set_id')}" if card.get("set_id") else None,
-        "code": card.get("set"),
-        "name": card.get("set_name"),
-        "series": card.get("set_type"),
-        "release_date": card.get("released_at"),
-        "printed_total": None,
-        "total_cards": None,
-        "logo": None,
-        "symbol": None,
-    }
+    set_data = UnifiedSet(
+        id=f"scryfall:{card.get('set_id')}" if card.get("set_id") else None,
+        code=card.get("set"),
+        name=card.get("set_name"),
+        series=card.get("set_type"),
+        release_date=card.get("released_at"),
+        printed_total=None,
+        total_cards=None,
+        logo=None,
+        symbol=None,
+    )
 
-    return {
-        "id": f"scryfall:{card.get('id')}",
-        "name": name,
-        "tcg": "magic",
-        "set_name": card.get("set_name"),
-        "set_code": card.get("set"),
-        "number": card.get("collector_number"),
-        "rarity": card.get("rarity"),
-        "image_url": image_uris.get("normal") or image_uris.get("small"),
-        "images": image_set,
-        "year": year,
-        "source": "scryfall",
-        "attributes": attributes,
-        "pricing_summary": pricing,
-        "set": set_data,
-        "tags": tags,
-        "metadata": _meta("scryfall"),
-    }
+    return UnifiedCard(
+        id=f"scryfall:{card.get('id')}",
+        name=name,
+        tcg="magic",
+        set_name=card.get("set_name"),
+        set_code=card.get("set"),
+        number=card.get("collector_number"),
+        rarity=card.get("rarity"),
+        image_url=image_uris.get("normal") or image_uris.get("small"),
+        images=image_set,
+        year=year,
+        source="scryfall",
+        attributes=attributes,
+        pricing_summary=pricing,
+        set=set_data,
+        tags=tags,
+        metadata=_meta("scryfall"),
+    ).model_dump()
 
 
 def _from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
@@ -413,15 +422,15 @@ def _from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
         if val not in (None, "", [], {}):
             attributes[key] = val
 
-    image_set = {
-        "small": _img(images.get("image_url_small"), alt=name),
-        "normal": _img(images.get("image_url"), alt=name),
-        "large": _img(images.get("image_url"), alt=name),
-        "art_crop": _img(images.get("image_url_cropped"), alt=name),
-    }
+    image_set = UnifiedImageSet(
+        small=_img(images.get("image_url_small"), alt=name),
+        normal=_img(images.get("image_url"), alt=name),
+        large=_img(images.get("image_url"), alt=name),
+        art_crop=_img(images.get("image_url_cropped"), alt=name),
+    )
 
     prices_list = card.get("card_prices") or []
-    pricing: dict[str, Any] | None = None
+    pricing: UnifiedPricingSummary | None = None
     if prices_list:
         first = prices_list[0]
         numeric: list[float] = []
@@ -440,55 +449,55 @@ def _from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
                 continue
         if numeric:
             avg = sum(numeric) / len(numeric)
-            pricing = {
-                "card_id": f"ygoprodeck:{card.get('id')}",
-                "currency": "USD",
-                "market": _money(avg),
-                "low": _money(min(numeric)),
-                "mid": None,
-                "high": _money(max(numeric)),
-                "as_of": None,
-                "sample_size": len(numeric),
-                "sources": ["ygoprodeck"],
-            }
+            pricing = UnifiedPricingSummary(
+                card_id=f"ygoprodeck:{card.get('id')}",
+                currency="USD",
+                market=_money(avg),
+                low=_money(min(numeric)),
+                mid=None,
+                high=_money(max(numeric)),
+                as_of=None,
+                sample_size=len(numeric),
+                sources=["ygoprodeck"],
+            )
 
-    set_data = {
-        "id": f"ygoprodeck:{first_set.get('set_code')}"
+    set_data = UnifiedSet(
+        id=f"ygoprodeck:{first_set.get('set_code')}"
         if first_set.get("set_code")
         else None,
-        "code": first_set.get("set_code"),
-        "name": first_set.get("set_name"),
-        "series": None,
-        "release_date": None,
-        "printed_total": None,
-        "total_cards": None,
-        "logo": None,
-        "symbol": None,
-    }
+        code=first_set.get("set_code"),
+        name=first_set.get("set_name"),
+        series=None,
+        release_date=None,
+        printed_total=None,
+        total_cards=None,
+        logo=None,
+        symbol=None,
+    )
 
     tags: list[str] = []
     rarity = first_set.get("set_rarity") or ""
     if "ultra" in rarity.lower() or "secret" in rarity.lower():
         tags.append("rare")
 
-    return {
-        "id": f"ygoprodeck:{card.get('id')}",
-        "name": name,
-        "tcg": "yugioh",
-        "set_name": first_set.get("set_name"),
-        "set_code": first_set.get("set_code"),
-        "number": first_set.get("set_code"),
-        "rarity": first_set.get("set_rarity"),
-        "image_url": images.get("image_url_small") or images.get("image_url"),
-        "images": image_set,
-        "year": None,
-        "source": "ygoprodeck",
-        "attributes": attributes,
-        "pricing_summary": pricing,
-        "set": set_data,
-        "tags": tags,
-        "metadata": _meta("ygoprodeck"),
-    }
+    return UnifiedCard(
+        id=f"ygoprodeck:{card.get('id')}",
+        name=name,
+        tcg="yugioh",
+        set_name=first_set.get("set_name"),
+        set_code=first_set.get("set_code"),
+        number=first_set.get("set_code"),
+        rarity=first_set.get("set_rarity"),
+        image_url=images.get("image_url_small") or images.get("image_url"),
+        images=image_set,
+        year=None,
+        source="ygoprodeck",
+        attributes=attributes,
+        pricing_summary=pricing,
+        set=set_data,
+        tags=tags,
+        metadata=_meta("ygoprodeck"),
+    ).model_dump()
 
 
 # ------------------------------------------------------------------- caching

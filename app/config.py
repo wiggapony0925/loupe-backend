@@ -119,6 +119,24 @@ class Settings(BaseSettings):
     gocollect_api_key: str | None = None
     # JustTCG — https://justtcg.com/api (aggregated TCG prices, free tier)
     justtcg_api_key: str | None = None
+    # PokemonPriceTracker — https://www.pokemonpricetracker.com/api-reference
+    # Fills the gap left by the (approval-gated) eBay API: real eBay *sold*
+    # data for graded slabs (PSA/CGC/BGS/SGC) plus TCGplayer market price.
+    # Free tier ~100 calls/day. Blank disables the provider gracefully.
+    pokemonpricetracker_api_key: str | None = None
+    # Apify — https://apify.com (Facebook Marketplace nearby-listings scraper).
+    # Powers the "Near You" carousel on the card-detail sheet: real FB
+    # Marketplace listings for the viewed card, filtered by a radius around
+    # the user's device location. Blank disables the feature gracefully.
+    apify_api_token: str | None = None
+    apify_fb_marketplace_actor: str = "apify/facebook-marketplace-scraper"
+    # StockX — https://developer.stockx.com (graded + sealed trading cards)
+    # Requires OAuth2 Authorization Code flow; store the refresh_token as a
+    # secret and the integration auto-renews the 12h access_token.
+    stockx_client_id: str | None = None
+    stockx_client_secret: str | None = None
+    stockx_api_key: str | None = None        # x-api-key header (from dev portal)
+    stockx_refresh_token: str | None = None  # long-lived token from OAuth dance
     # TCGCSV — https://tcgcsv.com (free daily TCGplayer mirror, no key needed).
     # Disabled by default: tcgcsv.com no longer publishes the per-group
     # `products.csv` / `prices.csv` dumps we rely on (every fetch 404s),

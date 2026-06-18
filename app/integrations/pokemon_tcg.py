@@ -24,6 +24,10 @@ class PokemonTcgProvider(BaseProvider):
     id = "pokemon_tcg"
     name = "Pokémon TCG API"
 
+    # Kept under the registry fan-out budget so this provider can never be
+    # the call that blows the card-detail aggregation deadline.
+    _MARKET_PRICE_TIMEOUT_S = 2.0
+
     def is_configured(self) -> bool:
         # Public endpoint — always available. The key is optional.
         return True
@@ -32,7 +36,9 @@ class PokemonTcgProvider(BaseProvider):
         if not query:
             return None
         try:
-            payload = await pokemon_tcg.search_cards(query, page=1, page_size=1)
+            payload = await pokemon_tcg.search_cards(
+                query, page=1, page_size=1, timeout_s=self._MARKET_PRICE_TIMEOUT_S
+            )
         except Exception as exc:
             logger.debug("pokemon_tcg search failed: %s", exc)
             return None

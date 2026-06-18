@@ -35,8 +35,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-import httpx
-
+from app.integrations.base import get_http_client
 from app.platform.circuit_breaker import get_breaker
 
 # Tuned for third-party TCG providers: 5 consecutive bad calls before
@@ -103,12 +102,17 @@ async def request_json(
     # as a breaker *success* rather than tripping the failure counter.
     result: dict[str, Any] = {"value": None}
 
-    async with breaker.guard(), httpx.AsyncClient(timeout=timeout_s) as client:
+    # Reuse the process-wide pooled client (keep-alive + warm TLS) instead
+    # of paying a fresh TCP+TLS handshake on every catalog call. The timeout
+    # is applied per-request so each integration keeps its own budget.
+    client = await get_http_client()
+    async with breaker.guard():
         resp = await client.request(
             method,
             url,
             params=dict(params) if params else None,
             headers=dict(headers) if headers else None,
+            timeout=timeout_s,
         )
         status = resp.status_code
         if not_found_ok and status == 404:

@@ -81,6 +81,9 @@
   "/v1/cards/{card_id}/marketplace-prices": [
     "GET"
   ],
+  "/v1/cards/{card_id}/nearby-listings": [
+    "GET"
+  ],
   "/v1/cards/{card_id}/prices": [
     "GET"
   ],

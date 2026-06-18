@@ -5,6 +5,7 @@ return empty lists / ``None`` so the rest of the backend degrades to the
 existing synthesized fallback. See :class:`app.integrations.base.BaseProvider`.
 """
 
+from app.integrations.apify import ApifyProvider
 from app.integrations.base import (
     BaseProvider,
     Listing,
@@ -16,6 +17,7 @@ from app.integrations.base import (
 from app.integrations.registry import ProviderRegistry, get_registry
 
 __all__ = [
+    "ApifyProvider",
     "BaseProvider",
     "Listing",
     "MarketPrice",

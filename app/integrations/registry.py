@@ -18,8 +18,10 @@ from app.integrations.gocollect import GoCollectProvider
 from app.integrations.justtcg import JustTcgProvider
 from app.integrations.point130 import Point130Provider
 from app.integrations.pokemon_tcg import PokemonTcgProvider
+from app.integrations.pokemonpricetracker import PokemonPriceTrackerProvider
 from app.integrations.pricecharting import PriceChartingProvider
 from app.integrations.psa import PsaProvider
+from app.integrations.stockx import StockXProvider
 from app.integrations.tcgcsv import TcgCsvProvider
 from app.integrations.tcgdex import TcgDexProvider
 from app.integrations.tcgplayer import TcgPlayerProvider
@@ -183,11 +185,15 @@ def get_registry() -> ProviderRegistry:
     return ProviderRegistry(
         providers=[
             EbayProvider(),
+            StockXProvider(),
             PsaProvider(),
             TcgPlayerProvider(),
             PriceChartingProvider(),
             Point130Provider(),
             GoCollectProvider(),
+            # Aggregator filling the eBay gap: real eBay sold/graded data +
+            # TCGplayer market price (accepts new devs, free tier).
+            PokemonPriceTrackerProvider(),
             # Free / low-friction fallbacks — keep last so paid/official
             # providers take priority in fan-out aggregations.
             PokemonTcgProvider(),

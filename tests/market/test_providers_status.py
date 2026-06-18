@@ -14,6 +14,7 @@ async def test_providers_status(client):
     ids = {p["id"] for p in body["providers"]}
     assert ids == {
         "ebay",
+        "stockx",
         "psa",
         "tcgplayer",
         "pricecharting",
@@ -23,6 +24,7 @@ async def test_providers_status(client):
         "tcgcsv",
         "tcgdex",
         "justtcg",
+        "pokemonpricetracker",
     }
     for row in body["providers"]:
         assert isinstance(row["configured"], bool)

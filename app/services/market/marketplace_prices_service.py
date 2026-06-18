@@ -40,6 +40,7 @@ _SEARCH_URL_TEMPLATE: dict[str, str] = {
     "cardmarket": "https://www.cardmarket.com/en/Pokemon/Products/Search?searchString={q}",
     "pricecharting": "https://www.pricecharting.com/search-products?q={q}&type=prices",
     "google_shopping": "https://www.google.com/search?tbm=shop&q={q}",
+    "stockx": "https://stockx.com/search?s={q}",
 }
 
 
@@ -58,6 +59,7 @@ def _provider_label(source: str) -> str:
         "tcgdex": "TCGdex",
         "justtcg": "JustTCG",
         "google_shopping": "Google Shopping",
+        "stockx": "StockX",
     }.get(s, source)
 
 

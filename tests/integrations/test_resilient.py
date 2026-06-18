@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import httpx
 import pytest
 
+from app.integrations import base as _base
 from app.integrations._http import _resilient
 from app.platform.circuit_breaker import CircuitOpenError, reset_all_breakers
 
@@ -19,16 +18,22 @@ def _reset_breakers():
 
 
 def _patch_httpx(monkeypatch: pytest.MonkeyPatch, handler) -> None:
-    """Install an httpx mock transport that runs `handler(request)`."""
+    """Point the shared pooled client at an httpx mock transport.
+
+    ``request_json`` now reuses the process-wide
+    :func:`app.integrations.base.get_http_client` instead of constructing a
+    client per call, so the mock is installed by swapping the cached client
+    for one wired to a :class:`httpx.MockTransport`.
+    """
 
     transport = httpx.MockTransport(handler)
-    real_init = httpx.AsyncClient.__init__
+    mock_client = httpx.AsyncClient(transport=transport)
 
-    def fake_init(self: httpx.AsyncClient, *args: Any, **kwargs: Any) -> None:
-        kwargs["transport"] = transport
-        real_init(self, *args, **kwargs)
+    async def _get_mock_client() -> httpx.AsyncClient:
+        return mock_client
 
-    monkeypatch.setattr(httpx.AsyncClient, "__init__", fake_init)
+    monkeypatch.setattr(_base, "get_http_client", _get_mock_client)
+    monkeypatch.setattr(_resilient, "get_http_client", _get_mock_client)
 
 
 @pytest.mark.asyncio

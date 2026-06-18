@@ -1,4 +1,4 @@
-.PHONY: install run worker test lint fmt typecheck migrate revision fresh-db docker-up docker-down ocr-eval index-images
+.PHONY: install run dev worker test lint fmt typecheck migrate revision fresh-db docker-up docker-down ocr-eval index-images
 
 VENV ?= .venv
 PY := $(VENV)/bin/python
@@ -9,8 +9,10 @@ install:
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt -r requirements-dev.txt
 
-run:
-	$(PY) run.py
+# Start everything: Docker Desktop → postgres/redis → migrations → API server.
+# Use this instead of calling run.py directly.
+dev run:
+	@chmod +x dev.sh && ./dev.sh
 
 worker:
 	$(VENV)/bin/arq app.worker.WorkerSettings

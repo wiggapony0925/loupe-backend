@@ -38,6 +38,7 @@ from app.services.market import (
     listings_service,
     market_service,
     marketplace_prices_service,
+    nearby_listings_service,
     trending_service,
 )
 from app.services.market import sold_comps_service as comps_service
@@ -264,6 +265,33 @@ async def get_listings(
     client always renders successfully.
     """
     result = await listings_service.get_listings_for_card(card_id, limit=limit)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return result
+
+
+@router.get(
+    "/{card_id}/nearby-listings",
+    summary="Nearby Facebook Marketplace listings (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def get_nearby_listings(
+    card_id: str,
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+    radius_km: int = Query(40, ge=1, le=500),
+    limit: int = Query(20, ge=1, le=50),
+) -> dict[str, Any]:
+    """Facebook Marketplace listings near the user for the viewed card.
+
+    Powers the "Near You" carousel on the card-detail sheet. ``lat``/``lng``
+    come from the device's location (foreground permission). Returns
+    ``listings: []`` when Apify is unconfigured or has no matches, so the
+    client always renders a clean empty state.
+    """
+    result = await nearby_listings_service.get_nearby_listings_for_card(
+        card_id, lat=lat, lng=lng, radius_km=radius_km, limit=limit
+    )
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
     return result
