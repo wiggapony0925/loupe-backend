@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     # secret and the integration auto-renews the 12h access_token.
     stockx_client_id: str | None = None
     stockx_client_secret: str | None = None
-    stockx_api_key: str | None = None        # x-api-key header (from dev portal)
+    stockx_api_key: str | None = None  # x-api-key header (from dev portal)
     stockx_refresh_token: str | None = None  # long-lived token from OAuth dance
     # TCGCSV — https://tcgcsv.com (free daily TCGplayer mirror, no key needed).
     # Disabled by default: tcgcsv.com no longer publishes the per-group
@@ -228,6 +228,22 @@ class Settings(BaseSettings):
     def admin_email_set(self) -> set[str]:
         """Normalised admin email allowlist (lowercased, deduped)."""
         return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+
+    # --- Email (transactional, via Resend) ---
+    # Optional. When `resend_api_key` + `notifications_from_email` are set,
+    # applicant status updates are emailed; otherwise they're logged and
+    # surfaced only on the public tracking page. Resend's free tier is
+    # generous and the API is a single HTTPS POST — no SMTP required.
+    resend_api_key: str = ""
+    notifications_from_email: str = ""  # e.g. "Loupe Careers <careers@loupe.app>"
+    # Public base URL of the web app, used to build links in emails
+    # (e.g. the application-tracking page). No trailing slash.
+    app_public_url: str = "https://loupe.app"
+
+    @property
+    def email_enabled(self) -> bool:
+        """True when a transactional-email provider is fully configured."""
+        return bool(self.resend_api_key and self.notifications_from_email)
 
     # --- OpenTelemetry (off by default; flip on once SDK + exporter
     # extras are installed in the runtime image and the IAM role for

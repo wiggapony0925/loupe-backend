@@ -25,8 +25,11 @@ from app.routers.collection import scan_devices as scanners
 from app.routers.market import alerts, market, prices
 from app.routers.ops import app_config
 from app.routers.ops import health as system
-from app.routers.public import storefront as public
 from app.routers.ops import websockets as ws
+from app.routers.portal import admin as portal_admin
+from app.routers.portal import blog as portal_blog
+from app.routers.portal import careers as portal_careers
+from app.routers.public import storefront as public
 
 
 def create_app() -> FastAPI:
@@ -112,6 +115,10 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router, prefix=api_prefix)
     app.include_router(sealed.catalog_router, prefix=api_prefix)
     app.include_router(sealed.holdings_router, prefix=api_prefix)
+    # Developer portal — public careers/blog + admin management.
+    app.include_router(portal_careers.router, prefix=api_prefix)
+    app.include_router(portal_blog.router, prefix=api_prefix)
+    app.include_router(portal_admin.router, prefix=api_prefix)
 
     # WebSockets mount at root.
     app.include_router(ws.router)

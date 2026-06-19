@@ -32,6 +32,10 @@ logger = get_logger("routers.auth")
 def _build_pair(user_id, user_read: UserRead) -> TokenPair:
     access, ttl = issue_token(user_id, "access")
     refresh, _ = issue_token(user_id, "refresh")
+    # Stamp admin membership so the client can route admins straight to the
+    # developer portal on sign-in (still enforced server-side on every call).
+    email = (user_read.email or "").strip().lower()
+    user_read.is_admin = bool(email) and email in get_settings().admin_email_set
     return TokenPair(
         access_token=access,
         refresh_token=refresh,

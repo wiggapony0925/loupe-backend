@@ -121,8 +121,57 @@ class SealedProductTypeEnum(str, enum.Enum):
     other = "other"
 
 
+class EmploymentTypeEnum(str, enum.Enum):
+    """Employment basis for a job posting."""
+
+    full_time = "full_time"
+    part_time = "part_time"
+    contract = "contract"
+    internship = "internship"
+
+
+class JobStatusEnum(str, enum.Enum):
+    """Publication lifecycle of a job posting.
+
+    ``open`` postings are visible on the public careers page and accept
+    applications; ``draft`` is admin-only; ``closed`` stays in the portal
+    for record-keeping but no longer accepts applications.
+    """
+
+    draft = "draft"
+    open = "open"
+    closed = "closed"
+
+
+class ApplicationStatusEnum(str, enum.Enum):
+    """Pipeline stage of a single job application.
+
+    Each transition is recorded as an ``ApplicationEvent`` so the
+    applicant can be kept informed and the portal shows a full history.
+    """
+
+    submitted = "submitted"
+    reviewing = "reviewing"
+    interview = "interview"
+    offer = "offer"
+    hired = "hired"
+    rejected = "rejected"
+    withdrawn = "withdrawn"
+
+
+class BlogStatusEnum(str, enum.Enum):
+    """Publication lifecycle of a blog post."""
+
+    draft = "draft"
+    published = "published"
+
+
 __all__ = [
+    "ApplicationStatusEnum",
+    "BlogStatusEnum",
+    "EmploymentTypeEnum",
     "GradeHouseEnum",
+    "JobStatusEnum",
     "PriceAlertCondition",
     "PriceSourceEnum",
     "RawConditionEnum",

@@ -18,6 +18,10 @@ class UserRead(BaseModel):
     display_name: str | None = None
     avatar_url: str | None = None
     created_at: datetime
+    # Whether this user is in the admin allowlist — drives access to the
+    # developer portal in the clients. Computed server-side; never trusted
+    # from the client. Set by the `/me` handler from the email allowlist.
+    is_admin: bool = False
 
 
 class UserUpdate(BaseModel):

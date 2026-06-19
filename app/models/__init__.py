@@ -2,11 +2,17 @@
 
 from app.models.api_key import ApiKey
 from app.models.audit import AuditLog
+from app.models.blog import BlogPost
 from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
+from app.models.career import ApplicationEvent, JobApplication, JobPosting
 from app.models.collection import Collection, CollectionItem
 from app.models.enums import (
+    ApplicationStatusEnum,
+    BlogStatusEnum,
+    EmploymentTypeEnum,
     GradeHouseEnum,
+    JobStatusEnum,
     PriceAlertCondition,
     PriceSourceEnum,
     RawConditionEnum,
@@ -32,17 +38,25 @@ from app.models.watchlist import WatchlistItem
 
 __all__ = [
     "ApiKey",
+    "ApplicationEvent",
+    "ApplicationStatusEnum",
     "AuditLog",
+    "BlogPost",
+    "BlogStatusEnum",
     "Card",
     "CardExternalRef",
     "CardIdentification",
     "CardSet",
     "Collection",
     "CollectionItem",
+    "EmploymentTypeEnum",
     "Fingerprint",
     "GradeHouseEnum",
     "GradedCard",
     "IdentificationFeedback",
+    "JobApplication",
+    "JobPosting",
+    "JobStatusEnum",
     "PriceAlert",
     "PriceAlertCondition",
     "PriceSnapshot",

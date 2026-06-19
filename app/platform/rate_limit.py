@@ -124,9 +124,16 @@ catalog_read_limit = rate_limit(limit=120, window_seconds=60, name="cards.read")
 # that masqueraded as "slow detail loads". This limit is set high
 # enough to absorb a full vault refresh while still stopping scrapers.
 image_proxy_limit = rate_limit(limit=1500, window_seconds=60, name="cards.image")
+# Public careers endpoints. Applying is a rare, deliberate action, so a tight
+# cap stops spam/abuse cold; tracking is gated on a matching email, and a tight
+# cap additionally frustrates id/email enumeration.
+application_submit_limit = rate_limit(limit=8, window_seconds=300, name="careers.apply")
+application_track_limit = rate_limit(limit=30, window_seconds=60, name="careers.track")
 
 
 __all__ = [
+    "application_submit_limit",
+    "application_track_limit",
     "catalog_read_limit",
     "image_proxy_limit",
     "rate_limit",
