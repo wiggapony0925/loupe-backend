@@ -15,13 +15,24 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.platform.rate_limit import catalog_read_limit, search_live_limit
 from app.services.catalog import card_search_service, catalog_browse_service
 from app.services.market import trending_service
 
 router = APIRouter(prefix="/public", tags=["public"])
+
+# Catalog identity (names, sets, art, rarity) is effectively immutable; only
+# pricing drifts. So we let the browser/CDN serve a cached copy instantly and
+# revalidate in the background — the client then refreshes prices. This is what
+# makes cards "never reload" on navigation/refresh.
+_CATALOG_CACHE = "public, max-age=120, stale-while-revalidate=86400"
+
+
+def _cache(response: Response) -> None:
+    response.headers["Cache-Control"] = _CATALOG_CACHE
+
 
 #: tcg values the trending feed understands (others collapse to "all").
 _TRENDING_TCGS = {"pokemon", "magic", "yugioh", "all"}
@@ -57,6 +68,7 @@ def _apply_sort(cards: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
     dependencies=[Depends(search_live_limit)],
 )
 async def public_search(
+    response: Response,
     q: str = Query("", max_length=120),
     tcg: str = Query(
         "all", pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$"
@@ -72,6 +84,7 @@ async def public_search(
     Returns the paginated slice plus ``total`` and ``facets`` so the client
     renders directly — no client-side filtering/sorting/pagination.
     """
+    _cache(response)
     if q.strip():
         # limit=20 matches the warm upstream cache key used by /v1/cards/search;
         # larger limits are a separate (often cold) cache entry.
@@ -116,6 +129,7 @@ async def public_search(
     dependencies=[Depends(catalog_read_limit)],
 )
 async def public_browse(
+    response: Response,
     game: str = Query(
         "pokemon", pattern="^(pokemon|magic|yugioh|lorcana|onepiece|digimon|all)$"
     ),
@@ -125,6 +139,7 @@ async def public_browse(
 ) -> dict[str, Any]:
     """Page through an entire game's upstream catalog (real ``total`` for paging),
     sorted server-side. Unsupported games return an empty page rather than an error."""
+    _cache(response)
     return await catalog_browse_service.browse_catalog(game, page, page_size, sort=sort)
 
 
@@ -134,6 +149,7 @@ async def public_browse(
     dependencies=[Depends(catalog_read_limit)],
 )
 async def public_trending(
+    response: Response,
     tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
     sort: str = Query("trending", pattern="^(trending|value)$"),
     max_price: float | None = Query(None, ge=0),
@@ -141,6 +157,7 @@ async def public_trending(
 ) -> dict[str, Any]:
     """Trending feed with the cut applied server-side (e.g. ``sort=value`` for
     "most valuable", ``max_price=5`` for "steals under $5")."""
+    _cache(response)
     body = await trending_service.get_trending(tcg=tcg, limit=100)
     cards = list(body.get("cards") or [])
 
