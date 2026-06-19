@@ -33,6 +33,18 @@ async def get_by_email(db: AsyncSession, email: str) -> User | None:
     ).scalar_one_or_none()
 
 
+async def active_emails(db: AsyncSession) -> list[str]:
+    """Emails of active users (not deleted, not banned) — e.g. announcement lists."""
+    rows = (
+        await db.execute(
+            select(User.email).where(
+                User.deleted_at.is_(None), User.banned_at.is_(None)
+            )
+        )
+    ).all()
+    return [email for (email,) in rows if email]
+
+
 async def get_by_apple_subject(db: AsyncSession, sub: str) -> User | None:
     return (
         await db.execute(select(User).where(User.apple_subject == sub))

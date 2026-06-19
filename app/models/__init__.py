@@ -24,6 +24,7 @@ from app.models.enums import (
     SealedProductTypeEnum,
     TcgEnum,
 )
+from app.models.feature_flag import FeatureFlag
 from app.models.fingerprint import Fingerprint
 from app.models.grade import GradedCard
 from app.models.identification import CardIdentification, IdentificationFeedback
@@ -50,6 +51,7 @@ __all__ = [
     "Collection",
     "CollectionItem",
     "EmploymentTypeEnum",
+    "FeatureFlag",
     "Fingerprint",
     "GradeHouseEnum",
     "GradedCard",

@@ -7,6 +7,7 @@ account — so there's always a way back in.
 
 from __future__ import annotations
 
+import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -15,8 +16,28 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_super_admin
+from app.models.grade import GradedCard
+from app.models.scan import ScanJob
 from app.models.user import User
-from app.schemas.admin import AdminUserPage, AdminUserRead
+from app.models.watchlist import WatchlistItem
+from app.schemas.admin import (
+    AdminUserDetail,
+    AdminUserPage,
+    AdminUserRead,
+    TestAccountCreated,
+)
+from app.services import email_service
+from app.services.auth import user_service
+
+
+def _auth_method(user: User) -> str:
+    if user.apple_subject:
+        return "apple"
+    if user.google_subject:
+        return "google"
+    if user.password_hash:
+        return "password"
+    return "unknown"
 
 
 def to_read(user: User) -> AdminUserRead:
@@ -25,6 +46,51 @@ def to_read(user: User) -> AdminUserRead:
     out.banned = user.banned_at is not None
     out.deleted = user.deleted_at is not None
     return out
+
+
+async def get_detail(db: AsyncSession, user_id: uuid.UUID) -> AdminUserDetail:
+    """A user's full record + activity aggregates (vault, watchlist, scans)."""
+    user = await _get(db, user_id)
+
+    async def count(model) -> int:
+        return int(
+            (
+                await db.execute(
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.user_id == user_id)
+                )
+            ).scalar_one()
+        )
+
+    est = (
+        await db.execute(
+            select(func.coalesce(func.sum(GradedCard.estimated_value_usd), 0)).where(
+                GradedCard.user_id == user_id
+            )
+        )
+    ).scalar_one()
+
+    out = AdminUserDetail.model_validate(user)
+    out.is_super_admin = is_super_admin(user)
+    out.banned = user.banned_at is not None
+    out.deleted = user.deleted_at is not None
+    out.auth_method = _auth_method(user)
+    out.grades_count = await count(GradedCard)
+    out.watchlist_count = await count(WatchlistItem)
+    out.scans_count = await count(ScanJob)
+    out.estimated_value_usd = float(est or 0)
+    return out
+
+
+async def create_test_account(db: AsyncSession) -> TestAccountCreated:
+    """Mint a sandbox account with a random password (returned once)."""
+    email = f"test+{secrets.token_hex(4)}@loupe.app"
+    password = secrets.token_urlsafe(12)
+    user = await user_service.create_with_password(
+        db, email=email, password=password, display_name="Test account"
+    )
+    return TestAccountCreated(id=user.id, email=email, password=password)
 
 
 async def list_users(
@@ -102,6 +168,8 @@ async def set_admin(
     target.is_admin = is_admin
     await db.commit()
     await db.refresh(target)
+    if is_admin:
+        await email_service.send_admin_granted(target)
     return to_read(target)
 
 
@@ -115,6 +183,7 @@ async def ban(
     target.ban_reason = (reason or "").strip() or None
     await db.commit()
     await db.refresh(target)
+    await email_service.send_ban_notice(target, target.ban_reason)
     return to_read(target)
 
 
@@ -135,4 +204,13 @@ async def soft_delete(db: AsyncSession, actor: User, user_id: uuid.UUID) -> None
     await db.commit()
 
 
-__all__ = ["ban", "list_users", "set_admin", "soft_delete", "to_read", "unban"]
+__all__ = [
+    "ban",
+    "create_test_account",
+    "get_detail",
+    "list_users",
+    "set_admin",
+    "soft_delete",
+    "to_read",
+    "unban",
+]

@@ -14,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_admin
 from app.db import get_db
 from app.models.user import User
-from app.schemas.admin import AdminRoleUpdate, AdminUserPage, AdminUserRead, BanRequest
+from app.schemas.admin import (
+    AdminRoleUpdate,
+    AdminUserDetail,
+    AdminUserPage,
+    AdminUserRead,
+    BanRequest,
+    TestAccountCreated,
+)
 from app.services import audit_service
 from app.services.admin import user_admin_service
 
@@ -29,6 +36,40 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserPage:
     return await user_admin_service.list_users(db, q=q, page=page, page_size=page_size)
+
+
+# NOTE: literal `/test` is declared before `/{user_id}` so it isn't shadowed.
+@router.post(
+    "/test",
+    response_model=TestAccountCreated,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a sandbox test account",
+)
+async def create_test_account(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> TestAccountCreated:
+    result = await user_admin_service.create_test_account(db)
+    await audit_service.record(
+        db,
+        request=request,
+        user=actor,
+        action="user.test_account",
+        target_table="users",
+        target_id=result.id,
+        payload={"email": result.email},
+    )
+    return result
+
+
+@router.get(
+    "/{user_id}", response_model=AdminUserDetail, summary="Get a user's full detail"
+)
+async def get_user(
+    user_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+) -> AdminUserDetail:
+    return await user_admin_service.get_detail(db, user_id)
 
 
 @router.patch(

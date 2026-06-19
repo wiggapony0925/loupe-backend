@@ -21,6 +21,7 @@ from app.schemas.auth import (
     TokenPair,
 )
 from app.schemas.user import UserRead
+from app.services import email_service
 from app.services.auth import user_service
 from app.services.auth.user_service import EmailAlreadyExistsError
 from app.utils.logger import get_logger
@@ -68,6 +69,7 @@ async def register(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with that email already exists.",
         ) from exc
+    await email_service.send_welcome(user)  # best-effort; no-op without a provider
     return _build_pair(user.id, UserRead.model_validate(user))
 
 

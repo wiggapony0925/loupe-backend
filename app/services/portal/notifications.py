@@ -12,15 +12,12 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-import httpx
-
 from app.config import get_settings
 from app.models.career import ApplicationEvent, JobApplication
+from app.services import email_service
 from app.utils.logger import get_logger
 
 logger = get_logger("portal.notifications")
-
-_RESEND_ENDPOINT = "https://api.resend.com/emails"
 
 # Friendly, applicant-facing copy per pipeline stage.
 _STATUS_COPY: dict[str, str] = {
@@ -72,36 +69,8 @@ async def notify_applicant(
 ) -> bool:
     """Email the applicant about a status change. Returns True if accepted by
     the provider, False if it was only logged (no provider / send failed)."""
-    settings = get_settings()
-    summary = f"application={application.id} to={application.applicant_email} status={event.status}"
-
-    if not settings.email_enabled:
-        logger.info("applicant-notify (email disabled) %s", summary)
-        return False
-
     subject, html = _build_email(application, event)
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                _RESEND_ENDPOINT,
-                headers={"Authorization": f"Bearer {settings.resend_api_key}"},
-                json={
-                    "from": settings.notifications_from_email,
-                    "to": [application.applicant_email],
-                    "subject": subject,
-                    "html": html,
-                },
-            )
-        if resp.status_code >= 400:
-            logger.warning(
-                "applicant-notify provider error %s: %s", resp.status_code, summary
-            )
-            return False
-        logger.info("applicant-notify sent %s", summary)
-        return True
-    except Exception as exc:  # never let email failure break the status update
-        logger.warning("applicant-notify failed (%s) %s", exc, summary)
-        return False
+    return await email_service.send_email(application.applicant_email, subject, html)
 
 
 __all__ = ["notify_applicant"]

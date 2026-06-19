@@ -4,17 +4,34 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_admin
 from app.db import get_db
+from app.models.enums import BlogStatusEnum
 from app.models.user import User
 from app.schemas.portal import BlogPostCreate, BlogPostRead, BlogPostUpdate
-from app.services import audit_service
+from app.services import audit_service, email_service
+from app.services.auth import user_service
 from app.services.portal import blog_service
 
 router = APIRouter(prefix="/blog", tags=["admin-blog"])
+
+_PUBLISHED = BlogStatusEnum.published.value
+
+
+async def _announce(db: AsyncSession, background: BackgroundTasks, post) -> None:
+    """Queue a 'new post' email to active users (best-effort, after response)."""
+    emails = await user_service.active_emails(db)
+    if emails:
+        background.add_task(
+            email_service.send_blog_announcement,
+            emails,
+            title=post.title,
+            excerpt=post.excerpt,
+            slug=post.slug,
+        )
 
 
 @router.get("", response_model=list[BlogPostRead], summary="List all blog posts")
@@ -32,6 +49,7 @@ async def list_posts(db: AsyncSession = Depends(get_db)) -> list[BlogPostRead]:
 async def create_post(
     payload: BlogPostCreate,
     request: Request,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> BlogPostRead:
@@ -45,6 +63,8 @@ async def create_post(
         target_id=row.id,
         payload={"title": row.title, "status": row.status},
     )
+    if row.status == _PUBLISHED:
+        await _announce(db, background, row)
     return BlogPostRead.model_validate(row)
 
 
@@ -61,9 +81,14 @@ async def update_post(
     post_id: uuid.UUID,
     payload: BlogPostUpdate,
     request: Request,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> BlogPostRead:
+    # Capture publish state *before* the update so we only announce on the
+    # draft → published transition (never on edits to an already-live post).
+    before = await blog_service.admin_get(db, post_id)
+    was_published = before.status == _PUBLISHED
     row = await blog_service.update(db, post_id, payload)
     await audit_service.record(
         db,
@@ -74,6 +99,8 @@ async def update_post(
         target_id=row.id,
         payload=payload.model_dump(exclude_unset=True, mode="json"),
     )
+    if not was_published and row.status == _PUBLISHED:
+        await _announce(db, background, row)
     return BlogPostRead.model_validate(row)
 
 

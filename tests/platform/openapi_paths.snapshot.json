@@ -23,6 +23,14 @@
     "GET",
     "PATCH"
   ],
+  "/v1/admin/flags": [
+    "GET",
+    "POST"
+  ],
+  "/v1/admin/flags/{flag_id}": [
+    "DELETE",
+    "PATCH"
+  ],
   "/v1/admin/jobs": [
     "GET",
     "POST"
@@ -38,8 +46,12 @@
   "/v1/admin/users": [
     "GET"
   ],
+  "/v1/admin/users/test": [
+    "POST"
+  ],
   "/v1/admin/users/{user_id}": [
-    "DELETE"
+    "DELETE",
+    "GET"
   ],
   "/v1/admin/users/{user_id}/ban": [
     "POST"
@@ -164,6 +176,9 @@
   ],
   "/v1/collections/{collection_id}/items/{graded_card_id}": [
     "DELETE"
+  ],
+  "/v1/flags": [
+    "GET"
   ],
   "/v1/grades": [
     "GET",

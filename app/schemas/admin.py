@@ -28,6 +28,19 @@ class AdminUserRead(BaseModel):
     deleted: bool = False
 
 
+class AdminUserDetail(AdminUserRead):
+    """Full per-user record for the detail drawer — identity + activity."""
+
+    updated_at: datetime | None = None
+    # How the account authenticates: "password" | "apple" | "google" | "unknown".
+    auth_method: str = "unknown"
+    # Activity aggregates.
+    grades_count: int = 0
+    watchlist_count: int = 0
+    scans_count: int = 0
+    estimated_value_usd: float = 0.0
+
+
 class AdminUserPage(BaseModel):
     """A page of users (server-side search + pagination)."""
 
@@ -35,6 +48,14 @@ class AdminUserPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class TestAccountCreated(BaseModel):
+    """A freshly-minted sandbox account — the password is shown only once."""
+
+    id: uuid.UUID
+    email: EmailStr
+    password: str
 
 
 class AdminRoleUpdate(BaseModel):
@@ -68,7 +89,9 @@ class AdminMetrics(BaseModel):
 __all__ = [
     "AdminMetrics",
     "AdminRoleUpdate",
+    "AdminUserDetail",
     "AdminUserPage",
     "AdminUserRead",
     "BanRequest",
+    "TestAccountCreated",
 ]
