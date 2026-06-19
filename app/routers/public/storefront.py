@@ -69,7 +69,9 @@ async def public_search(
     renders directly — no client-side filtering/sorting/pagination.
     """
     if q.strip():
-        body = await card_search_service.search_cards(q=q, tcg=tcg, limit=50)
+        # limit=20 matches the warm upstream cache key used by /v1/cards/search;
+        # larger limits are a separate (often cold) cache entry.
+        body = await card_search_service.search_cards(q=q, tcg=tcg, limit=20)
         cards = list(body.get("results") or [])
         source = body.get("source")
     else:
