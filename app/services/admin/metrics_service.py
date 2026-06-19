@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.blog import BlogPost
 from app.models.career import JobApplication, JobPosting
-from app.models.enums import BlogStatusEnum, JobStatusEnum
+from app.models.enums import BlogStatusEnum, JobStatusEnum, WaitlistStatusEnum
 from app.models.user import User
+from app.models.waitlist import WaitlistEntry
 from app.schemas.admin import AdminMetrics
 
 
@@ -55,6 +56,15 @@ async def summary(db: AsyncSession) -> AdminMetrics:
             select(func.count())
             .select_from(BlogPost)
             .where(BlogPost.status == BlogStatusEnum.published.value),
+        ),
+        waitlist_total=await _count(
+            db, select(func.count()).select_from(WaitlistEntry)
+        ),
+        waitlist_waiting=await _count(
+            db,
+            select(func.count())
+            .select_from(WaitlistEntry)
+            .where(WaitlistEntry.status == WaitlistStatusEnum.waiting.value),
         ),
     )
 

@@ -6,14 +6,18 @@ endpoint.
 
 Strategy per provider:
 
-* **Pokémon TCG** — `name:charizard*` (a reliable, popular query that
-  always returns rich images + pricing). Cheaper than `rarity:"Rare
-  Holo*"` which needs escaping and is slower upstream.
+* **Pokémon TCG** — modern chase subtypes (ex / VMAX / VSTAR) ordered by
+  `-set.releaseDate` so the *newest* sets' chase cards lead the rail
+  (Surging Sparks, Prismatic Evolutions, …). This keeps the feed current
+  and varied instead of returning the same default-ordered handful.
 * **Scryfall** — `is:booster game:paper` with `order=edhrec` → the
   EDHREC popularity ordering surfaces genuinely-trending Commander
   staples.
 * **YGOPRODeck** — `/cardinfo.php?num={N}&offset=0&sort=new` (newest
   releases). This is the closest thing the API exposes to "trending".
+
+Art-less cards are dropped from every provider so the rail never shows a
+bare placeholder row.
 
 All three responses run in parallel via :func:`asyncio.gather`; any
 single provider failure is logged and silently dropped. If everything
@@ -55,11 +59,11 @@ DEFAULT_LIMIT = 24
 # Hard cap per upstream provider when building the trending feed. The
 # default `http_timeout_seconds` (15s) can occasionally hang under load,
 # and the public `/cards/trending` endpoint must stay snappy because the
-# home screen blocks on it. 2s is enough for healthy responses; the
-# Redis cache TTL (15 min) covers transient blips. Tightened from 3s
-# while pokemontcg.io is flaking — a failing provider shouldn't add a
-# full second of latency to every home-screen load.
-_PROVIDER_TIMEOUT_S = 2.0
+# home screen blocks on it. The Redis cache TTL (15 min) plus the client
+# query persistence mean this cold-fetch cost is paid rarely, so we give
+# providers 3s — enough for the (slightly heavier) ordered Pokémon query
+# to land instead of timing out and collapsing the feed to two TCGs.
+_PROVIDER_TIMEOUT_S = 3.0
 
 # Per-provider trending queries. Chosen for: (a) high variety so the
 # rail doesn't look like one card type, (b) low upstream cost, (c)
@@ -90,14 +94,28 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _has_art(card: dict[str, Any]) -> bool:
+    """A card we can actually show — has artwork (no bare/placeholder rows)."""
+    return bool(card.get("images") or card.get("image_url"))
+
+
 async def _trending_pokemon(limit: int) -> list[dict[str, Any]]:
     # `pokemon_tcg.search_cards` is already wrapped in the
     # ``"pokemontcg"`` circuit breaker at the integration layer
     # (see app/integrations/_http/pokemon_tcg.py).
+    #
+    # `orderBy=-set.releaseDate` surfaces chase cards from the NEWEST sets
+    # first (Surging Sparks, Prismatic Evolutions, …) instead of the same
+    # default-ordered handful — so the rail feels current and varied. We
+    # over-fetch and drop art-less cards so the feed is never "bare".
     raw = await pokemon_tcg.search_cards(
-        POKEMON_TRENDING_QUERY, page=1, page_size=limit
+        POKEMON_TRENDING_QUERY,
+        page=1,
+        page_size=min(MAX_LIMIT, limit * 3),
+        order_by="-set.releaseDate",
     )
-    return [_from_pokemon(c) for c in (raw.get("data") or [])][:limit]
+    mapped = [_from_pokemon(c) for c in (raw.get("data") or [])]
+    return [c for c in mapped if _has_art(c)][:limit]
 
 
 async def _trending_magic(limit: int) -> list[dict[str, Any]]:
@@ -122,7 +140,8 @@ async def _trending_magic(limit: int) -> list[dict[str, Any]]:
     )
     if body is None:
         return []
-    return [_from_scryfall(c) for c in (body.get("data") or [])][:limit]
+    mapped = [_from_scryfall(c) for c in (body.get("data") or [])]
+    return [c for c in mapped if _has_art(c)][:limit]
 
 
 async def _trending_yugioh(limit: int) -> list[dict[str, Any]]:

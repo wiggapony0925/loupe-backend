@@ -65,6 +65,15 @@
   "/v1/admin/users/{user_id}/unban": [
     "POST"
   ],
+  "/v1/admin/waitlist": [
+    "GET"
+  ],
+  "/v1/admin/waitlist/{entry_id}": [
+    "DELETE"
+  ],
+  "/v1/admin/waitlist/{entry_id}/status": [
+    "PATCH"
+  ],
   "/v1/alerts": [
     "GET",
     "POST"
@@ -296,6 +305,12 @@
     "GET"
   ],
   "/v1/sets/progress": [
+    "GET"
+  ],
+  "/v1/waitlist": [
+    "POST"
+  ],
+  "/v1/waitlist/stats": [
     "GET"
   ],
   "/v1/watchlist": [

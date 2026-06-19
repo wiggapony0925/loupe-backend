@@ -166,6 +166,20 @@ class BlogStatusEnum(str, enum.Enum):
     published = "published"
 
 
+class WaitlistStatusEnum(str, enum.Enum):
+    """Pipeline stage of a Loupe Scanner waitlist signup.
+
+    ``waiting`` is a fresh signup; ``invited`` means we've reached out with a
+    purchase link; ``purchased`` is a converted buyer (set once Stripe / the
+    fulfilment provider confirms an order); ``removed`` is an opt-out.
+    """
+
+    waiting = "waiting"
+    invited = "invited"
+    purchased = "purchased"
+    removed = "removed"
+
+
 __all__ = [
     "ApplicationStatusEnum",
     "BlogStatusEnum",
@@ -182,4 +196,5 @@ __all__ = [
     "ScannerTransportEnum",
     "SealedProductTypeEnum",
     "TcgEnum",
+    "WaitlistStatusEnum",
 ]

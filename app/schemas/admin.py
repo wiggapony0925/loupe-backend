@@ -84,6 +84,8 @@ class AdminMetrics(BaseModel):
     applications_new_7d: int
     posts_total: int
     posts_published: int
+    waitlist_total: int
+    waitlist_waiting: int
 
 
 __all__ = [

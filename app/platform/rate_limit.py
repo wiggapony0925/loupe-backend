@@ -129,6 +129,10 @@ image_proxy_limit = rate_limit(limit=1500, window_seconds=60, name="cards.image"
 # cap additionally frustrates id/email enumeration.
 application_submit_limit = rate_limit(limit=8, window_seconds=300, name="careers.apply")
 application_track_limit = rate_limit(limit=30, window_seconds=60, name="careers.track")
+# Public waitlist join (the scanner "checkout" CTA). A deliberate, rare
+# action — a tight cap stops signup spam while leaving room for a visitor
+# who fat-fingers the form a couple of times.
+waitlist_join_limit = rate_limit(limit=10, window_seconds=300, name="waitlist.join")
 
 
 __all__ = [
@@ -140,4 +144,5 @@ __all__ = [
     "resolve_limit",
     "scan_create_limit",
     "search_live_limit",
+    "waitlist_join_limit",
 ]

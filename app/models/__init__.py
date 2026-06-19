@@ -23,6 +23,7 @@ from app.models.enums import (
     ScanStatusEnum,
     SealedProductTypeEnum,
     TcgEnum,
+    WaitlistStatusEnum,
 )
 from app.models.feature_flag import FeatureFlag
 from app.models.fingerprint import Fingerprint
@@ -35,6 +36,7 @@ from app.models.scanner import Scanner
 from app.models.sealed import SealedHolding, SealedProduct
 from app.models.user import User, UserSettings
 from app.models.user_report import UserReport
+from app.models.waitlist import WaitlistEntry
 from app.models.watchlist import WatchlistItem
 
 __all__ = [
@@ -78,5 +80,7 @@ __all__ = [
     "User",
     "UserReport",
     "UserSettings",
+    "WaitlistEntry",
+    "WaitlistStatusEnum",
     "WatchlistItem",
 ]

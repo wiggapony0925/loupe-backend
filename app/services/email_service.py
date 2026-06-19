@@ -120,6 +120,27 @@ async def send_ban_notice(user: User, reason: str | None) -> bool:
     )
 
 
+async def send_waitlist_confirmation(
+    email: str, *, name: str | None, position: int
+) -> bool:
+    """Confirm a Loupe Scanner waitlist signup and share their place in line."""
+    greeting = f"Hi {name}," if name else "Hi there,"
+    body = (
+        "<p>You're on the list for the <strong>Loupe Scanner</strong> — the "
+        "fastest way to turn a shoebox of cards into a live, grade-aware "
+        "portfolio.</p>"
+        f"<p>You're <strong>#{position}</strong> in line. We'll email you a "
+        "private purchase link the moment your spot opens up.</p>"
+        "<p>In the meantime, you can keep tracking your collection on web and "
+        "mobile.</p>"
+    )
+    return await send_email(
+        email,
+        "You're on the Loupe Scanner waitlist",
+        _wrap(greeting, body, ("Open Loupe", _app_url())),
+    )
+
+
 async def send_blog_announcement(
     emails: list[str], *, title: str, excerpt: str, slug: str
 ) -> int:
@@ -143,5 +164,6 @@ __all__ = [
     "send_ban_notice",
     "send_blog_announcement",
     "send_email",
+    "send_waitlist_confirmation",
     "send_welcome",
 ]

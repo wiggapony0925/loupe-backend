@@ -30,6 +30,7 @@ from app.routers.ops import health as system
 from app.routers.ops import websockets as ws
 from app.routers.portal import blog as portal_blog
 from app.routers.portal import careers as portal_careers
+from app.routers.portal import waitlist as portal_waitlist
 from app.routers.public import storefront as public
 
 
@@ -116,9 +117,10 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router, prefix=api_prefix)
     app.include_router(sealed.catalog_router, prefix=api_prefix)
     app.include_router(sealed.holdings_router, prefix=api_prefix)
-    # Developer portal — public careers/blog + admin management.
+    # Developer portal — public careers/blog/waitlist + admin management.
     app.include_router(portal_careers.router, prefix=api_prefix)
     app.include_router(portal_blog.router, prefix=api_prefix)
+    app.include_router(portal_waitlist.router, prefix=api_prefix)
     app.include_router(flags.router, prefix=api_prefix)
     app.include_router(admin_router, prefix=api_prefix)
 
