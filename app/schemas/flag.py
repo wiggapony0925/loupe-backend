@@ -47,4 +47,21 @@ class FeatureFlagUpdate(BaseModel):
     enabled: bool | None = None
 
 
-__all__ = ["FeatureFlagCreate", "FeatureFlagRead", "FeatureFlagUpdate"]
+class FeatureFlagUpsert(BaseModel):
+    """Set a flag's enabled state by key, creating it if missing.
+
+    Backs the in-app inspect overlay, which toggles a component's flag
+    without knowing its id. `label` is used only when the flag is created.
+    """
+
+    enabled: bool
+    label: str | None = Field(None, min_length=1, max_length=120)
+    description: str | None = Field(None, max_length=2000)
+
+
+__all__ = [
+    "FeatureFlagCreate",
+    "FeatureFlagRead",
+    "FeatureFlagUpdate",
+    "FeatureFlagUpsert",
+]

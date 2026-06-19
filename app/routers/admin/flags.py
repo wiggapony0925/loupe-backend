@@ -10,11 +10,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_admin
 from app.db import get_db
 from app.models.user import User
-from app.schemas.flag import FeatureFlagCreate, FeatureFlagRead, FeatureFlagUpdate
+from app.schemas.flag import (
+    FeatureFlagCreate,
+    FeatureFlagRead,
+    FeatureFlagUpdate,
+    FeatureFlagUpsert,
+)
 from app.services import audit_service
 from app.services.admin import flag_service
 
 router = APIRouter(prefix="/flags", tags=["admin-flags"])
+
+
+@router.put(
+    "/key/{key}",
+    response_model=FeatureFlagRead,
+    summary="Set a flag's enabled state by key (create if missing)",
+)
+async def upsert_flag(
+    key: str,
+    payload: FeatureFlagUpsert,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_admin),
+) -> FeatureFlagRead:
+    row = await flag_service.upsert_by_key(db, key, payload)
+    await audit_service.record(
+        db,
+        request=request,
+        user=user,
+        action="flag.upsert",
+        target_table="feature_flags",
+        target_id=row.id,
+        payload={"key": row.key, "enabled": row.enabled},
+    )
+    return FeatureFlagRead.model_validate(row)
 
 
 @router.get("", response_model=list[FeatureFlagRead], summary="List all feature flags")

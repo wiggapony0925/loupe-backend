@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from fastapi import HTTPException, status
@@ -10,7 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.feature_flag import FeatureFlag
-from app.schemas.flag import FeatureFlagCreate, FeatureFlagUpdate
+from app.schemas.flag import FeatureFlagCreate, FeatureFlagUpdate, FeatureFlagUpsert
+
+_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,79}$")
 
 
 async def public_map(db: AsyncSession) -> dict[str, bool]:
@@ -76,4 +79,39 @@ async def delete(db: AsyncSession, flag_id: uuid.UUID) -> None:
     await db.commit()
 
 
-__all__ = ["create", "delete", "list_all", "public_map", "update"]
+async def upsert_by_key(
+    db: AsyncSession, key: str, payload: FeatureFlagUpsert
+) -> FeatureFlag:
+    """Set a flag's enabled state by key, creating it if it doesn't exist.
+
+    Powers the in-app inspect overlay (toggle a component's flag without an id).
+    """
+    key = key.strip().lower()
+    if not _KEY_RE.match(key):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="key must be lowercase letters, digits, and underscores (start with a letter)",
+        )
+    row = (
+        await db.execute(select(FeatureFlag).where(FeatureFlag.key == key))
+    ).scalar_one_or_none()
+    if row is None:
+        row = FeatureFlag(
+            key=key,
+            label=payload.label or key,
+            description=payload.description,
+            enabled=payload.enabled,
+        )
+        db.add(row)
+    else:
+        row.enabled = payload.enabled
+        if payload.label:
+            row.label = payload.label
+        if payload.description is not None:
+            row.description = payload.description
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+__all__ = ["create", "delete", "list_all", "public_map", "update", "upsert_by_key"]
