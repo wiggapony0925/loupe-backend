@@ -41,7 +41,9 @@ def _market_amount(card: dict[str, Any]) -> float | None:
 
 def _apply_sort(cards: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
     if sort == "price_asc":
-        return sorted(cards, key=lambda c: (_market_amount(c) is None, _market_amount(c) or 0.0))
+        return sorted(
+            cards, key=lambda c: (_market_amount(c) is None, _market_amount(c) or 0.0)
+        )
     if sort == "price_desc":
         return sorted(cards, key=lambda c: _market_amount(c) or 0.0, reverse=True)
     if sort == "name":
@@ -56,7 +58,9 @@ def _apply_sort(cards: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
 )
 async def public_search(
     q: str = Query("", max_length=120),
-    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$"),
+    tcg: str = Query(
+        "all", pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$"
+    ),
     rarity: str | None = Query(None, max_length=80),
     set_name: str | None = Query(None, alias="set", max_length=120),
     sort: str = Query("best", pattern="^(best|price_asc|price_desc|name)$"),
@@ -112,7 +116,9 @@ async def public_search(
     dependencies=[Depends(catalog_read_limit)],
 )
 async def public_browse(
-    game: str = Query("pokemon", pattern="^(pokemon|magic|yugioh|lorcana|onepiece|digimon|all)$"),
+    game: str = Query(
+        "pokemon", pattern="^(pokemon|magic|yugioh|lorcana|onepiece|digimon|all)$"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=50),
     sort: str = Query("name", pattern="^(name|newest|price_asc|price_desc)$"),

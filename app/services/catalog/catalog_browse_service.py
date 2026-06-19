@@ -32,7 +32,9 @@ from app.services.catalog.card_search_service import (
 logger = logging.getLogger(__name__)
 
 _CACHE_PREFIX = "loupe:public:browse"
-_BROWSE_TTL = 900  # 15 min — catalog pages change rarely; serve hot + survive upstream blips.
+_BROWSE_TTL = (
+    900  # 15 min — catalog pages change rarely; serve hot + survive upstream blips.
+)
 
 _SCRYFALL_PAGE = 175  # Scryfall fixes its page size.
 _MAGIC_ALL = "game:paper"  # every paper Magic printing
@@ -54,10 +56,18 @@ _YGO_SORT = {"name": "name", "newest": "new", "price_asc": "name", "price_desc":
 
 
 def _empty(game: str, page: int, page_size: int) -> dict[str, Any]:
-    return {"cards": [], "total": 0, "page": page, "page_size": page_size, "source": game}
+    return {
+        "cards": [],
+        "total": 0,
+        "page": page,
+        "page_size": page_size,
+        "source": game,
+    }
 
 
-async def browse_catalog(game: str, page: int, page_size: int, sort: str = "name") -> dict[str, Any]:
+async def browse_catalog(
+    game: str, page: int, page_size: int, sort: str = "name"
+) -> dict[str, Any]:
     """One page of a game's catalog — cached, sorted server-side, never raises.
 
     Serves from Redis when warm; on a cold miss fetches upstream. If the upstream
@@ -74,8 +84,14 @@ async def browse_catalog(game: str, page: int, page_size: int, sort: str = "name
 
     try:
         result = await _fetch_catalog(game, page, page_size, sort)
-    except Exception as exc:  # noqa: BLE001 — upstream slow/down/circuit-open
-        logger.warning("browse_catalog upstream failed game=%s page=%s sort=%s: %s", game, page, sort, exc)
+    except Exception as exc:
+        logger.warning(
+            "browse_catalog upstream failed game=%s page=%s sort=%s: %s",
+            game,
+            page,
+            sort,
+            exc,
+        )
         return _empty(game, page, page_size)
 
     if result.get("cards"):
@@ -83,7 +99,9 @@ async def browse_catalog(game: str, page: int, page_size: int, sort: str = "name
     return result
 
 
-async def _fetch_catalog(game: str, page: int, page_size: int, sort: str) -> dict[str, Any]:
+async def _fetch_catalog(
+    game: str, page: int, page_size: int, sort: str
+) -> dict[str, Any]:
     """Fetch one catalog page from the right upstream. May raise on upstream failure."""
     s = get_settings()
 
@@ -94,7 +112,13 @@ async def _fetch_catalog(game: str, page: int, page_size: int, sort: str) -> dic
         )
         cards = [_from_pokemon(c) for c in (raw.get("data") or [])]
         total = int(raw.get("totalCount") or len(cards))
-        return {"cards": cards, "total": total, "page": page, "page_size": page_size, "source": "pokemontcg"}
+        return {
+            "cards": cards,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "source": "pokemontcg",
+        }
 
     if game == "magic":
         offset = (page - 1) * page_size
@@ -105,7 +129,13 @@ async def _fetch_catalog(game: str, page: int, page_size: int, sort: str) -> dic
             integration="scryfall",
             method="GET",
             url="https://api.scryfall.com/cards/search",
-            params={"q": _MAGIC_ALL, "order": order, "dir": direction, "unique": "prints", "page": sf_page},
+            params={
+                "q": _MAGIC_ALL,
+                "order": order,
+                "dir": direction,
+                "unique": "prints",
+                "page": sf_page,
+            },
             headers={"Accept": "application/json"},
             timeout_s=s.http_timeout_seconds,
             not_found_ok=True,
@@ -115,7 +145,13 @@ async def _fetch_catalog(game: str, page: int, page_size: int, sort: str) -> dic
         data = body.get("data") or []
         cards = [_from_scryfall(c) for c in data[within : within + page_size]]
         total = int(body.get("total_cards") or len(cards))
-        return {"cards": cards, "total": total, "page": page, "page_size": page_size, "source": "scryfall"}
+        return {
+            "cards": cards,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "source": "scryfall",
+        }
 
     if game == "yugioh":
         offset = (page - 1) * page_size
@@ -134,7 +170,13 @@ async def _fetch_catalog(game: str, page: int, page_size: int, sort: str) -> dic
         cards = [_from_yugioh(c) for c in (body.get("data") or [])]
         meta = body.get("meta") or {}
         total = int(meta.get("total_rows") or 0) or (offset + len(cards))
-        return {"cards": cards, "total": total, "page": page, "page_size": page_size, "source": "ygoprodeck"}
+        return {
+            "cards": cards,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "source": "ygoprodeck",
+        }
 
     # Unsupported game (lorcana / onepiece / digimon) — graceful empty.
     return _empty(game, page, page_size)

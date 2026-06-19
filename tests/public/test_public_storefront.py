@@ -10,7 +10,9 @@ from app.services.catalog import card_search_service
 from app.services.market import trending_service
 
 
-def _card(id_: str, name: str, rarity: str, set_name: str, price: float) -> dict[str, Any]:
+def _card(
+    id_: str, name: str, rarity: str, set_name: str, price: float
+) -> dict[str, Any]:
     return {
         "id": id_,
         "name": name,
@@ -36,7 +38,13 @@ async def test_public_search_filters_sorts_paginates_and_facets(client, monkeypa
 
     resp = await client.get(
         "/v1/public/search",
-        params={"q": "x", "rarity": "Rare", "sort": "price_desc", "page": 1, "page_size": 1},
+        params={
+            "q": "x",
+            "rarity": "Rare",
+            "sort": "price_desc",
+            "page": 1,
+            "page_size": 1,
+        },
     )
     assert resp.status_code == 200
     data = resp.json()["data"]
@@ -60,7 +68,8 @@ async def test_public_search_page_two(client, monkeypatch):
     monkeypatch.setattr(card_search_service, "search_cards", fake_search)
 
     resp = await client.get(
-        "/v1/public/search", params={"q": "x", "sort": "name", "page": 2, "page_size": 2}
+        "/v1/public/search",
+        params={"q": "x", "sort": "name", "page": 2, "page_size": 2},
     )
     data = resp.json()["data"]
     assert data["total"] == 5
@@ -73,12 +82,16 @@ async def test_public_browse_pokemon_paginates(client, monkeypatch):
 
     captured: dict = {}
 
-    async def fake_search(query: str, page: int = 1, page_size: int = 25, *, order_by=None, timeout_s=None):
+    async def fake_search(
+        query: str, page: int = 1, page_size: int = 25, *, order_by=None, timeout_s=None
+    ):
         captured["order_by"] = order_by
         return {"data": [{"id": "p1"}, {"id": "p2"}], "totalCount": 18342}
 
     monkeypatch.setattr(svc.pokemon_tcg, "search_cards", fake_search)
-    monkeypatch.setattr(svc, "_from_pokemon", lambda c: {"id": c["id"], "name": c["id"]})
+    monkeypatch.setattr(
+        svc, "_from_pokemon", lambda c: {"id": c["id"], "name": c["id"]}
+    )
 
     resp = await client.get(
         "/v1/public/browse",
@@ -115,7 +128,9 @@ async def test_public_trending_value_sort_and_price_ceiling(client, monkeypatch)
 
     monkeypatch.setattr(trending_service, "get_trending", fake_trending)
 
-    by_value = await client.get("/v1/public/trending", params={"sort": "value", "limit": 2})
+    by_value = await client.get(
+        "/v1/public/trending", params={"sort": "value", "limit": 2}
+    )
     assert [c["id"] for c in by_value.json()["data"]["cards"]] == ["b", "a"]
 
     cheap = await client.get("/v1/public/trending", params={"max_price": 5})

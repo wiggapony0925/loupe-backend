@@ -35,7 +35,9 @@ async def test_market_price_parsed(monkeypatch):
     assert p.is_configured() is True
 
     with respx.mock(assert_all_called=False) as router:
-        router.get(url__startswith="https://www.pokemonpricetracker.com/api/v2/cards").mock(
+        router.get(
+            url__startswith="https://www.pokemonpricetracker.com/api/v2/cards"
+        ).mock(
             return_value=httpx.Response(
                 200,
                 json={
@@ -64,7 +66,9 @@ async def test_graded_comps_parsed(monkeypatch):
     p = PokemonPriceTrackerProvider()
 
     with respx.mock(assert_all_called=False) as router:
-        router.get(url__startswith="https://www.pokemonpricetracker.com/api/v2/cards").mock(
+        router.get(
+            url__startswith="https://www.pokemonpricetracker.com/api/v2/cards"
+        ).mock(
             return_value=httpx.Response(
                 200,
                 json={

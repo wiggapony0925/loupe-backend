@@ -66,10 +66,7 @@ class ApifyProvider(BaseProvider):
             return []
 
         actor = settings.apify_fb_marketplace_actor
-        url = (
-            f"{_API_BASE}/acts/{actor}/run-sync-get-dataset-items"
-            f"?token={token}"
-        )
+        url = f"{_API_BASE}/acts/{actor}/run-sync-get-dataset-items?token={token}"
         payload = {
             "query": query,
             "latitude": lat,

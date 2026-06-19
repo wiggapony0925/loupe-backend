@@ -118,8 +118,12 @@ class StockXProvider(BaseProvider):
                 self._access_token = body.get("access_token")
                 # StockX returns expires_in=43200 (12 h); cache with buffer.
                 expires_in = int(body.get("expires_in", 43_200))
-                self._token_expires_at = time.time() + max(60, expires_in - _TOKEN_TTL_BUFFER_S)
-                logger.info("stockx access_token refreshed (expires in %ds)", expires_in)
+                self._token_expires_at = time.time() + max(
+                    60, expires_in - _TOKEN_TTL_BUFFER_S
+                )
+                logger.info(
+                    "stockx access_token refreshed (expires in %ds)", expires_in
+                )
                 return self._access_token
 
             except Exception as exc:
@@ -237,6 +241,7 @@ class StockXProvider(BaseProvider):
 
 
 # ── parsers ────────────────────────────────────────────────────────────────
+
 
 def _parse_product_listing(product: dict[str, Any]) -> Listing | None:
     """Map a StockX product search result to a ``Listing``."""
