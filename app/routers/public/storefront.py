@@ -18,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 
 from app.platform.rate_limit import catalog_read_limit, search_live_limit
-from app.services.catalog import card_search_service
+from app.services.catalog import card_search_service, catalog_browse_service
 from app.services.market import trending_service
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -104,6 +104,21 @@ async def public_search(
         "facets": {"rarities": rarities, "sets": sets},
         "source": source,
     }
+
+
+@router.get(
+    "/browse",
+    summary="Browse a whole game catalog (paginated thousands of cards)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def public_browse(
+    game: str = Query("pokemon", pattern="^(pokemon|magic|yugioh|lorcana|onepiece|digimon|all)$"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(24, ge=1, le=50),
+) -> dict[str, Any]:
+    """Page through an entire game's upstream catalog (real ``total`` for paging).
+    Unsupported games return an empty page rather than an error."""
+    return await catalog_browse_service.browse_catalog(game, page, page_size)
 
 
 @router.get(

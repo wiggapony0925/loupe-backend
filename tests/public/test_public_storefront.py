@@ -68,6 +68,33 @@ async def test_public_search_page_two(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_public_browse_pokemon_paginates(client, monkeypatch):
+    from app.services.catalog import catalog_browse_service as svc
+
+    async def fake_search(query: str, page: int = 1, page_size: int = 25):
+        return {"data": [{"id": "p1"}, {"id": "p2"}], "totalCount": 18342}
+
+    monkeypatch.setattr(svc.pokemon_tcg, "search_cards", fake_search)
+    monkeypatch.setattr(svc, "_from_pokemon", lambda c: {"id": c["id"], "name": c["id"]})
+
+    resp = await client.get("/v1/public/browse", params={"game": "pokemon", "page": 3, "page_size": 24})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["total"] == 18342  # real catalog size drives the pager
+    assert data["page"] == 3
+    assert [c["id"] for c in data["cards"]] == ["p1", "p2"]
+
+
+@pytest.mark.asyncio
+async def test_public_browse_unsupported_game_is_empty(client):
+    resp = await client.get("/v1/public/browse", params={"game": "lorcana"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["total"] == 0
+    assert data["cards"] == []
+
+
+@pytest.mark.asyncio
 async def test_public_trending_value_sort_and_price_ceiling(client, monkeypatch):
     cards = [
         _card("a", "A", "Rare", "S", 3.0),
