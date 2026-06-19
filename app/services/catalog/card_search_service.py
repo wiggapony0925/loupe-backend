@@ -710,9 +710,14 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
             )
             done_count = sum(1 for t in tasks.values() if t.done())
 
-            # Phase 2: if we don't have enough yet, wait the rest of the
-            # per-provider budget for the stragglers.
-            if done_count < 2:
+            # Phase 2: wait the rest of the per-provider budget for stragglers
+            # if we don't yet have 2 providers — OR if Pokémon hasn't returned.
+            # Pokémon is the largest catalog and the most-searched TCG, so we
+            # never let fast-settle silently drop it (that's the bug where
+            # "pikachu" returned nothing because Magic + Yu-Gi-Oh settled first
+            # and the Pokémon task got cancelled).
+            anchor_pending = not tasks["pokemontcg"].done()
+            if done_count < 2 or anchor_pending:
                 remaining = [t for t in tasks.values() if not t.done()]
                 if remaining:
                     await asyncio.wait(
