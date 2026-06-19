@@ -14,6 +14,7 @@ from app.http.middleware import register_http_middleware
 from app.http.response_envelope import register_envelope_middleware
 from app.lifecycle import lifespan
 from app.platform.observability import init_otel, init_sentry
+from app.routers.admin import admin_router
 from app.routers.analytics import home_feed as home
 from app.routers.analytics import portfolio_overview as analytics
 from app.routers.analytics import reports
@@ -26,7 +27,6 @@ from app.routers.market import alerts, market, prices
 from app.routers.ops import app_config
 from app.routers.ops import health as system
 from app.routers.ops import websockets as ws
-from app.routers.portal import admin as portal_admin
 from app.routers.portal import blog as portal_blog
 from app.routers.portal import careers as portal_careers
 from app.routers.public import storefront as public
@@ -118,7 +118,7 @@ def create_app() -> FastAPI:
     # Developer portal — public careers/blog + admin management.
     app.include_router(portal_careers.router, prefix=api_prefix)
     app.include_router(portal_blog.router, prefix=api_prefix)
-    app.include_router(portal_admin.router, prefix=api_prefix)
+    app.include_router(admin_router, prefix=api_prefix)
 
     # WebSockets mount at root.
     app.include_router(ws.router)

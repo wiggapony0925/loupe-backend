@@ -5,8 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_user
-from app.config import get_settings as get_app_settings
+from app.auth.dependencies import is_admin_user, require_user
 from app.db import get_db
 from app.models.user import User
 from app.schemas.user import (
@@ -21,10 +20,9 @@ router = APIRouter(prefix="/me", tags=["users"])
 
 
 def _to_user_read(user: User) -> UserRead:
-    """Serialize a user, stamping `is_admin` from the email allowlist."""
+    """Serialize a user, stamping effective `is_admin` (DB grant or allowlist)."""
     out = UserRead.model_validate(user)
-    email = (user.email or "").strip().lower()
-    out.is_admin = bool(email) and email in get_app_settings().admin_email_set
+    out.is_admin = is_admin_user(user)
     return out
 
 

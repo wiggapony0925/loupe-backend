@@ -1,5 +1,8 @@
-"""Developer-portal routers: public careers + blog, and the admin surface."""
+"""Public developer-portal routers: careers + blog.
 
-from app.routers.portal import admin, blog, careers
+(Admin-only routers live in :mod:`app.routers.admin`.)
+"""
 
-__all__ = ["admin", "blog", "careers"]
+from app.routers.portal import blog, careers
+
+__all__ = ["blog", "careers"]

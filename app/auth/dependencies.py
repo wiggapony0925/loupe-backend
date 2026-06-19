@@ -64,6 +64,10 @@ async def _resolve_user(
         if required:
             raise HTTPException(status_code=401, detail="User deactivated")
         return None
+    if user is not None and user.banned_at is not None:
+        if required:
+            raise HTTPException(status_code=403, detail="Account suspended")
+        return None
     if user is not None:
         # Stamp the user-id on the request context so structured logs
         # downstream (and Sentry events) can attribute requests to a user
@@ -90,29 +94,31 @@ async def optional_user(
     return await _resolve_user(creds, db, required=False)
 
 
-async def require_admin(user: User = Depends(require_user)) -> User:
-    """Dependency: a signed-in user whose email is in the admin allowlist.
+def is_super_admin(user: User) -> bool:
+    """Bootstrap super-admin — email is in the ``ADMIN_EMAILS`` env allowlist.
 
-    Authorization model is intentionally minimal — until a proper role
-    table lands on :class:`User`, admin membership is driven by the
-    ``ADMIN_EMAILS`` env var (comma-separated). This keeps internal
-    metrics / dashboards behind a real auth check rather than a
-    TODO-stub, and is easy to ratchet up later without touching call
-    sites.
-
-    Raises:
-        HTTPException(403): when the user's email isn't in the allowlist
-            (or the allowlist is empty, which deliberately denies all).
+    Super-admins can't be demoted, banned, or deleted from the portal, so
+    there's always a way back in even if the DB role flags get muddled.
     """
     allow = get_settings().admin_email_set
     email = (user.email or "").strip().lower()
-    if not email or email not in allow:
-        logger.warning(
-            "admin-gate denied user=%s email=%s allowlist_size=%d",
-            user.id,
-            email or "<unset>",
-            len(allow),
-        )
+    return bool(email) and email in allow
+
+
+def is_admin_user(user: User) -> bool:
+    """Effective admin: the DB-backed grant OR the env bootstrap allowlist."""
+    return bool(getattr(user, "is_admin", False)) or is_super_admin(user)
+
+
+async def require_admin(user: User = Depends(require_user)) -> User:
+    """Dependency: a signed-in **admin** user (DB grant or env allowlist).
+
+    Raises:
+        HTTPException(403): when the user is neither flagged ``is_admin``
+            nor in the ``ADMIN_EMAILS`` allowlist.
+    """
+    if not is_admin_user(user):
+        logger.warning("admin-gate denied user=%s email=%s", user.id, user.email)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required",
@@ -120,4 +126,11 @@ async def require_admin(user: User = Depends(require_user)) -> User:
     return user
 
 
-__all__ = ["bearer_scheme", "optional_user", "require_admin", "require_user"]
+__all__ = [
+    "bearer_scheme",
+    "is_admin_user",
+    "is_super_admin",
+    "optional_user",
+    "require_admin",
+    "require_user",
+]

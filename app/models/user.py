@@ -33,6 +33,16 @@ class User(Base):
     )
     # argon2id hash; NULL for SSO-only accounts that never set a password.
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # DB-backed admin grant. Effective admin = `is_admin OR email in
+    # ADMIN_EMAILS` (the env allowlist is the bootstrap super-admin; this flag
+    # is what the developer portal toggles per user).
+    is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # Set when an admin bans the account. Banned users are rejected at auth
+    # (like soft-deleted users) but the row + reason are retained.
+    banned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ban_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
