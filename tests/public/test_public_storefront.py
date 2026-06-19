@@ -71,18 +71,26 @@ async def test_public_search_page_two(client, monkeypatch):
 async def test_public_browse_pokemon_paginates(client, monkeypatch):
     from app.services.catalog import catalog_browse_service as svc
 
-    async def fake_search(query: str, page: int = 1, page_size: int = 25):
+    captured: dict = {}
+
+    async def fake_search(query: str, page: int = 1, page_size: int = 25, *, order_by=None, timeout_s=None):
+        captured["order_by"] = order_by
         return {"data": [{"id": "p1"}, {"id": "p2"}], "totalCount": 18342}
 
     monkeypatch.setattr(svc.pokemon_tcg, "search_cards", fake_search)
     monkeypatch.setattr(svc, "_from_pokemon", lambda c: {"id": c["id"], "name": c["id"]})
 
-    resp = await client.get("/v1/public/browse", params={"game": "pokemon", "page": 3, "page_size": 24})
+    resp = await client.get(
+        "/v1/public/browse",
+        params={"game": "pokemon", "page": 3, "page_size": 24, "sort": "price_desc"},
+    )
     assert resp.status_code == 200
     data = resp.json()["data"]
     assert data["total"] == 18342  # real catalog size drives the pager
     assert data["page"] == 3
     assert [c["id"] for c in data["cards"]] == ["p1", "p2"]
+    # sort maps to the upstream's native ordering
+    assert captured["order_by"] == "-cardmarket.prices.averageSellPrice"
 
 
 @pytest.mark.asyncio

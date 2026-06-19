@@ -34,20 +34,25 @@ async def search_cards(
     page: int = 1,
     page_size: int = 25,
     *,
+    order_by: str | None = None,
     timeout_s: float | None = None,
 ) -> dict[str, Any]:
     """Search cards by name/number (Pokémon TCG ``q`` syntax).
 
-    ``timeout_s`` overrides the default request budget — callers inside a
-    tight fan-out (e.g. card-detail market price) pass a small value so a
-    slow upstream can't blow the aggregation deadline.
+    ``order_by`` maps to the upstream ``orderBy`` param (e.g. ``name``,
+    ``-set.releaseDate``). ``timeout_s`` overrides the default request budget —
+    callers inside a tight fan-out (e.g. card-detail market price) pass a small
+    value so a slow upstream can't blow the aggregation deadline.
     """
     s = get_settings()
+    params: dict[str, Any] = {"q": query, "page": page, "pageSize": page_size}
+    if order_by:
+        params["orderBy"] = order_by
     body = await request_json(
         integration=INTEGRATION,
         method="GET",
         url=f"{BASE_URL}/cards",
-        params={"q": query, "page": page, "pageSize": page_size},
+        params=params,
         headers=_headers(),
         timeout_s=timeout_s if timeout_s is not None else s.http_timeout_seconds,
     )

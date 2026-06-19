@@ -29,19 +29,37 @@ from app.services.catalog.card_search_service import (
 _SCRYFALL_PAGE = 175  # Scryfall fixes its page size.
 _MAGIC_ALL = "game:paper"  # every paper Magic printing
 
+# Unified sort → per-upstream native ordering.
+_POKEMON_ORDER = {
+    "name": "name",
+    "newest": "-set.releaseDate",
+    "price_asc": "cardmarket.prices.averageSellPrice",
+    "price_desc": "-cardmarket.prices.averageSellPrice",
+}
+_SCRYFALL_ORDER = {
+    "name": ("name", "asc"),
+    "newest": ("released", "desc"),
+    "price_asc": ("usd", "asc"),
+    "price_desc": ("usd", "desc"),
+}
+_YGO_SORT = {"name": "name", "newest": "new", "price_asc": "name", "price_desc": "name"}
+
 
 def _empty(game: str, page: int, page_size: int) -> dict[str, Any]:
     return {"cards": [], "total": 0, "page": page, "page_size": page_size, "source": game}
 
 
-async def browse_catalog(game: str, page: int, page_size: int) -> dict[str, Any]:
-    """Return one page of a game's catalog. Never raises (graceful empty)."""
+async def browse_catalog(game: str, page: int, page_size: int, sort: str = "name") -> dict[str, Any]:
+    """Return one page of a game's catalog, sorted server-side. Never raises."""
     game = (game or "").lower()
+    sort = sort if sort in _POKEMON_ORDER else "name"
     s = get_settings()
 
     if game in ("pokemon", "all"):
         # Empty query → the Pokémon TCG API returns the full catalog.
-        raw = await pokemon_tcg.search_cards("", page=page, page_size=page_size)
+        raw = await pokemon_tcg.search_cards(
+            "", page=page, page_size=page_size, order_by=_POKEMON_ORDER[sort]
+        )
         cards = [_from_pokemon(c) for c in (raw.get("data") or [])]
         total = int(raw.get("totalCount") or len(cards))
         return {"cards": cards, "total": total, "page": page, "page_size": page_size, "source": "pokemontcg"}
@@ -50,11 +68,12 @@ async def browse_catalog(game: str, page: int, page_size: int) -> dict[str, Any]
         offset = (page - 1) * page_size
         sf_page = offset // _SCRYFALL_PAGE + 1
         within = offset % _SCRYFALL_PAGE
+        order, direction = _SCRYFALL_ORDER[sort]
         body = await request_json(
             integration="scryfall",
             method="GET",
             url="https://api.scryfall.com/cards/search",
-            params={"q": _MAGIC_ALL, "order": "name", "unique": "prints", "page": sf_page},
+            params={"q": _MAGIC_ALL, "order": order, "dir": direction, "unique": "prints", "page": sf_page},
             headers={"Accept": "application/json"},
             timeout_s=s.http_timeout_seconds,
             not_found_ok=True,
@@ -72,7 +91,7 @@ async def browse_catalog(game: str, page: int, page_size: int) -> dict[str, Any]
             integration="ygoprodeck",
             method="GET",
             url="https://db.ygoprodeck.com/api/v7/cardinfo.php",
-            params={"num": page_size, "offset": offset, "sort": "name"},
+            params={"num": page_size, "offset": offset, "sort": _YGO_SORT[sort]},
             headers={"Accept": "application/json"},
             timeout_s=s.http_timeout_seconds,
             not_found_ok=True,
