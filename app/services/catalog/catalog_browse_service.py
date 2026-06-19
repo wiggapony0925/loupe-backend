@@ -15,16 +15,24 @@ three upstreams with different native paging:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.config import get_settings
 from app.integrations._http import pokemon_tcg
 from app.integrations._http._resilient import request_json
 from app.services.catalog.card_search_service import (
+    _cache_get,
+    _cache_set,
     _from_pokemon,
     _from_scryfall,
     _from_yugioh,
 )
+
+logger = logging.getLogger(__name__)
+
+_CACHE_PREFIX = "loupe:public:browse"
+_BROWSE_TTL = 900  # 15 min — catalog pages change rarely; serve hot + survive upstream blips.
 
 _SCRYFALL_PAGE = 175  # Scryfall fixes its page size.
 _MAGIC_ALL = "game:paper"  # every paper Magic printing
@@ -50,9 +58,33 @@ def _empty(game: str, page: int, page_size: int) -> dict[str, Any]:
 
 
 async def browse_catalog(game: str, page: int, page_size: int, sort: str = "name") -> dict[str, Any]:
-    """Return one page of a game's catalog, sorted server-side. Never raises."""
+    """One page of a game's catalog — cached, sorted server-side, never raises.
+
+    Serves from Redis when warm; on a cold miss fetches upstream. If the upstream
+    is slow / down / circuit-open, returns an empty page (never a 500) so the
+    client degrades cleanly instead of hanging or erroring.
+    """
     game = (game or "").lower()
     sort = sort if sort in _POKEMON_ORDER else "name"
+
+    cache_key = f"{_CACHE_PREFIX}:{game}:{sort}:{page}:{page_size}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        result = await _fetch_catalog(game, page, page_size, sort)
+    except Exception as exc:  # noqa: BLE001 — upstream slow/down/circuit-open
+        logger.warning("browse_catalog upstream failed game=%s page=%s sort=%s: %s", game, page, sort, exc)
+        return _empty(game, page, page_size)
+
+    if result.get("cards"):
+        await _cache_set(cache_key, result, _BROWSE_TTL)
+    return result
+
+
+async def _fetch_catalog(game: str, page: int, page_size: int, sort: str) -> dict[str, Any]:
+    """Fetch one catalog page from the right upstream. May raise on upstream failure."""
     s = get_settings()
 
     if game in ("pokemon", "all"):
