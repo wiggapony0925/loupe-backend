@@ -146,6 +146,12 @@
   "/v1/providers/status": [
     "GET"
   ],
+  "/v1/public/search": [
+    "GET"
+  ],
+  "/v1/public/trending": [
+    "GET"
+  ],
   "/v1/reports": [
     "GET",
     "POST"
