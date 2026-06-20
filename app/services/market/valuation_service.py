@@ -53,10 +53,14 @@ def _catalog_signal(card: dict[str, Any]) -> float | None:
 
 
 def _listings_signal(marketplace: dict[str, Any] | None) -> float | None:
+    # Ask-side prices only — PriceCharting is a sold-price guide and is used as
+    # the comps signal instead, so exclude it here to avoid double-counting.
     prices = [
         a
         for row in (marketplace or {}).get("providers", [])
-        if (a := _amount(row.get("price"))) is not None
+        if "pricecharting"
+        not in f"{row.get('source') or ''} {row.get('label') or ''}".lower()
+        and (a := _amount(row.get("price"))) is not None
     ]
     return statistics.median(prices) if prices else None
 
@@ -68,6 +72,15 @@ def _ungraded_comp_signal(grade_summary: dict[str, Any] | None) -> float | None:
             if isinstance(median, (int, float)) and median > 0:
                 return float(median)
             return _amount(row.get("last_sale"))
+    return None
+
+
+def _pricecharting_signal(marketplace: dict[str, Any] | None) -> float | None:
+    """PriceCharting's price is a recent-sales guide — a real "sold" signal."""
+    for row in (marketplace or {}).get("providers", []):
+        src = f"{row.get('source') or ''} {row.get('label') or ''}".lower()
+        if "pricecharting" in src:
+            return _amount(row.get("price"))
     return None
 
 
@@ -90,7 +103,9 @@ async def get_valuation(card_id: str) -> dict[str, Any] | None:
 
     catalog = _catalog_signal(card)
     listings = _listings_signal(marketplace)
-    comps = _ungraded_comp_signal(grade_summary)
+    # PriceCharting tracks realised sale prices, so prefer it as the "sold
+    # comps" signal; fall back to ungraded sold comps when it's unavailable.
+    comps = _pricecharting_signal(marketplace) or _ungraded_comp_signal(grade_summary)
 
     weighted = [
         (comps, _W_COMPS),

@@ -78,6 +78,45 @@ async def test_fair_value_with_only_catalog(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pricecharting_drives_sold_comps_signal(monkeypatch):
+    async def fake_card(card_id: str) -> dict[str, Any]:
+        return {"id": card_id, "pricing_summary": {"market": _money(30.0)}}
+
+    async def fake_marketplace(card_id: str, **_: Any) -> dict[str, Any]:
+        return {
+            "providers": [
+                {
+                    "source": "pricecharting",
+                    "label": "PriceCharting",
+                    "price": _money(27.5),
+                },
+                {"source": "scryfall", "label": "Scryfall", "price": _money(31.0)},
+            ]
+        }
+
+    async def empty_grades(card_id: str, **_: Any) -> None:
+        return None
+
+    monkeypatch.setattr(vs.card_search_service, "get_card", fake_card)
+    monkeypatch.setattr(
+        vs.marketplace_prices_service,
+        "get_marketplace_prices_for_card",
+        fake_marketplace,
+    )
+    monkeypatch.setattr(
+        vs.grade_summary_service, "get_grade_summary_for_card", empty_grades
+    )
+
+    v = await vs.get_valuation("x:3")
+    assert v is not None
+    # PriceCharting becomes the real "sold comps" signal…
+    assert v["signals"]["sold_comps"]["amount"] == 27.5
+    # …and is excluded from listings (only Scryfall remains there).
+    assert v["signals"]["listings"]["amount"] == 31.0
+    assert v["confidence"] == 3
+
+
+@pytest.mark.asyncio
 async def test_valuation_none_for_unknown_card(monkeypatch):
     async def no_card(card_id: str) -> None:
         return None
