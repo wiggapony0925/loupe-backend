@@ -126,6 +126,24 @@ def _has_art(card: dict[str, Any]) -> bool:
     return bool(card.get("images") or card.get("image_url"))
 
 
+def _distinct_by_name(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep one card per name (first wins).
+
+    A new set often has several printings of the same chase card (regular,
+    alt-art, special illustration). They share a name, so showing all of them
+    makes the rail look repetitive — one "Mega Greninja ex" is plenty.
+    """
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for c in cards:
+        key = (c.get("name") or "").strip().lower()
+        if key and key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
 async def _trending_pokemon(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
     # `pokemon_tcg.search_cards` is already wrapped in the
     # ``"pokemontcg"`` circuit breaker at the integration layer
@@ -142,7 +160,7 @@ async def _trending_pokemon(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, An
         order_by="-set.releaseDate",
     )
     mapped = [_from_pokemon(c) for c in (raw.get("data") or [])]
-    return [c for c in mapped if _has_art(c)]
+    return _distinct_by_name([c for c in mapped if _has_art(c)])
 
 
 async def _trending_magic(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
@@ -171,7 +189,7 @@ async def _trending_magic(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]
     if body is None:
         return []
     mapped = [_from_scryfall(c) for c in (body.get("data") or [])]
-    return [c for c in mapped if _has_art(c)][:pool]
+    return _distinct_by_name([c for c in mapped if _has_art(c)])[:pool]
 
 
 async def _trending_yugioh(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
@@ -191,7 +209,7 @@ async def _trending_yugioh(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any
     if not body:
         return []
     mapped = [_from_yugioh(c) for c in (body.get("data") or [])]
-    return [c for c in mapped if _has_art(c)]
+    return _distinct_by_name([c for c in mapped if _has_art(c)])
 
 
 async def _fallback_cards(limit: int) -> list[dict[str, Any]]:

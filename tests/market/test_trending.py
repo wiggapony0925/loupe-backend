@@ -194,6 +194,18 @@ def test_rotate_daily_is_deterministic_permutation():
     assert trending_service._rotate_daily(pool, salt=2) != once
 
 
+def test_distinct_by_name_drops_duplicate_printings():
+    cards = [
+        {"id": "a", "name": "Mega Greninja ex"},
+        {"id": "b", "name": "mega greninja EX"},  # alt printing, same name
+        {"id": "c", "name": "Cinccino ex"},
+        {"id": "d", "name": ""},  # no name → kept (can't dedupe)
+    ]
+    out = trending_service._distinct_by_name(cards)
+    names = [c["id"] for c in out]
+    assert names == ["a", "c", "d"]  # second "greninja" dropped
+
+
 @pytest.mark.asyncio
 async def test_trending_rejects_invalid_tcg(client):
     resp = await client.get("/v1/cards/trending?tcg=onepiece")
