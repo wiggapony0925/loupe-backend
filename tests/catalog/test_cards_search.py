@@ -190,8 +190,9 @@ async def test_live_search_upstream_error_graceful(client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_live_search_all_interleaves_providers(client, monkeypatch):
-    """tcg=all fans out to all three providers and interleaves results."""
+async def test_live_search_all_ranks_by_relevance(client, monkeypatch):
+    """tcg=all fans out to every provider, then ranks the pool by relevance
+    to the query (best match first), keeping all providers represented."""
 
     async def fake_pokemon(query: str, page: int = 1, page_size: int = 25):
         return {
@@ -246,25 +247,17 @@ async def test_live_search_all_interleaves_providers(client, monkeypatch):
     monkeypatch.setattr(card_search_service.scryfall, "search_cards", fake_scryfall)
     monkeypatch.setattr(card_search_service.ygoprodeck, "search_cards", fake_yugi)
 
+    # Query the exact name of one provider's card — it must rank #1.
     resp = await client.get(
-        "/v1/cards/search", params={"q": "x", "tcg": "all", "limit": 9}
+        "/v1/cards/search", params={"q": "Magic1", "tcg": "all", "limit": 9}
     )
     body = assert_envelope_ok(resp)
     assert body["source"] == "mixed"
     assert len(body["results"]) == 9
-    tcgs = [r["tcg"] for r in body["results"]]
-    # Round-robin: pokemon, magic, yugioh, pokemon, ...
-    assert tcgs == [
-        "pokemon",
-        "magic",
-        "yugioh",
-        "pokemon",
-        "magic",
-        "yugioh",
-        "pokemon",
-        "magic",
-        "yugioh",
-    ]
+    # Relevance ranking: the exact match leads regardless of provider order.
+    assert body["results"][0]["name"] == "Magic1"
+    # All three providers are still represented in the pool.
+    assert {r["tcg"] for r in body["results"]} == {"pokemon", "magic", "yugioh"}
 
 
 @pytest.mark.asyncio

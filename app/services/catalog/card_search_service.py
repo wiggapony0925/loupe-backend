@@ -52,10 +52,14 @@ logger = get_logger("services.card_search")
 MAX_LIMIT = 50
 #: Hard ceiling per provider in the ``tcg=all`` fan-out. Healthy upstream
 #: responses come back in 300-800 ms; this cap exists purely to keep one
-#: misbehaving provider from holding the entire keystroke hostage.
+#: misbehaving provider from holding the entire keystroke hostage. Kept
+#: generous because the typeahead is non-blocking (it shows the previous
+#: results while refetching), and the Pokemon catalog — the anchor with the
+#: most hits — can run 3-4 s cold; cancelling it too early is what made
+#: common queries like "mewtwo" intermittently return nothing.
 #: Partial failures are NOT cached for long (see ``PARTIAL_RESULT_TTL``)
 #: so a brief blip self-heals on the next keystroke.
-PER_PROVIDER_TIMEOUT = 3.0
+PER_PROVIDER_TIMEOUT = 5.0
 
 #: Soft deadline: once this elapses, if at least two providers have
 #: already returned we ship the response and cancel the laggard.
@@ -545,11 +549,118 @@ def _build_pokemon_query(q: str) -> str:
     return " ".join(f"name:{tok}*" for tok in tokens)
 
 
+def _build_pokemon_relaxed_query(q: str) -> str | None:
+    """Forgiving fallback: OR of substring wildcards across tokens.
+
+    The strict query ANDs prefix wildcards, so "green ninja" →
+    ``name:green* name:ninja*`` matches nothing (no card has both words).
+    This relaxed form — ``name:*green* OR name:*ninja*`` — surfaces partial
+    and run-together matches (e.g. **Greninja**, "Green's …"), which the
+    relevance scorer then ranks. Returns ``None`` when there's nothing to
+    relax (single empty token)."""
+    cleaned = _POKEMON_SAFE_RE.sub(" ", q).strip().lower()
+    tokens = [t for t in cleaned.split() if len(t) >= 2]
+    if not tokens:
+        return None
+    return " OR ".join(f"name:*{tok}*" for tok in tokens)
+
+
+# ------------------------------------------------------------- relevance rank
+
+#: Below this many hits a provider re-queries in a more forgiving mode.
+_RELAX_MIN = 6
+
+
+def _lev(a: str, b: str) -> int:
+    """Levenshtein edit distance (small inputs — card names)."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _ratio(a: str, b: str) -> float:
+    """1.0 == identical, 0.0 == completely different."""
+    if not a and not b:
+        return 1.0
+    m = max(len(a), len(b)) or 1
+    return 1.0 - _lev(a, b) / m
+
+
+def relevance_score(name: str, query: str) -> float:
+    """Score a card name against the user's query (0..1, higher = better).
+
+    Combines exact / prefix / substring / token-overlap signals with a
+    de-spaced edit-distance so "green ninja" scores **Greninja** highly even
+    though neither word is a prefix of it. This is what makes the search feel
+    smart instead of literal."""
+    n = _POKEMON_SAFE_RE.sub(" ", (name or "").lower()).strip()
+    qq = _POKEMON_SAFE_RE.sub(" ", (query or "").lower()).strip()
+    if not n or not qq:
+        return 0.0
+    if n == qq:
+        return 1.0
+    score = 0.0
+    if n.startswith(qq) or qq.startswith(n):
+        score = max(score, 0.9)
+    if qq in n or n in qq:
+        score = max(score, 0.85)
+    qtokens = [t for t in qq.split() if t]
+    ntokens = (qtokens and [t for t in n.split() if t]) or []
+    if qtokens:
+        exact = sum(1 for t in qtokens if t in ntokens)
+        sub = sum(1 for t in qtokens if any(t in w or w in t for w in ntokens))
+        score = max(score, 0.55 * exact / len(qtokens) + 0.3 * sub / len(qtokens))
+    # De-spaced fuzzy match — catches run-together names + minor typos.
+    score = max(score, _ratio(n.replace(" ", ""), qq.replace(" ", "")) * 0.95)
+    return min(1.0, score)
+
+
+def _rank(items: list[dict[str, Any]], q: str, limit: int) -> list[dict[str, Any]]:
+    """Sort by relevance to ``q`` (stable), drop dupes by id, cap to ``limit``."""
+    scored = sorted(
+        items, key=lambda c: relevance_score(str(c.get("name", "")), q), reverse=True
+    )
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for c in scored:
+        cid = str(c.get("id") or "")
+        if cid and cid in seen:
+            continue
+        if cid:
+            seen.add(cid)
+        out.append(c)
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def _search_pokemon(q: str, limit: int) -> list[dict[str, Any]]:
     raw = await pokemon_tcg.search_cards(
         _build_pokemon_query(q), page=1, page_size=limit
     )
-    return [_from_pokemon(c) for c in (raw.get("data") or [])][:limit]
+    items = [_from_pokemon(c) for c in (raw.get("data") or [])]
+    # Too few exact-ish hits → widen with the forgiving OR-substring query.
+    if len(items) < _RELAX_MIN:
+        relaxed = _build_pokemon_relaxed_query(q)
+        if relaxed:
+            try:
+                raw2 = await pokemon_tcg.search_cards(
+                    relaxed, page=1, page_size=max(limit, 30)
+                )
+                items += [_from_pokemon(c) for c in (raw2.get("data") or [])]
+            except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
+                logger.info("relaxed pokemon search failed (%s): %s", q, exc)
+    return _rank(items, q, limit)
 
 
 def _bare_number(number: str | None) -> str | None:
@@ -632,14 +743,46 @@ async def search_cards_precise(
     return []
 
 
+def _build_scryfall_relaxed_query(q: str) -> str | None:
+    """`name:green or name:ninja` — OR the tokens so a multi-word query that
+    ANDs to nothing still surfaces partial name matches."""
+    cleaned = _POKEMON_SAFE_RE.sub(" ", q).strip().lower()
+    tokens = [t for t in cleaned.split() if len(t) >= 2]
+    if len(tokens) < 2:
+        return None
+    return " or ".join(f"name:{tok}" for tok in tokens)
+
+
 async def _search_scryfall(q: str, limit: int) -> list[dict[str, Any]]:
-    raw = await scryfall.search_cards(q, page=1)
-    return [_from_scryfall(c) for c in (raw.get("data") or [])][:limit]
+    items: list[dict[str, Any]] = []
+    err: Exception | None = None
+    try:
+        raw = await scryfall.search_cards(q, page=1)
+        items = [_from_scryfall(c) for c in (raw.get("data") or [])]
+    except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
+        # Scryfall 404s a search with zero hits — hold the error so we can
+        # still attempt the relaxed query, but re-raise it below if nothing
+        # is recovered (so genuine upstream outages are reported, not hidden).
+        err = exc
+        logger.info("scryfall search miss (%s): %s", q, exc)
+    if len(items) < _RELAX_MIN:
+        relaxed = _build_scryfall_relaxed_query(q)
+        if relaxed:
+            try:
+                raw2 = await scryfall.search_cards(relaxed, page=1)
+                items += [_from_scryfall(c) for c in (raw2.get("data") or [])]
+                err = None  # recovered via the forgiving query
+            except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
+                logger.info("relaxed scryfall search failed (%s): %s", q, exc)
+    if not items and err is not None:
+        raise err
+    return _rank(items, q, limit)
 
 
 async def _search_ygoprodeck(q: str, limit: int) -> list[dict[str, Any]]:
     raw = await ygoprodeck.search_cards(q)
-    return [_from_yugioh(c) for c in (raw.get("data") or [])[:limit]]
+    items = [_from_yugioh(c) for c in (raw.get("data") or [])]
+    return _rank(items, q, limit)
 
 
 def _interleave(lists: list[list[dict[str, Any]]], cap: int) -> list[dict[str, Any]]:
@@ -748,7 +891,11 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
                     continue
                 if isinstance(res, list):
                     lists.append(res)
-            merged = _interleave(lists, limit)
+            # Rank the combined pool by relevance to the query so the best
+            # match leads regardless of provider (e.g. "green ninja" → the
+            # exact Yu-Gi-Oh "Green Ninja" first, then Pokémon Greninja),
+            # instead of a round-robin that buries good hits.
+            merged = _rank([c for lst in lists for c in lst], q, limit)
             body = {
                 "results": merged,
                 "total": len(merged),
@@ -772,8 +919,15 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
     # Don't poison the cache with partial fan-out results. If pokemontcg
     # (or any provider) timed out, write a much shorter TTL so the next
     # keystroke can pick up a recovered provider instead of being stuck
-    # showing only the surviving TCGs for the next 5 minutes.
-    ttl = PARTIAL_RESULT_TTL if body.get("partial") else CARD_SEARCH_TTL
+    # showing only the surviving TCGs for the next 5 minutes. We also treat
+    # an *empty* result as short-lived: a cold fan-out can transiently return
+    # zero rows (a timeout that wasn't flagged partial), and caching that for
+    # 5 min makes a common query like "mewtwo" look permanently broken.
+    ttl = (
+        PARTIAL_RESULT_TTL
+        if body.get("partial") or not body.get("results")
+        else CARD_SEARCH_TTL
+    )
     await _cache_set(cache_key, body, ttl)
     return body
 
