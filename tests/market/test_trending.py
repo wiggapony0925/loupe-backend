@@ -81,17 +81,17 @@ def _patch_all_providers(
     magic: Iterable[dict[str, Any]] | BaseException,
     yugioh: Iterable[dict[str, Any]] | BaseException,
 ) -> None:
-    async def _pokemon(_limit: int) -> list[dict[str, Any]]:
+    async def _pokemon(_pool: int = 0) -> list[dict[str, Any]]:
         if isinstance(pokemon, BaseException):
             raise pokemon
         return [card_search_service._from_pokemon(c) for c in pokemon]
 
-    async def _magic(_limit: int) -> list[dict[str, Any]]:
+    async def _magic(_pool: int = 0) -> list[dict[str, Any]]:
         if isinstance(magic, BaseException):
             raise magic
         return [card_search_service._from_scryfall(c) for c in magic]
 
-    async def _yugi(_limit: int) -> list[dict[str, Any]]:
+    async def _yugi(_pool: int = 0) -> list[dict[str, Any]]:
         if isinstance(yugioh, BaseException):
             raise yugioh
         return [card_search_service._from_yugioh(c) for c in yugioh]
@@ -180,6 +180,18 @@ async def test_trending_fallback_on_all_providers_down(client, monkeypatch):
     assert len(body["cards"]) == 3
     for c in body["cards"]:
         assert "id" in c and "name" in c
+
+
+def test_rotate_daily_is_deterministic_permutation():
+    pool = [{"id": str(i)} for i in range(20)]
+    once = trending_service._rotate_daily(pool, salt=1)
+    twice = trending_service._rotate_daily(pool, salt=1)
+    # Same day + same salt → identical order (stable while browsing).
+    assert once == twice
+    # It's a permutation — every card is still present, none dropped/dupes.
+    assert sorted(c["id"] for c in once) == sorted(c["id"] for c in pool)
+    # Different salt → different order (providers don't rotate in lockstep).
+    assert trending_service._rotate_daily(pool, salt=2) != once
 
 
 @pytest.mark.asyncio

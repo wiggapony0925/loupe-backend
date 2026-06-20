@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import UTC, datetime
 from typing import Any
 
@@ -55,6 +56,12 @@ logger = logging.getLogger(__name__)
 
 MAX_LIMIT = 100
 DEFAULT_LIMIT = 24
+
+# How many popular cards to pull per provider before the daily rotation
+# picks the slice that surfaces today. A pool this size means a *different*
+# set of popular cards leads the rail each day (instead of the same Sol Ring
+# / Venusaur ex every single day) while staying within "genuinely popular".
+_POOL_PER_PROVIDER = 50
 
 # Hard cap per upstream provider when building the trending feed. The
 # default `http_timeout_seconds` (15s) can occasionally hang under load,
@@ -94,34 +101,57 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _today_key() -> str:
+    """UTC day stamp — rolls the trending rotation (and cache) over at midnight."""
+    return datetime.now(UTC).strftime("%Y%m%d")
+
+
+def _rotate_daily(items: list[dict[str, Any]], salt: int = 0) -> list[dict[str, Any]]:
+    """Deterministically shuffle a pool by today's date.
+
+    Same order all day (so the feed is stable while you browse), a fresh
+    order tomorrow (so it doesn't show the identical cards every day). The
+    ``salt`` keeps each provider's pool from shuffling in lockstep.
+    """
+    if len(items) <= 1:
+        return items
+    rng = random.Random(f"{_today_key()}:{salt}")
+    shuffled = items[:]
+    rng.shuffle(shuffled)
+    return shuffled
+
+
 def _has_art(card: dict[str, Any]) -> bool:
     """A card we can actually show — has artwork (no bare/placeholder rows)."""
     return bool(card.get("images") or card.get("image_url"))
 
 
-async def _trending_pokemon(limit: int) -> list[dict[str, Any]]:
+async def _trending_pokemon(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
     # `pokemon_tcg.search_cards` is already wrapped in the
     # ``"pokemontcg"`` circuit breaker at the integration layer
     # (see app/integrations/_http/pokemon_tcg.py).
     #
     # `orderBy=-set.releaseDate` surfaces chase cards from the NEWEST sets
     # first (Surging Sparks, Prismatic Evolutions, …) instead of the same
-    # default-ordered handful — so the rail feels current and varied. We
-    # over-fetch and drop art-less cards so the feed is never "bare".
+    # default-ordered handful. We pull a *pool* and drop art-less cards;
+    # the caller rotates it daily so different chase cards lead each day.
     raw = await pokemon_tcg.search_cards(
         POKEMON_TRENDING_QUERY,
         page=1,
-        page_size=min(MAX_LIMIT, limit * 3),
+        page_size=min(MAX_LIMIT, pool),
         order_by="-set.releaseDate",
     )
     mapped = [_from_pokemon(c) for c in (raw.get("data") or [])]
-    return [c for c in mapped if _has_art(c)][:limit]
+    return [c for c in mapped if _has_art(c)]
 
 
-async def _trending_magic(limit: int) -> list[dict[str, Any]]:
+async def _trending_magic(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
     # Scryfall's `order` query param isn't surfaced by the shared
     # `scryfall.search_cards`, so we issue the request through the
     # resilient helper directly under the same ``"scryfall"`` breaker.
+    # `order=edhrec` returns the most-played Commander cards (a genuine
+    # popularity signal); a page is ~175 cards, so the daily rotation has a
+    # deep pool of real staples to vary across — not just Sol Ring forever.
     from app.config import get_settings
 
     s = get_settings()
@@ -141,10 +171,10 @@ async def _trending_magic(limit: int) -> list[dict[str, Any]]:
     if body is None:
         return []
     mapped = [_from_scryfall(c) for c in (body.get("data") or [])]
-    return [c for c in mapped if _has_art(c)][:limit]
+    return [c for c in mapped if _has_art(c)][:pool]
 
 
-async def _trending_yugioh(limit: int) -> list[dict[str, Any]]:
+async def _trending_yugioh(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
     from app.config import get_settings
 
     s = get_settings()
@@ -152,7 +182,7 @@ async def _trending_yugioh(limit: int) -> list[dict[str, Any]]:
         integration="ygoprodeck",
         method="GET",
         url="https://db.ygoprodeck.com/api/v7/cardinfo.php",
-        params={"num": limit, "offset": 0, "sort": "new"},
+        params={"num": pool, "offset": 0, "sort": "new"},
         headers={"Accept": "application/json"},
         timeout_s=s.http_timeout_seconds,
         not_found_ok=True,
@@ -160,7 +190,8 @@ async def _trending_yugioh(limit: int) -> list[dict[str, Any]]:
     )
     if not body:
         return []
-    return [_from_yugioh(c) for c in (body.get("data") or [])][:limit]
+    mapped = [_from_yugioh(c) for c in (body.get("data") or [])]
+    return [c for c in mapped if _has_art(c)]
 
 
 async def _fallback_cards(limit: int) -> list[dict[str, Any]]:
@@ -214,38 +245,41 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     tcg = (tcg or "all").lower()
     limit = max(1, min(MAX_LIMIT, int(limit)))
 
-    cache_key = f"loupe:cards:trending:{tcg}:{limit}"
+    # The day stamp in the key means a new day is a cache miss → fresh daily
+    # rotation, while the 15-min TTL keeps it snappy within the day.
+    cache_key = f"loupe:cards:trending:{tcg}:{limit}:{_today_key()}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         cached_copy = dict(cached)
         cached_copy["source"] = "cached"
         return cached_copy
 
+    # Per-provider salts for the daily shuffle so the three pools don't
+    # rotate in lockstep.
+    _SALT = {"pokemon": 1, "magic": 2, "yugioh": 3}
+
     cards: list[dict[str, Any]] = []
     try:
         if tcg == "pokemon":
-            cards = (
-                await asyncio.wait_for(_trending_pokemon(limit), _PROVIDER_TIMEOUT_S)
-            )[:limit]
+            pool = await asyncio.wait_for(_trending_pokemon(), _PROVIDER_TIMEOUT_S)
+            cards = _rotate_daily(pool, _SALT["pokemon"])[:limit]
         elif tcg == "magic":
-            cards = (
-                await asyncio.wait_for(_trending_magic(limit), _PROVIDER_TIMEOUT_S)
-            )[:limit]
+            pool = await asyncio.wait_for(_trending_magic(), _PROVIDER_TIMEOUT_S)
+            cards = _rotate_daily(pool, _SALT["magic"])[:limit]
         elif tcg == "yugioh":
-            cards = (
-                await asyncio.wait_for(_trending_yugioh(limit), _PROVIDER_TIMEOUT_S)
-            )[:limit]
+            pool = await asyncio.wait_for(_trending_yugioh(), _PROVIDER_TIMEOUT_S)
+            cards = _rotate_daily(pool, _SALT["yugioh"])[:limit]
         else:
-            per = max(4, (limit // 3) + 2)
             results = await asyncio.gather(
-                asyncio.wait_for(_trending_pokemon(per), _PROVIDER_TIMEOUT_S),
-                asyncio.wait_for(_trending_magic(per), _PROVIDER_TIMEOUT_S),
-                asyncio.wait_for(_trending_yugioh(per), _PROVIDER_TIMEOUT_S),
+                asyncio.wait_for(_trending_pokemon(), _PROVIDER_TIMEOUT_S),
+                asyncio.wait_for(_trending_magic(), _PROVIDER_TIMEOUT_S),
+                asyncio.wait_for(_trending_yugioh(), _PROVIDER_TIMEOUT_S),
                 return_exceptions=True,
             )
             lists: list[list[dict[str, Any]]] = []
-            for label, res in zip(
+            for label, salt_key, res in zip(
                 ("pokemontcg", "scryfall", "ygoprodeck"),
+                ("pokemon", "magic", "yugioh"),
                 results,
                 strict=False,
             ):
@@ -260,7 +294,9 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
                     logger.warning("trending upstream %s failed: %s", label, res)
                     continue
                 if isinstance(res, list) and res:
-                    lists.append(res)
+                    # Rotate each pool daily, then round-robin interleave so
+                    # the rail stays TCG-diverse *and* fresh day to day.
+                    lists.append(_rotate_daily(res, _SALT[salt_key]))
             cards = _interleave(lists, limit)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("trending unexpected error: %s", exc)
