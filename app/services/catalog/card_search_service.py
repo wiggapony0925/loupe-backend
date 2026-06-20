@@ -76,6 +76,13 @@ FAST_SETTLE_DEADLINE = 1.5
 #: long enough that rapid retyping doesn't hammer the upstream.
 PARTIAL_RESULT_TTL = 20
 
+#: How long a *successful* (non-empty, complete) search is kept as a "last
+#: good" fallback. The Pokemon TCG upstream has erratic latency (1-37 s), so a
+#: cold fetch can time out and return zero rows; serving the last good result
+#: instead means a query that has *ever* succeeded never looks broken again
+#: within this window. Catalog identity is stable, so 6 h is safe.
+LASTGOOD_RESULT_TTL = 6 * 60 * 60
+
 #: Providers we *don't* have an upstream for yet — returned gracefully.
 UNSUPPORTED_TCGS = {"onepiece", "lorcana", "sports"}
 
@@ -819,9 +826,20 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
         return _empty(tcg, error="provider_not_configured")
 
     cache_key = f"loupe:cards:search:{tcg}:{q.lower()}:{limit}"
+    lastgood_key = f"loupe:cards:search:lastgood:{tcg}:{q.lower()}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return cached
+
+    async def _fallback_or(body: dict[str, Any]) -> dict[str, Any]:
+        """Serve the last good result when the live fetch came back empty —
+        so a slow/flaky upstream never makes a known query look broken."""
+        if body.get("results"):
+            return body
+        stale = await _cache_get(lastgood_key)
+        if stale and stale.get("results"):
+            return {**stale, "stale": True}
+        return body
 
     try:
         if tcg == "pokemon":
@@ -915,25 +933,25 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
                 body["partial"] = True
     except (httpx.HTTPError, CircuitOpenError) as exc:
         logger.warning("upstream search failed (%s): %s", tcg, exc)
-        return _empty(tcg, error=str(exc))
+        return await _fallback_or(_empty(tcg, error=str(exc)))
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("unexpected error in search_cards: %s", exc)
-        return _empty(tcg, error="upstream error")
+        return await _fallback_or(_empty(tcg, error="upstream error"))
 
-    # Don't poison the cache with partial fan-out results. If pokemontcg
-    # (or any provider) timed out, write a much shorter TTL so the next
-    # keystroke can pick up a recovered provider instead of being stuck
-    # showing only the surviving TCGs for the next 5 minutes. We also treat
-    # an *empty* result as short-lived: a cold fan-out can transiently return
-    # zero rows (a timeout that wasn't flagged partial), and caching that for
-    # 5 min makes a common query like "mewtwo" look permanently broken.
-    ttl = (
-        PARTIAL_RESULT_TTL
-        if body.get("partial") or not body.get("results")
-        else CARD_SEARCH_TTL
-    )
-    await _cache_set(cache_key, body, ttl)
-    return body
+    is_good = bool(body.get("results")) and not body.get("partial")
+    if is_good:
+        # A complete, non-empty result: cache it normally AND stash it as the
+        # long-lived "last good" fallback for this query.
+        await _cache_set(cache_key, body, CARD_SEARCH_TTL)
+        await _cache_set(lastgood_key, body, LASTGOOD_RESULT_TTL)
+        return body
+
+    # Empty/partial: short-TTL it so a recovered upstream shows up on the next
+    # keystroke (don't poison the 5-min cache), but serve the last good result
+    # instead of an empty list when we have one — so a flaky upstream never
+    # makes a known query like "mewtwo" look broken.
+    await _cache_set(cache_key, body, PARTIAL_RESULT_TTL)
+    return await _fallback_or(body)
 
 
 # --------------------------------------------------------------------- single
