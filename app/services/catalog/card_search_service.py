@@ -1351,17 +1351,30 @@ _HOUSE_DRIFT_HISTORY: dict[str, float] = {
     "sgc": 0.92,
     "tag": 0.85,
 }
+# Graded-price multiplier vs the raw price, per numeric grade. Covers the full
+# 1-10 scale incl. half grades so every tier the UI offers (PSA/BGS/CGC/SGC)
+# charts a sensible curve — gem-mint commands a steep premium, low grades trade
+# below raw. (Replaced by real PriceCharting comps once a token is configured.)
 _GRADE_MULT_HISTORY: dict[float, tuple[float, float]] = {
     10: (10.0, 18.0),
     9.5: (5.0, 8.0),
     9: (2.5, 4.0),
     8.5: (1.6, 2.2),
     8: (1.2, 1.6),
+    7.5: (1.0, 1.3),
     7: (0.9, 1.1),
+    6.5: (0.80, 0.92),
     6: (0.70, 0.78),
+    5.5: (0.62, 0.70),
     5: (0.55, 0.62),
+    4.5: (0.50, 0.55),
     4: (0.45, 0.52),
+    3.5: (0.40, 0.45),
     3: (0.35, 0.40),
+    2.5: (0.30, 0.35),
+    2: (0.25, 0.30),
+    1.5: (0.20, 0.25),
+    1: (0.15, 0.20),
 }
 
 
