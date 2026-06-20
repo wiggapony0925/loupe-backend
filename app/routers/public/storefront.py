@@ -91,10 +91,11 @@ async def public_search(
     _cache(response)
     if q.strip():
         # The typeahead (small page_size) only needs a cheap top-N, so it reuses
-        # the warm limit=20 upstream cache key. The full results page (larger
-        # page_size) fetches a deep set so users can page through big result
-        # counts -- e.g. 200+ Mewtwo printings -- instead of a hard 20-row cap.
-        fetch_limit = 20 if page_size <= 12 else 200
+        # the warm limit=20 upstream cache key. The full results page fetches a
+        # deeper set so users can page through popular names (e.g. Mewtwo has
+        # 80+ printings). Kept modest: the Pokemon TCG API gets very slow with
+        # large page sizes, so 60 stays fast while ~tripling the old 20-cap.
+        fetch_limit = 20 if page_size <= 12 else 60
         body = await card_search_service.search_cards(q=q, tcg=tcg, limit=fetch_limit)
         cards = list(body.get("results") or [])
         source = body.get("source")
