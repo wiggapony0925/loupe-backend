@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -70,7 +71,13 @@ _POOL_PER_PROVIDER = 50
 # query persistence mean this cold-fetch cost is paid rarely, so we give
 # providers 3s — enough for the (slightly heavier) ordered Pokémon query
 # to land instead of timing out and collapsing the feed to two TCGs.
-_PROVIDER_TIMEOUT_S = 3.0
+_PROVIDER_TIMEOUT_S = 5.0
+
+#: Each provider's last *successful* trending pool is cached this long and
+#: served as a fallback when a later fetch times out — so the mixed feed never
+#: collapses to a single game just because one slow upstream (Pokemon / YGO
+#: trending are erratic) blipped. Long because catalog identity is stable.
+_POOL_TTL = 6 * 60 * 60
 
 # Per-provider trending queries. Chosen for: (a) high variety so the
 # rail doesn't look like one card type, (b) low upstream cost, (c)
@@ -244,6 +251,31 @@ async def _fallback_cards(limit: int) -> list[dict[str, Any]]:
     return out
 
 
+async def _provider_pool(
+    key: str, fetch: Callable[[], Awaitable[list[dict[str, Any]]]]
+) -> list[dict[str, Any]]:
+    """A provider's trending pool, with a long last-good fallback.
+
+    On a successful (non-empty) fetch the pool is cached for ``_POOL_TTL`` and
+    returned; on timeout/failure the last good pool is served instead, so the
+    mixed feed stays diverse even when one upstream (Pokemon / YGO trending are
+    erratic) is slow. Never raises.
+    """
+    pool_key = f"loupe:cards:trendingpool:{key}"
+    try:
+        pool = await asyncio.wait_for(fetch(), _PROVIDER_TIMEOUT_S)
+        if pool:
+            await _cache_set(pool_key, {"items": pool}, _POOL_TTL)
+            return pool
+    except (TimeoutError, CircuitOpenError) as exc:
+        logger.info("trending %s slow/open (%s); serving last-good pool", key, exc)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("trending %s failed (%s); serving last-good pool", key, exc)
+    stale = await _cache_get(pool_key)
+    items = stale.get("items") if isinstance(stale, dict) else None
+    return items if isinstance(items, list) else []
+
+
 async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
     """Return a trending feed envelope.
 
@@ -279,42 +311,27 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     cards: list[dict[str, Any]] = []
     try:
         if tcg == "pokemon":
-            pool = await asyncio.wait_for(_trending_pokemon(), _PROVIDER_TIMEOUT_S)
+            pool = await _provider_pool("pokemon", _trending_pokemon)
             cards = _rotate_daily(pool, _SALT["pokemon"])[:limit]
         elif tcg == "magic":
-            pool = await asyncio.wait_for(_trending_magic(), _PROVIDER_TIMEOUT_S)
+            pool = await _provider_pool("magic", _trending_magic)
             cards = _rotate_daily(pool, _SALT["magic"])[:limit]
         elif tcg == "yugioh":
-            pool = await asyncio.wait_for(_trending_yugioh(), _PROVIDER_TIMEOUT_S)
+            pool = await _provider_pool("yugioh", _trending_yugioh)
             cards = _rotate_daily(pool, _SALT["yugioh"])[:limit]
         else:
-            results = await asyncio.gather(
-                asyncio.wait_for(_trending_pokemon(), _PROVIDER_TIMEOUT_S),
-                asyncio.wait_for(_trending_magic(), _PROVIDER_TIMEOUT_S),
-                asyncio.wait_for(_trending_yugioh(), _PROVIDER_TIMEOUT_S),
-                return_exceptions=True,
+            # Each pool is live-or-last-good, so a slow Pokemon/YGO upstream no
+            # longer collapses the mixed feed to Magic.
+            pools = await asyncio.gather(
+                _provider_pool("pokemon", _trending_pokemon),
+                _provider_pool("magic", _trending_magic),
+                _provider_pool("yugioh", _trending_yugioh),
             )
-            lists: list[list[dict[str, Any]]] = []
-            for label, salt_key, res in zip(
-                ("pokemontcg", "scryfall", "ygoprodeck"),
-                ("pokemon", "magic", "yugioh"),
-                results,
-                strict=False,
-            ):
-                if isinstance(res, CircuitOpenError):
-                    logger.debug(
-                        "trending upstream %s skipped (circuit open): %s",
-                        label,
-                        res,
-                    )
-                    continue
-                if isinstance(res, BaseException):
-                    logger.warning("trending upstream %s failed: %s", label, res)
-                    continue
-                if isinstance(res, list) and res:
-                    # Rotate each pool daily, then round-robin interleave so
-                    # the rail stays TCG-diverse *and* fresh day to day.
-                    lists.append(_rotate_daily(res, _SALT[salt_key]))
+            lists = [
+                _rotate_daily(pool, _SALT[key])
+                for key, pool in zip(("pokemon", "magic", "yugioh"), pools, strict=True)
+                if pool
+            ]
             cards = _interleave(lists, limit)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("trending unexpected error: %s", exc)
