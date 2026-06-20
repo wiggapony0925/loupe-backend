@@ -79,6 +79,13 @@ _PROVIDER_TIMEOUT_S = 5.0
 #: trending are erratic) blipped. Long because catalog identity is stable.
 _POOL_TTL = 6 * 60 * 60
 
+#: A *degraded* trending envelope — built before the per-game pools warmed, so
+#: it spans <2 games or fell back to stubs — is cached only this long instead of
+#: the full TTL. Otherwise the very first (cold) request poisons the cache for
+#: 15 min: it captures a one-game mix and serves it even after the other games'
+#: pools have warmed. A short TTL lets the feed self-heal within ~2 min.
+_DEGRADED_TTL = 120
+
 # Per-provider trending queries. Chosen for: (a) high variety so the
 # rail doesn't look like one card type, (b) low upstream cost, (c)
 # alignment with what collectors actually chase right now.
@@ -367,10 +374,13 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
         "source": source,
     }
 
-    # Cache live + fallback responses alike so we don't hammer providers
-    # while they're down. TTL is short enough that a recovery propagates
-    # within 15 min.
-    await _cache_set(cache_key, envelope, TRENDING_TTL)
+    # Cache live + fallback responses alike so we don't hammer providers while
+    # they're down. A *degraded* "all" feed (cold pools → only one game showed
+    # up, or we fell back to stubs) is cached briefly so it self-heals once the
+    # other games' pools warm; a healthy feed gets the full 15-min TTL.
+    distinct_tcgs = len({c.get("tcg") for c in cards if c.get("tcg")})
+    degraded = source == "fallback" or (tcg == "all" and distinct_tcgs < 2)
+    await _cache_set(cache_key, envelope, _DEGRADED_TTL if degraded else TRENDING_TTL)
     return envelope
 
 

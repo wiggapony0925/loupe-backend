@@ -125,6 +125,73 @@ async def test_evaluate_for_card_below_threshold(db_session, created_user):
 
 
 @pytest.mark.asyncio
+async def test_create_by_upstream_id_materializes_local_card(
+    client, db_session, auth_headers, monkeypatch
+):
+    """Web sends a composite ``<source>:<id>``; the service materializes it."""
+    from app.services.catalog import card_search_service
+
+    upstream_id = "pokemontcg:xy1-1"
+    unified = {
+        "id": upstream_id,
+        "tcg": "pokemon",
+        "name": "Materialized Charizard",
+        "number": "1",
+        "rarity": "Rare Holo",
+        "year": 2014,
+        "image_url": "https://example.test/charizard.png",
+        "set": {"name": "Test Set", "releaseDate": "2014/02/05"},
+        "set_name": "Test Set",
+        "pricing_summary": {"market": {"amount": "120.00", "currency": "USD"}},
+        "images": {"small": "https://example.test/s.png"},
+        "attributes": {},
+    }
+
+    async def _fake_get_card(_cid: str) -> dict:
+        return unified
+
+    monkeypatch.setattr(card_search_service, "get_card", _fake_get_card)
+
+    resp = await client.post(
+        "/v1/alerts",
+        json={
+            "upstream_id": upstream_id,
+            "condition": "below",
+            "threshold_usd": "90.00",
+        },
+        headers=auth_headers,
+    )
+    data = assert_envelope_ok(resp, expected_status=201)
+    assert data["card_name"] == "Materialized Charizard"
+    assert data["condition"] == "below"
+    # A real local card UUID was created + returned.
+    uuid.UUID(data["card_id"])
+
+    # Idempotent: a second alert on the same upstream id reuses the local card.
+    resp2 = await client.post(
+        "/v1/alerts",
+        json={
+            "upstream_id": upstream_id,
+            "condition": "above",
+            "threshold_usd": "200.00",
+        },
+        headers=auth_headers,
+    )
+    data2 = assert_envelope_ok(resp2, expected_status=201)
+    assert data2["card_id"] == data["card_id"]
+
+
+@pytest.mark.asyncio
+async def test_create_requires_a_card_identifier(client, auth_headers):
+    resp = await client.post(
+        "/v1/alerts",
+        json={"condition": "above", "threshold_usd": "5.00"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_create_validates_positive_threshold(client, db_session, auth_headers):
     card = await make_card(db_session)
     resp = await client.post(

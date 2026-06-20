@@ -47,7 +47,13 @@ async def create(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> PriceAlertRead:
-    return await price_alert_service.create(db, user, payload)
+    try:
+        return await price_alert_service.create(db, user, payload)
+    except price_alert_service.CardNotResolvable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not resolve card '{exc}' to set an alert.",
+        ) from exc
 
 
 @router.delete(

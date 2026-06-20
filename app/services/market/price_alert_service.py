@@ -51,12 +51,31 @@ async def list_for_user(
     return [_to_read(a, c) for (a, c) in rows]
 
 
+class CardNotResolvable(Exception):
+    """Raised when an alert's ``upstream_id`` can't be materialized locally."""
+
+
 async def create(
     db: AsyncSession, user: User, payload: PriceAlertCreate
 ) -> PriceAlertRead:
+    # Web sends an upstream ``<source>:<id>`` rather than a local UUID, so
+    # materialize a local Card for it first (idempotent — repeat alerts on the
+    # same card reuse the row). Mobile keeps passing a resolved ``card_id``.
+    card_id = payload.card_id
+    card: Card | None = None
+    if card_id is None:
+        from app.services.catalog import card_resolver_service
+
+        card = await card_resolver_service.ensure_local_card(
+            db, upstream_id=payload.upstream_id or ""
+        )
+        if card is None:
+            raise CardNotResolvable(payload.upstream_id or "")
+        card_id = card.id
+
     row = PriceAlert(
         user_id=user.id,
-        card_id=payload.card_id,
+        card_id=card_id,
         condition=payload.condition,
         threshold_usd=payload.threshold_usd,
         note=payload.note,
@@ -64,9 +83,10 @@ async def create(
     db.add(row)
     await db.commit()
     await db.refresh(row)
-    card = (
-        await db.execute(select(Card).where(Card.id == payload.card_id))
-    ).scalar_one_or_none()
+    if card is None:
+        card = (
+            await db.execute(select(Card).where(Card.id == card_id))
+        ).scalar_one_or_none()
     return _to_read(row, card)
 
 
@@ -132,6 +152,7 @@ def serialize_for_wire(alert: PriceAlert, card: Card | None = None) -> dict[str,
 
 
 __all__ = [
+    "CardNotResolvable",
     "create",
     "delete",
     "evaluate_for_card",
