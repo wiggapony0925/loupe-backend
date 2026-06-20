@@ -49,7 +49,11 @@ from app.utils.time import utcnow
 
 logger = get_logger("services.card_search")
 
-MAX_LIMIT = 50
+# Upper bound on results per search. Set generously so a popular name (e.g.
+# "mewtwo" has 200+ printings) returns a deep, pageable set rather than a
+# hard ~20-row cap. The storefront only requests this many for the full
+# results page; the typeahead asks for a small top-N (see public_search).
+MAX_LIMIT = 250
 #: Hard ceiling per provider in the ``tcg=all`` fan-out. Healthy upstream
 #: responses come back in 300-800 ms; this cap exists purely to keep one
 #: misbehaving provider from holding the entire keystroke hostage. Kept
