@@ -31,6 +31,7 @@ from app.routers.ops import websockets as ws
 from app.routers.portal import blog as portal_blog
 from app.routers.portal import careers as portal_careers
 from app.routers.portal import waitlist as portal_waitlist
+from app.routers.public import share as public_share
 from app.routers.public import storefront as public
 
 
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(scans.router, prefix=api_prefix)
     app.include_router(cards.router, prefix=api_prefix)
     app.include_router(public.router, prefix=api_prefix)
+    app.include_router(public_share.router, prefix=api_prefix)
     app.include_router(identify.router, prefix=api_prefix)
     app.include_router(image_proxy.router, prefix=api_prefix)
     app.include_router(sets.router, prefix=api_prefix)
