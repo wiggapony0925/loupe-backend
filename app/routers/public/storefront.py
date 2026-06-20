@@ -13,6 +13,7 @@ independently of the mobile app's catalog endpoints.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -129,6 +130,47 @@ async def public_search(
         "facets": {"rarities": rarities, "sets": sets},
         "source": source,
     }
+
+
+@router.get(
+    "/sparklines",
+    summary="Batch mini price series for a set of cards (list-row sparklines)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def public_sparklines(
+    response: Response,
+    ids: str = Query(..., max_length=2000),
+    range_: str = Query("7d", alias="range", pattern="^(7d|30d|90d)$"),
+) -> dict[str, Any]:
+    """A tiny trend series per id so list rows (search dropdown, rails) can
+    show a Robinhood-style sparkline without one request per card.
+
+    Reuses the cached, synthesized price history, so a batch of visible ids
+    resolves from cache after the first hit. Capped to keep the fan-out small.
+    """
+    _cache(response)
+    id_list = [i.strip() for i in ids.split(",") if i.strip()][:24]
+    histories = await asyncio.gather(
+        *(card_search_service.get_price_history(cid, range_) for cid in id_list)
+    )
+    out: list[dict[str, Any]] = []
+    for cid, body in zip(id_list, histories, strict=True):
+        if not body:
+            continue
+        points = [
+            p["price"]
+            for p in (body.get("points") or [])
+            if isinstance(p, dict) and p.get("price") is not None
+        ]
+        summary = body.get("summary") or {}
+        out.append(
+            {
+                "card_id": cid,
+                "points": points,
+                "change_pct": summary.get("change_pct"),
+            }
+        )
+    return {"sparklines": out}
 
 
 @router.get(
