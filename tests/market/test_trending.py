@@ -99,6 +99,11 @@ def _patch_all_providers(
     monkeypatch.setattr(trending_service, "_trending_pokemon", _pokemon)
     monkeypatch.setattr(trending_service, "_trending_magic", _magic)
     monkeypatch.setattr(trending_service, "_trending_yugioh", _yugi)
+    # The trending pool now falls back to each game's value source, so patch
+    # those too — "all providers down" must take the whole chain down.
+    monkeypatch.setattr(trending_service, "_valuable_pokemon", _pokemon)
+    monkeypatch.setattr(trending_service, "_valuable_magic", _magic)
+    monkeypatch.setattr(trending_service, "_valuable_yugioh", _yugi)
 
 
 @pytest.mark.asyncio

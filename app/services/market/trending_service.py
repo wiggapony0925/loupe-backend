@@ -252,14 +252,17 @@ async def _fallback_cards(limit: int) -> list[dict[str, Any]]:
 
 
 async def _provider_pool(
-    key: str, fetch: Callable[[], Awaitable[list[dict[str, Any]]]]
+    key: str,
+    fetch: Callable[[], Awaitable[list[dict[str, Any]]]],
+    fallback: Callable[[], Awaitable[list[dict[str, Any]]]] | None = None,
 ) -> list[dict[str, Any]]:
-    """A provider's trending pool, with a long last-good fallback.
+    """A provider's trending pool, with a long last-good + value fallback.
 
-    On a successful (non-empty) fetch the pool is cached for ``_POOL_TTL`` and
-    returned; on timeout/failure the last good pool is served instead, so the
-    mixed feed stays diverse even when one upstream (Pokemon / YGO trending are
-    erratic) is slow. Never raises.
+    Order: live trending → last-good cached pool → the game's ``valuable``
+    source. Pokemon/YGO ``trending`` queries are erratic (circuit-open / slow)
+    and often never populate a pool, so without the value fallback the mixed
+    feed collapses to Magic. The value source is reliable, so it keeps every
+    game represented. Never raises; caches whatever it resolves.
     """
     pool_key = f"loupe:cards:trendingpool:{key}"
     try:
@@ -268,12 +271,24 @@ async def _provider_pool(
             await _cache_set(pool_key, {"items": pool}, _POOL_TTL)
             return pool
     except (TimeoutError, CircuitOpenError) as exc:
-        logger.info("trending %s slow/open (%s); serving last-good pool", key, exc)
+        logger.info("trending %s slow/open (%s); trying fallbacks", key, exc)
     except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("trending %s failed (%s); serving last-good pool", key, exc)
+        logger.warning("trending %s failed (%s); trying fallbacks", key, exc)
+
     stale = await _cache_get(pool_key)
     items = stale.get("items") if isinstance(stale, dict) else None
-    return items if isinstance(items, list) else []
+    if isinstance(items, list) and items:
+        return items
+
+    if fallback is not None:
+        try:
+            vals = await asyncio.wait_for(fallback(), _VALUABLE_TIMEOUT_S)
+            if vals:
+                await _cache_set(pool_key, {"items": vals}, _POOL_TTL)
+                return vals
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("trending %s value-fallback failed: %s", key, exc)
+    return []
 
 
 async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
@@ -311,21 +326,21 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     cards: list[dict[str, Any]] = []
     try:
         if tcg == "pokemon":
-            pool = await _provider_pool("pokemon", _trending_pokemon)
+            pool = await _provider_pool("pokemon", _trending_pokemon, _valuable_pokemon)
             cards = _rotate_daily(pool, _SALT["pokemon"])[:limit]
         elif tcg == "magic":
-            pool = await _provider_pool("magic", _trending_magic)
+            pool = await _provider_pool("magic", _trending_magic, _valuable_magic)
             cards = _rotate_daily(pool, _SALT["magic"])[:limit]
         elif tcg == "yugioh":
-            pool = await _provider_pool("yugioh", _trending_yugioh)
+            pool = await _provider_pool("yugioh", _trending_yugioh, _valuable_yugioh)
             cards = _rotate_daily(pool, _SALT["yugioh"])[:limit]
         else:
-            # Each pool is live-or-last-good, so a slow Pokemon/YGO upstream no
-            # longer collapses the mixed feed to Magic.
+            # Each pool is live trending → last-good → value, so a slow/broken
+            # Pokemon/YGO trending upstream no longer collapses the mix to Magic.
             pools = await asyncio.gather(
-                _provider_pool("pokemon", _trending_pokemon),
-                _provider_pool("magic", _trending_magic),
-                _provider_pool("yugioh", _trending_yugioh),
+                _provider_pool("pokemon", _trending_pokemon, _valuable_pokemon),
+                _provider_pool("magic", _trending_magic, _valuable_magic),
+                _provider_pool("yugioh", _trending_yugioh, _valuable_yugioh),
             )
             lists = [
                 _rotate_daily(pool, _SALT[key])
