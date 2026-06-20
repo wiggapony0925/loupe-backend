@@ -206,6 +206,46 @@ def test_distinct_by_name_drops_duplicate_printings():
     assert names == ["a", "c", "d"]  # second "greninja" dropped
 
 
+def test_price_of_falls_through_bands_and_handles_unpriced():
+    money = lambda amt: {"amount": amt, "currency": "USD"}  # noqa: E731
+    assert (
+        trending_service._price_of({"pricing_summary": {"market": money(12.5)}}) == 12.5
+    )
+    # No market → fall through to high.
+    assert trending_service._price_of({"pricing_summary": {"high": money(8.0)}}) == 8.0
+    # No price at all → None (so it can be filtered out).
+    assert trending_service._price_of({"pricing_summary": None}) is None
+    assert trending_service._price_of({}) is None
+
+
+def test_priced_arted_drops_unpriced_and_sorts_desc():
+    money = lambda amt: {"amount": amt, "currency": "USD"}  # noqa: E731
+    cards = [
+        {
+            "name": "Cheap",
+            "image_url": "a.png",
+            "pricing_summary": {"market": money(2)},
+        },
+        {
+            "name": "Rich",
+            "image_url": "b.png",
+            "pricing_summary": {"market": money(99)},
+        },
+        {"name": "NoPrice", "image_url": "c.png", "pricing_summary": None},
+        {
+            "name": "NoArt",
+            "images": None,
+            "image_url": None,
+            "pricing_summary": {"market": money(50)},
+        },
+    ]
+    out = trending_service._priced_arted(cards)
+    assert [c["name"] for c in out] == [
+        "Rich",
+        "Cheap",
+    ]  # priciest first, unpriced/art-less gone
+
+
 @pytest.mark.asyncio
 async def test_trending_rejects_invalid_tcg(client):
     resp = await client.get("/v1/cards/trending?tcg=onepiece")

@@ -39,14 +39,18 @@ _TRENDING_TCGS = {"pokemon", "magic", "yugioh", "all"}
 
 
 def _market_amount(card: dict[str, Any]) -> float | None:
-    """Best-available numeric price for a card dict (market, else low)."""
+    """Best-available numeric price for a card dict, or None if it has none.
+
+    Falls through market → high → mid → low so a card with only one price band
+    still counts as "priced" (and isn't dropped from the shopping rails)."""
     pricing = card.get("pricing_summary") or {}
-    chosen = pricing.get("market") or pricing.get("low")
-    if isinstance(chosen, dict) and chosen.get("amount") is not None:
-        try:
-            return float(chosen["amount"])
-        except (TypeError, ValueError):
-            return None
+    for key in ("market", "high", "mid", "low"):
+        chosen = pricing.get(key)
+        if isinstance(chosen, dict) and chosen.get("amount") is not None:
+            try:
+                return float(chosen["amount"])
+            except (TypeError, ValueError):
+                continue
     return None
 
 
@@ -155,11 +159,22 @@ async def public_trending(
     max_price: float | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=100),
 ) -> dict[str, Any]:
-    """Trending feed with the cut applied server-side (e.g. ``sort=value`` for
-    "most valuable", ``max_price=5`` for "steals under $5")."""
+    """Trending feed with the cut applied server-side.
+
+    ``sort=value`` ("most valuable") draws from a dedicated high-priced source —
+    not a re-sort of the newest-cards pool — so the rail is genuinely valuable.
+    Every returned card is guaranteed to have a price *and* art, so the UI never
+    renders a "—" priceless tile or a bare image.
+    """
     _cache(response)
-    body = await trending_service.get_trending(tcg=tcg, limit=100)
-    cards = list(body.get("cards") or [])
+    if sort == "value":
+        body = await trending_service.get_most_valuable(tcg=tcg, limit=100)
+    else:
+        body = await trending_service.get_trending(tcg=tcg, limit=100)
+
+    # Only show cards we can actually price — a card with no market value reads
+    # as broken in a shopping rail. `_market_amount` returns None when unpriced.
+    cards = [c for c in (body.get("cards") or []) if _market_amount(c) is not None]
 
     if max_price is not None:
         cards = [c for c in cards if (_market_amount(c) or 0.0) <= max_price]

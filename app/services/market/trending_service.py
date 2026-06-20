@@ -342,4 +342,145 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     return envelope
 
 
-__all__ = ["get_trending"]
+# ── Most valuable ─────────────────────────────────────────────────────────
+#
+# "Trending" sorts the *newest* cards, which are often too new to have a
+# price. "Most valuable" is the opposite cut: per provider we ask the catalog
+# for its priciest cards (Scryfall `order=usd`, Pokémon by Cardmarket avg,
+# YGO meta staples), keep only ones with a real price + art, and interleave
+# the three lists so the rail is genuinely valuable *and* spans all games.
+
+
+# "Most valuable" is a deliberate browse cut, cached daily and not on the
+# blocking home-hero path, so we give its (sometimes cold) upstream queries a
+# more generous budget than the snappy trending feed — otherwise a cold
+# Scryfall/Pokémon fetch times out and the rail collapses to one game.
+_VALUABLE_TIMEOUT_S = 7.0
+
+
+def _price_of(card: dict[str, Any]) -> float | None:
+    """Best numeric price for a card dict, or None when it has no price."""
+    pricing = card.get("pricing_summary") or {}
+    for key in ("market", "high", "mid", "low"):
+        chosen = pricing.get(key)
+        if isinstance(chosen, dict) and chosen.get("amount") is not None:
+            try:
+                return float(chosen["amount"])
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _priced_arted(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep distinct cards that have both a real price and artwork, priciest first."""
+    out = [c for c in cards if _has_art(c) and _price_of(c) is not None]
+    out.sort(key=lambda c: _price_of(c) or 0.0, reverse=True)
+    return _distinct_by_name(out)
+
+
+POKEMON_VALUABLE_QUERY = (
+    '(rarity:"Special Illustration Rare" OR rarity:"Illustration Rare" '
+    'OR rarity:"Hyper Rare" OR subtypes:VMAX OR subtypes:VSTAR OR subtypes:ex)'
+)
+SCRYFALL_VALUABLE_QUERY = "game:paper -is:digital"
+
+
+async def _valuable_pokemon(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
+    raw = await pokemon_tcg.search_cards(
+        POKEMON_VALUABLE_QUERY,
+        page=1,
+        page_size=min(MAX_LIMIT, pool * 2),
+        order_by="-cardmarket.prices.averageSellPrice",
+    )
+    return _priced_arted([_from_pokemon(c) for c in (raw.get("data") or [])])[:pool]
+
+
+async def _valuable_magic(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
+    from app.config import get_settings
+
+    s = get_settings()
+    body = await request_json(
+        integration="scryfall",
+        method="GET",
+        url="https://api.scryfall.com/cards/search",
+        params={"q": SCRYFALL_VALUABLE_QUERY, "order": "usd", "dir": "desc", "page": 1},
+        headers={"Accept": "application/json"},
+        timeout_s=s.http_timeout_seconds,
+        not_found_ok=True,
+    )
+    if not body:
+        return []
+    return _priced_arted([_from_scryfall(c) for c in (body.get("data") or [])])[:pool]
+
+
+async def _valuable_yugioh(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
+    from app.config import get_settings
+
+    s = get_settings()
+    body = await request_json(
+        integration="ygoprodeck",
+        method="GET",
+        url="https://db.ygoprodeck.com/api/v7/cardinfo.php",
+        params={"staple": "yes"},
+        headers={"Accept": "application/json"},
+        timeout_s=s.http_timeout_seconds,
+        not_found_ok=True,
+        extra_ok_statuses=(400,),
+    )
+    if not body:
+        return []
+    return _priced_arted([_from_yugioh(c) for c in (body.get("data") or [])])[:pool]
+
+
+async def get_most_valuable(
+    tcg: str = "all", limit: int = DEFAULT_LIMIT
+) -> dict[str, Any]:
+    """Return the priciest cards (with prices + art), interleaved across games."""
+    tcg = (tcg or "all").lower()
+    limit = max(1, min(MAX_LIMIT, int(limit)))
+
+    cache_key = f"loupe:cards:valuable:{tcg}:{limit}:{_today_key()}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        out = dict(cached)
+        out["source"] = "cached"
+        return out
+
+    cards: list[dict[str, Any]] = []
+    try:
+        if tcg == "pokemon":
+            cards = (await asyncio.wait_for(_valuable_pokemon(), _VALUABLE_TIMEOUT_S))[
+                :limit
+            ]
+        elif tcg == "magic":
+            cards = (await asyncio.wait_for(_valuable_magic(), _VALUABLE_TIMEOUT_S))[
+                :limit
+            ]
+        elif tcg == "yugioh":
+            cards = (await asyncio.wait_for(_valuable_yugioh(), _VALUABLE_TIMEOUT_S))[
+                :limit
+            ]
+        else:
+            results = await asyncio.gather(
+                asyncio.wait_for(_valuable_pokemon(), _VALUABLE_TIMEOUT_S),
+                asyncio.wait_for(_valuable_magic(), _VALUABLE_TIMEOUT_S),
+                asyncio.wait_for(_valuable_yugioh(), _VALUABLE_TIMEOUT_S),
+                return_exceptions=True,
+            )
+            lists = [r for r in results if isinstance(r, list) and r]
+            cards = _interleave(lists, limit)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("most-valuable unexpected error: %s", exc)
+        cards = []
+
+    envelope = {
+        "cards": cards,
+        "updated_at": _now_iso(),
+        "source": "live" if cards else "empty",
+    }
+    if cards:
+        await _cache_set(cache_key, envelope, TRENDING_TTL)
+    return envelope
+
+
+__all__ = ["get_most_valuable", "get_trending"]

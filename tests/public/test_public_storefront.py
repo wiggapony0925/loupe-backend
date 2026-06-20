@@ -123,10 +123,13 @@ async def test_public_trending_value_sort_and_price_ceiling(client, monkeypatch)
         _card("c", "C", "Rare", "S", 1.0),
     ]
 
-    async def fake_trending(tcg: str = "all", limit: int = 24) -> dict[str, Any]:
+    async def fake_feed(tcg: str = "all", limit: int = 24) -> dict[str, Any]:
         return {"cards": cards, "source": "live"}
 
-    monkeypatch.setattr(trending_service, "get_trending", fake_trending)
+    # `sort=value` now draws from the dedicated most-valuable source; the
+    # default/steals path still uses get_trending.
+    monkeypatch.setattr(trending_service, "get_trending", fake_feed)
+    monkeypatch.setattr(trending_service, "get_most_valuable", fake_feed)
 
     by_value = await client.get(
         "/v1/public/trending", params={"sort": "value", "limit": 2}
@@ -135,3 +138,27 @@ async def test_public_trending_value_sort_and_price_ceiling(client, monkeypatch)
 
     cheap = await client.get("/v1/public/trending", params={"max_price": 5})
     assert {c["id"] for c in cheap.json()["data"]["cards"]} == {"a", "c"}
+
+
+@pytest.mark.asyncio
+async def test_public_trending_drops_priceless_cards(client, monkeypatch):
+    # A card with no pricing_summary must never reach a shopping rail.
+    priced = _card("p", "Priced", "Rare", "S", 4.0)
+    priceless = {
+        "id": "x",
+        "name": "Unpriced",
+        "rarity": "Rare",
+        "set_name": "S",
+        "image_url": "https://img/x.png",
+        "pricing_summary": None,
+    }
+
+    async def fake_feed(tcg: str = "all", limit: int = 24) -> dict[str, Any]:
+        return {"cards": [priced, priceless], "source": "live"}
+
+    monkeypatch.setattr(trending_service, "get_trending", fake_feed)
+    monkeypatch.setattr(trending_service, "get_most_valuable", fake_feed)
+
+    resp = await client.get("/v1/public/trending")
+    ids = [c["id"] for c in resp.json()["data"]["cards"]]
+    assert ids == ["p"]  # the priceless card is filtered out
