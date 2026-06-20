@@ -162,6 +162,9 @@
   "/v1/cards/{card_id}/prices": [
     "GET"
   ],
+  "/v1/cards/{card_id}/valuation": [
+    "GET"
+  ],
   "/v1/careers/applications/{application_id}": [
     "GET"
   ],

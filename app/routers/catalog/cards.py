@@ -40,6 +40,7 @@ from app.services.market import (
     marketplace_prices_service,
     nearby_listings_service,
     trending_service,
+    valuation_service,
 )
 from app.services.market import sold_comps_service as comps_service
 
@@ -336,6 +337,21 @@ async def get_grade_summary(
     result = await grade_summary_service.get_grade_summary_for_card(
         card_id, window_days=window_days
     )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return result
+
+
+@router.get(
+    "/{card_id}/valuation",
+    summary="Loupe Value — equilibrium fair value + per-grade ladder (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def get_valuation(card_id: str) -> dict[str, Any]:
+    """One equilibrium "fair value" for the raw card (blended from sold comps,
+    live listings, and catalog market), the transparent input signals, and the
+    per-grade price ladder (PSA 10 / BGS 9.5 / …) — in a single round-trip."""
+    result = await valuation_service.get_valuation(card_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
     return result
