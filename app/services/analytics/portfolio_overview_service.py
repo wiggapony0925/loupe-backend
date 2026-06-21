@@ -33,6 +33,7 @@ from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.services.analytics.home_feed_service import _change_pct_1y
+from app.services.collection.portfolio_service import holding_value_usd
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -116,9 +117,10 @@ async def build_overview(db: AsyncSession, user: User) -> dict[str, Any]:
     grade_buckets: dict[str, int] = dict.fromkeys(_GRADE_BUCKET_ORDER, 0)
 
     for g, c, s in rows:
-        value = (
-            float(g.estimated_value_usd) if g.estimated_value_usd is not None else 0.0
-        )
+        # `holding_value_usd` is the single canonical valuation basis shared
+        # with the summary + history endpoints, so `stats.totalValueUsd` here
+        # equals the history endpoint's terminal point to the cent.
+        value = holding_value_usd(g)
         grade = float(g.grade) if g.grade is not None else None
         set_name = (s.name if s is not None else None) or (
             c.set.name

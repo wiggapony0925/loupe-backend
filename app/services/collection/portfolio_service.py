@@ -133,6 +133,35 @@ def current_market_value(card: Card | None) -> Decimal | None:
         return None
 
 
+def holding_value_usd(grade: GradedCard) -> float:
+    """Canonical per-holding "collection value" — the one valuation basis.
+
+    The honest value of a *graded* card is its grade-aware estimate
+    (``GradedCard.estimated_value_usd``): the value the scan pipeline / owner
+    assigned to *this slab*. The raw catalog market price
+    (``Card.card_metadata['pricing_summary']['market']``, and the
+    ``price_history`` snapshotted from it) is grade-agnostic and systematically
+    *undervalues* slabbed cards — a PSA 10 commands a large premium over the raw
+    card — so it must **not** be the valuation basis for collection totals.
+
+    Every endpoint that reports a collection total runs each holding through
+    THIS function so the numbers agree to the cent:
+
+    * ``GET /v1/grades/summary``   (:func:`summary`)
+    * ``GET /v1/grades/history``   (:func:`history` — terminal point)
+    * ``GET /v1/analytics/overview`` (``portfolio_overview_service``)
+
+    The raw ``price_history`` is still consulted, but only to derive the
+    *shape* of the value-over-time curve (relative price movement), never the
+    absolute total. See :func:`history`.
+    """
+    return (
+        float(grade.estimated_value_usd)
+        if grade.estimated_value_usd is not None
+        else 0.0
+    )
+
+
 async def summary(db: AsyncSession, user: User) -> dict:
     """Aggregate the user's vault into a single hero card payload."""
     rows = await _load_grades_with_cards(db, user)
@@ -147,15 +176,14 @@ async def summary(db: AsyncSession, user: User) -> dict:
     # `Set(c.set)` and `count(c.house == 'loupe')` in JS.
     unique_card_ids: set = set()
     loupe_graded_count = 0
-    for g, card in rows:
-        # Prefer the live market price from the linked Card row so the
-        # vault total tracks today's market instead of the snapshot
-        # captured at scan time. Fall back to the stored estimate when
-        # no fresh price exists yet.
-        live = current_market_value(card)
-        if live is not None:
-            total += live
-        elif g.estimated_value_usd is not None:
+    for g, _card in rows:
+        # Collection value is the grade-aware per-card estimate — the same
+        # `holding_value_usd` basis the analytics overview and the history
+        # endpoint use, so the vault total, the Command Center hero, and the
+        # Analytics tab all agree to the cent. (We sum `estimated_value_usd`
+        # directly here to keep `total` in Decimal for the cost-basis P/L math
+        # below; the float mirror is `holding_value_usd`.)
+        if g.estimated_value_usd is not None:
             total += g.estimated_value_usd
         if g.purchase_price_usd is not None:
             cost += g.purchase_price_usd
@@ -371,61 +399,74 @@ async def history(
     if not rows:
         return PortfolioHistory(range=range_, points=[], delta_usd=0.0, delta_pct=0.0)
 
+    today = datetime.now(UTC).date()
+
     # Establish the earliest reference date for ALL range.
     earliest_dates: list[date] = []
-    # (estimated_value_usd, price_history, live_today_value_for_this_card)
-    per_card_history: list[tuple[Decimal | None, list[tuple[date, float]], float]] = []
-    # Today's live total — reuses the same per-card market lookup the
-    # vault summary endpoint uses so the Command Center hero value and
-    # the Vault portfolio value always agree. Without this, history's
-    # last bucket sums the synthetic `price_history` while summary sums
-    # `pricing_summary.market.amount`, and the two screens show
-    # different numbers for the same portfolio.
-    live_today_total = 0.0
+    # Per card: (canonical_value, price_history, raw_ref_price_today).
+    #   canonical_value  — the grade-aware `holding_value_usd` (the basis the
+    #                       summary + overview endpoints also use).
+    #   price_history    — raw catalog-price points; used ONLY to derive the
+    #                       relative shape of the curve, not its level.
+    #   raw_ref_price_today — the most recent recorded raw price, the
+    #                       denominator that normalises the ratio so the
+    #                       terminal bucket lands exactly on canonical_value.
+    per_card_history: list[tuple[float, list[tuple[date, float]], float | None]] = []
+    # Today's canonical total — the single source of truth for "collection
+    # value". Pinning the terminal bucket to this sum is what makes the
+    # Command Center hero, the Vault summary, and the Analytics overview all
+    # report the same number. The per-card raw `price_history` only bends the
+    # line between past buckets; it never sets the absolute level (the raw
+    # catalog price is grade-agnostic and would undervalue slabs).
+    canonical_total = 0.0
     for g, c in rows:
         hist = _extract_price_history(c)
         if hist:
             earliest_dates.append(hist[0][0])
         if g.graded_at is not None:
             earliest_dates.append(g.graded_at.date())
-        live = current_market_value(c)
-        if live is not None:
-            live_value = float(live)
-        elif g.estimated_value_usd is not None:
-            live_value = float(g.estimated_value_usd)
-        else:
-            live_value = 0.0
-        per_card_history.append((g.estimated_value_usd, hist, live_value))
-        live_today_total += live_value
-    earliest = (
-        min(earliest_dates)
-        if earliest_dates
-        else datetime.now(UTC).date() - timedelta(days=30)
-    )
+        value = holding_value_usd(g)
+        # Most recent recorded raw price (no staleness cap — it's just the
+        # normalising denominator). None when the card has no price history,
+        # in which case the card stays flat at its canonical value.
+        raw_ref = _value_on(None, hist, today) if hist else None
+        per_card_history.append((value, hist, raw_ref))
+        canonical_total += value
+    earliest = min(earliest_dates) if earliest_dates else today - timedelta(days=30)
 
     buckets = _bucket_dates(range_, earliest)
     max_carry_days = _RANGE_MAX_CARRY_DAYS.get(range_)
     points: list[PortfolioPoint] = []
-    today = datetime.now(UTC).date()
     for b in buckets:
-        # The terminal bucket ("today") is pinned to the same live total
-        # the vault summary returns so both screens agree to the cent.
-        # Past buckets still use the per-card recorded history so the
-        # line shape reflects actual price movement.
+        # The terminal bucket ("today") is pinned to the canonical total so
+        # every collection-value surface agrees to the cent. Past buckets
+        # scale each card's canonical value by its raw-price ratio vs. today,
+        # so the line still reflects real market movement while staying in the
+        # same (grade-aware) units as the terminal point.
         if b >= today:
             points.append(
-                PortfolioPoint(date=b.isoformat(), price_usd=round(live_today_total, 2))
+                PortfolioPoint(date=b.isoformat(), price_usd=round(canonical_total, 2))
             )
             continue
         total = 0.0
-        for est, hist, live_value in per_card_history:
-            total += _value_on(
-                est,
+        for value, hist, raw_ref in per_card_history:
+            if not hist or raw_ref is None or raw_ref <= 0:
+                # No usable price signal → flat at the canonical value (this
+                # card contributes 0 to the range's delta rather than a
+                # fabricated move from the scan-time estimate gap).
+                total += value
+                continue
+            # `_value_on` returns the raw price on-or-before `b`, falling back
+            # to `raw_ref` when the bucket has no fresh point (no/stale
+            # history) → ratio 1.0 → flat at the canonical value.
+            raw_b = _value_on(
+                None,
                 hist,
                 b,
-                live_fallback=live_value,
+                live_fallback=raw_ref,
                 max_carry_days=max_carry_days,
             )
+            total += value * (raw_b / raw_ref)
         points.append(PortfolioPoint(date=b.isoformat(), price_usd=round(total, 2)))
 
     first = points[0].price_usd if points else 0.0
@@ -477,7 +518,9 @@ __all__ = [
     "CardSparkline",
     "PortfolioHistory",
     "PortfolioPoint",
+    "current_market_value",
     "history",
+    "holding_value_usd",
     "sparklines",
     "summary",
 ]

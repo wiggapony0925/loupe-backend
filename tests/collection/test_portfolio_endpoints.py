@@ -275,6 +275,84 @@ async def test_history_last_point_equals_sum_of_card_values(
 
 
 @pytest.mark.asyncio
+async def test_collection_value_agrees_across_endpoints(
+    client, auth_headers, db_session, created_user
+):
+    """The three collection-value surfaces must report the SAME total.
+
+    Regression for the dashboard bug where ``/v1/grades/history`` (raw
+    catalog market basis) reported ~$22k while ``/v1/analytics/overview``
+    (grade-aware estimate basis) reported ~$50k for the same account.
+
+    All three now run every holding through the one canonical
+    ``holding_value_usd`` (grade-aware ``estimated_value_usd``) basis:
+
+      * history terminal point  == summary.totalValueUsd
+      * summary.totalValueUsd   == overview.stats.totalValueUsd
+
+    The collection deliberately mixes cards whose *raw* market price and
+    *graded* estimate diverge, so a regression back to the raw basis would
+    fail the equality.
+    """
+    today = datetime.now(UTC).date()
+
+    # Card A: raw price_history (300 -> 360) AND a raw live market of 360,
+    # but the graded slab is estimated at 800. The raw numbers must NOT leak
+    # into the total — only the grade-aware 800 counts.
+    card_a = await make_card_with_price_history(
+        db_session, [(today - timedelta(days=15), 300.0), (today, 360.0)], name="A"
+    )
+    card_a.card_metadata = {
+        **(card_a.card_metadata or {}),
+        "pricing_summary": {"market": {"amount": 360.0, "currency": "USD"}},
+    }
+    db_session.add(card_a)
+
+    # Card B: no price history, no live market — estimate only.
+    card_b = await make_card(db_session, name="B")
+
+    # Card C: has price history, estimate 120.
+    card_c = await make_card_with_price_history(
+        db_session, [(today - timedelta(days=20), 90.0), (today, 110.0)], name="C"
+    )
+
+    for card, estimate in [(card_a, "800.00"), (card_b, "250.00"), (card_c, "120.00")]:
+        db_session.add(
+            GradedCard(
+                user_id=created_user.id,
+                card_id=card.id,
+                grade=Decimal("9.5"),
+                house=GradeHouseEnum.psa,
+                estimated_value_usd=Decimal(estimate),
+            )
+        )
+    await db_session.commit()
+
+    expected_total = 800.0 + 250.0 + 120.0
+
+    summary = assert_envelope_ok(
+        await client.get("/v1/grades/summary", headers=auth_headers)
+    )
+    overview = assert_envelope_ok(
+        await client.get("/v1/analytics/overview", headers=auth_headers)
+    )
+    history = assert_envelope_ok(
+        await client.get("/v1/grades/history?range=1M", headers=auth_headers)
+    )
+    history_total = history["points"][-1]["priceUsd"]
+    summary_total = summary["totalValueUsd"]
+    overview_total = overview["stats"]["totalValueUsd"]
+
+    # Each surface equals the canonical grade-aware total…
+    assert float(summary_total) == pytest.approx(expected_total)
+    assert float(overview_total) == pytest.approx(expected_total)
+    assert float(history_total) == pytest.approx(expected_total)
+    # …and therefore each other (the property the dashboard depends on).
+    assert float(history_total) == pytest.approx(float(overview_total))
+    assert float(summary_total) == pytest.approx(float(overview_total))
+
+
+@pytest.mark.asyncio
 async def test_history_points_are_date_ordered(
     client, auth_headers, db_session, created_user
 ):
@@ -411,10 +489,9 @@ async def test_history_1d_zero_delta_when_card_unchanged(
 async def test_history_no_price_history_reports_zero_delta(
     client, auth_headers, db_session, created_user, range_
 ):
-    """Regression: a card with a live market price but no recorded
-    ``price_history`` must NOT inflate the delta with the gap between
-    ``GradedCard.estimated_value_usd`` (scan-time guess) and today's
-    live market value.
+    """Regression: a card with no recorded ``price_history`` must NOT
+    inflate the delta, and its level must be the canonical grade-aware
+    estimate \u2014 never the raw catalog market price.
 
     The pre-fix behaviour treated the scan-time estimate as
     "yesterday's price" for every historical bucket, producing
@@ -422,13 +499,19 @@ async def test_history_no_price_history_reports_zero_delta(
     table hadn't been backfilled yet. The honest answer is ``0`` \u2014
     "we don't have historical pricing for this card so we can't tell
     you how it moved".
+
+    Collection value is ``holding_value_usd`` (``estimated_value_usd``),
+    the same grade-aware basis the analytics overview uses. The raw
+    ``pricing_summary.market`` price is grade-agnostic and would
+    undervalue a slab, so the terminal bucket must equal the estimate,
+    not the raw market number.
     """
-    # Card has pricing_summary (live market = $1500) but no price_history.
+    # Card has a raw catalog price (pricing_summary.market = $1500) but no
+    # price_history. The raw price must NOT become the collection-value level.
     card = await make_card(db_session, name="No-History Chase Card")
     card.card_metadata = {"pricing_summary": {"market": {"amount": 1500.0}}}
     db_session.add(card)
-    # Add to user's vault with a low scan-time estimate (e.g. user
-    # guessed $100 at scan time; real market is $1500).
+    # Add to user's vault with the grade-aware estimate ($100) for this slab.
     db_session.add(
         GradedCard(
             user_id=created_user.id,
@@ -448,10 +531,12 @@ async def test_history_no_price_history_reports_zero_delta(
         f"got {body['deltaUsd']}"
     )
     assert body["deltaPct"] == pytest.approx(0.0)
-    # Today's bucket still reflects live market value, not the estimate.
+    # Terminal bucket is the canonical grade-aware estimate ($100), the same
+    # value the analytics overview reports \u2014 NOT the raw market price ($1500).
     last_point = body["points"][-1]["priceUsd"]
-    assert last_point == pytest.approx(1500.0), (
-        f"{range_}: today bucket must equal live market ($1500), got ${last_point}"
+    assert last_point == pytest.approx(100.0), (
+        f"{range_}: today bucket must equal the canonical estimate ($100), "
+        f"got ${last_point}"
     )
 
 
