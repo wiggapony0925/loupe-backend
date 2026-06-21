@@ -102,7 +102,9 @@ async def upload_report_pdf(
         body=pdf_bytes,
         content_type="application/pdf",
     )
-    _log.info("uploaded report %s for user %s (%d bytes)", report_id, user_id, len(pdf_bytes))
+    _log.info(
+        "uploaded report %s for user %s (%d bytes)", report_id, user_id, len(pdf_bytes)
+    )
     return key
 
 

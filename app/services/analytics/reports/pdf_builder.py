@@ -329,9 +329,7 @@ def _section_allocation(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> 
     if any(count > 0 for _, count in snap.grade_buckets):
         flow.append(_grade_bar_chart(snap))
     else:
-        flow.append(
-            Paragraph("No graded cards in this period yet.", st["dim"])
-        )
+        flow.append(Paragraph("No graded cards in this period yet.", st["dim"]))
     return flow
 
 
