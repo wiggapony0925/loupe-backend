@@ -66,28 +66,34 @@ def _empty(game: str, page: int, page_size: int) -> dict[str, Any]:
 
 
 async def browse_catalog(
-    game: str, page: int, page_size: int, sort: str = "name"
+    game: str, page: int, page_size: int, sort: str = "name", set_id: str | None = None
 ) -> dict[str, Any]:
     """One page of a game's catalog — cached, sorted server-side, never raises.
 
     Serves from Redis when warm; on a cold miss fetches upstream. If the upstream
     is slow / down / circuit-open, returns an empty page (never a 500) so the
     client degrades cleanly instead of hanging or erroring.
+
+    When ``set_id`` is given (e.g. ``pokemontcg:base1``) the page is scoped to
+    that single set — powering the "browse a set" surface. Supported for Pokémon
+    and Magic; other games return an empty page for a set filter.
     """
     game = (game or "").lower()
     sort = sort if sort in _POKEMON_ORDER else "name"
 
-    cache_key = f"{_CACHE_PREFIX}:{game}:{sort}:{page}:{page_size}"
+    set_key = (set_id or "").strip() or "_"
+    cache_key = f"{_CACHE_PREFIX}:{game}:{set_key}:{sort}:{page}:{page_size}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         return cached
 
     try:
-        result = await _fetch_catalog(game, page, page_size, sort)
+        result = await _fetch_catalog(game, page, page_size, sort, set_id)
     except Exception as exc:
         logger.warning(
-            "browse_catalog upstream failed game=%s page=%s sort=%s: %s",
+            "browse_catalog upstream failed game=%s set=%s page=%s sort=%s: %s",
             game,
+            set_key,
             page,
             sort,
             exc,
@@ -100,15 +106,19 @@ async def browse_catalog(
 
 
 async def _fetch_catalog(
-    game: str, page: int, page_size: int, sort: str
+    game: str, page: int, page_size: int, sort: str, set_id: str | None = None
 ) -> dict[str, Any]:
     """Fetch one catalog page from the right upstream. May raise on upstream failure."""
     s = get_settings()
 
+    # Provider-local set code (drop the "<source>:" prefix, e.g. pokemontcg:base1).
+    prov_set = set_id.split(":")[-1].strip() if set_id else ""
+
     if game in ("pokemon", "all"):
-        # Empty query → the Pokémon TCG API returns the full catalog.
+        # Empty query → full catalog; `set.id:<code>` scopes to one set.
+        q = f"set.id:{prov_set}" if prov_set else ""
         raw = await pokemon_tcg.search_cards(
-            "", page=page, page_size=page_size, order_by=_POKEMON_ORDER[sort]
+            q, page=page, page_size=page_size, order_by=_POKEMON_ORDER[sort]
         )
         cards = [_from_pokemon(c) for c in (raw.get("data") or [])]
         total = int(raw.get("totalCount") or len(cards))
@@ -130,7 +140,7 @@ async def _fetch_catalog(
             method="GET",
             url="https://api.scryfall.com/cards/search",
             params={
-                "q": _MAGIC_ALL,
+                "q": f"set:{prov_set}" if prov_set else _MAGIC_ALL,
                 "order": order,
                 "dir": direction,
                 "unique": "prints",
@@ -154,6 +164,10 @@ async def _fetch_catalog(
         }
 
     if game == "yugioh":
+        # No clean per-set browse on this provider yet — a set filter returns an
+        # empty page rather than the whole game (which would be wrong).
+        if prov_set:
+            return _empty(game, page, page_size)
         offset = (page - 1) * page_size
         body = await request_json(
             integration="ygoprodeck",

@@ -183,14 +183,18 @@ async def public_browse(
     game: str = Query(
         "pokemon", pattern="^(pokemon|magic|yugioh|lorcana|onepiece|digimon|all)$"
     ),
+    set_id: str | None = Query(None, alias="set", max_length=120),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=50),
     sort: str = Query("name", pattern="^(name|newest|price_asc|price_desc)$"),
 ) -> dict[str, Any]:
     """Page through an entire game's upstream catalog (real ``total`` for paging),
-    sorted server-side. Unsupported games return an empty page rather than an error."""
+    sorted server-side. With ``set`` (e.g. ``pokemontcg:base1``) the page is scoped
+    to a single set. Unsupported games return an empty page rather than an error."""
     _cache(response)
-    return await catalog_browse_service.browse_catalog(game, page, page_size, sort=sort)
+    return await catalog_browse_service.browse_catalog(
+        game, page, page_size, sort=sort, set_id=set_id
+    )
 
 
 @router.get(

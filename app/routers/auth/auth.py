@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.apple import verify_apple_identity_token
+from app.auth.dependencies import AUTH_COOKIE
 from app.auth.google import verify_google_id_token
 from app.auth.jwt import issue_token, verify_token
 from app.config import get_settings
@@ -48,6 +49,27 @@ def _build_pair(user_id, user_read: UserRead) -> TokenPair:
     )
 
 
+def _issue(response: Response, user_id, user_read: UserRead) -> TokenPair:
+    """Build a TokenPair AND set the access token as an HttpOnly cookie.
+
+    The body still carries the tokens (mobile reads them for its Bearer flow);
+    the cookie is an additive, browser-only convenience so the web can move off
+    JS-readable storage. `Secure` is on in production; `SameSite=Lax` is safe
+    because the web calls the API same-origin (nginx proxies /v1).
+    """
+    pair = _build_pair(user_id, user_read)
+    response.set_cookie(
+        key=AUTH_COOKIE,
+        value=pair.access_token,
+        max_age=pair.expires_in,
+        httponly=True,
+        secure=get_settings().app_env == "production",
+        samesite="lax",
+        path="/",
+    )
+    return pair
+
+
 @router.post(
     "/register",
     response_model=TokenPair,
@@ -55,7 +77,9 @@ def _build_pair(user_id, user_read: UserRead) -> TokenPair:
     summary="Create account with email + password",
 )
 async def register(
-    payload: EmailSignUpRequest, db: AsyncSession = Depends(get_db)
+    payload: EmailSignUpRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
     try:
         user = await user_service.create_with_password(
@@ -70,7 +94,7 @@ async def register(
             detail="An account with that email already exists.",
         ) from exc
     await email_service.send_welcome(user)  # best-effort; no-op without a provider
-    return _build_pair(user.id, UserRead.model_validate(user))
+    return _issue(response, user.id, UserRead.model_validate(user))
 
 
 @router.post(
@@ -79,7 +103,9 @@ async def register(
     summary="Sign in with email + password",
 )
 async def login(
-    payload: EmailSignInRequest, db: AsyncSession = Depends(get_db)
+    payload: EmailSignInRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
     user = await user_service.authenticate_with_password(
         db, email=payload.email, password=payload.password
@@ -89,7 +115,7 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
         )
-    return _build_pair(user.id, UserRead.model_validate(user))
+    return _issue(response, user.id, UserRead.model_validate(user))
 
 
 @router.post(
@@ -98,7 +124,9 @@ async def login(
     summary="Dev-only: sign in by email without a password",
 )
 async def dev_login(
-    payload: DevLoginRequest, db: AsyncSession = Depends(get_db)
+    payload: DevLoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
     """Find-or-create a user by email, no password required.
 
@@ -109,12 +137,14 @@ async def dev_login(
     user = await user_service.find_or_create_dev_user(
         db, email=payload.email, display_name=payload.display_name
     )
-    return _build_pair(user.id, UserRead.model_validate(user))
+    return _issue(response, user.id, UserRead.model_validate(user))
 
 
 @router.post("/apple", response_model=TokenPair, summary="Sign in with Apple")
 async def sign_in_with_apple(
-    payload: AppleSignInRequest, db: AsyncSession = Depends(get_db)
+    payload: AppleSignInRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
     try:
         claims = await verify_apple_identity_token(payload.identity_token)
@@ -130,12 +160,14 @@ async def sign_in_with_apple(
         email=claims.email,
         display_name=payload.display_name,
     )
-    return _build_pair(user.id, UserRead.model_validate(user))
+    return _issue(response, user.id, UserRead.model_validate(user))
 
 
 @router.post("/google", response_model=TokenPair, summary="Sign in with Google")
 async def sign_in_with_google(
-    payload: GoogleSignInRequest, db: AsyncSession = Depends(get_db)
+    payload: GoogleSignInRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
     try:
         claims = await verify_google_id_token(payload.id_token)
@@ -152,12 +184,14 @@ async def sign_in_with_google(
         display_name=payload.display_name or claims.name,
         avatar_url=claims.picture,
     )
-    return _build_pair(user.id, UserRead.model_validate(user))
+    return _issue(response, user.id, UserRead.model_validate(user))
 
 
 @router.post("/refresh", response_model=TokenPair, summary="Refresh access token")
 async def refresh(
-    payload: RefreshRequest, db: AsyncSession = Depends(get_db)
+    payload: RefreshRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
 ) -> TokenPair:
     try:
         claims = verify_token(payload.refresh_token, expected_type="refresh")
@@ -172,7 +206,18 @@ async def refresh(
     user = await user_service.get_by_id(db, user_id)
     if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=401, detail="User not found")
-    return _build_pair(user.id, UserRead.model_validate(user))
+    return _issue(response, user.id, UserRead.model_validate(user))
+
+
+@router.post(
+    "/logout",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Clear the auth cookie (web sign-out)",
+)
+async def logout(response: Response) -> None:
+    """Expire the HttpOnly auth cookie. JS can't clear it, so the web calls this
+    on sign-out. Bearer clients (mobile) simply drop their stored token."""
+    response.delete_cookie(AUTH_COOKIE, path="/")
 
 
 __all__ = ["router"]

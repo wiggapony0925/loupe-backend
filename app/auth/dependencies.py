@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,23 @@ from app.utils.logger import get_logger
 logger = get_logger("auth.deps")
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+#: Name of the HttpOnly cookie the web client uses (set on auth responses). The
+#: Authorization header still takes precedence — mobile keeps sending a bearer
+#: token — so this is a pure, backward-compatible fallback for browsers.
+AUTH_COOKIE = "loupe_token"
+
+
+def _credentials(
+    request: Request, creds: HTTPAuthorizationCredentials | None
+) -> HTTPAuthorizationCredentials | None:
+    """Prefer the Authorization header; fall back to the auth cookie (web)."""
+    if creds is not None and creds.credentials:
+        return creds
+    token = request.cookies.get(AUTH_COOKIE)
+    if token:
+        return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    return None
 
 
 async def _resolve_user(
@@ -77,21 +94,23 @@ async def _resolve_user(
 
 
 async def require_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """Dependency: a valid signed-in user, or HTTP 401."""
-    user = await _resolve_user(creds, db, required=True)
+    user = await _resolve_user(_credentials(request, creds), db, required=True)
     assert user is not None
     return user
 
 
 async def optional_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User | None:
     """Dependency: user if present + valid, else ``None``."""
-    return await _resolve_user(creds, db, required=False)
+    return await _resolve_user(_credentials(request, creds), db, required=False)
 
 
 def is_super_admin(user: User) -> bool:
@@ -127,6 +146,7 @@ async def require_admin(user: User = Depends(require_user)) -> User:
 
 
 __all__ = [
+    "AUTH_COOKIE",
     "bearer_scheme",
     "is_admin_user",
     "is_super_admin",

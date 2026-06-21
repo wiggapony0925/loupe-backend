@@ -30,6 +30,7 @@ env:
   API_SERVICE: loupe-api
   WORKER_SERVICE: loupe-worker
   MIGRATE_JOB: loupe-migrate
+  INGEST_JOB: loupe-ingest
 
 jobs:
   deploy:
@@ -122,6 +123,18 @@ jobs:
             --region "${GCP_REGION}" \
             --project "${GCP_PROJECT}" \
             --quiet
+
+      - name: Update loupe-ingest job image
+        # The Redis-free ingestion Job (catalog/prices/snapshots/alerts), run on
+        # a schedule by Cloud Scheduler. Keep it on current code each deploy.
+        # Non-fatal: a missing job (e.g. not yet created) must not block deploy.
+        continue-on-error: true
+        run: |
+          gcloud run jobs update "${INGEST_JOB}" \
+            --image "${{ steps.tag.outputs.image_sha }}" \
+            --region "${GCP_REGION}" \
+            --project "${GCP_PROJECT}" \
+            --quiet || echo "ingest job update skipped (job not present?)"
 
       - name: Smoke test /health
         run: |
