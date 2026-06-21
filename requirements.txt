@@ -23,6 +23,9 @@ arq>=0.26.0,<1.0.0
 # --- HTTP & cloud ---
 httpx>=0.28.0,<1.0.0
 aioboto3>=13.2.0,<14.0.0
+# Native GCS for persisting PDF statements (Cloud Run SA has objectAdmin on
+# the reports bucket; ADC — no HMAC keys). Falls back to the S3 stub in tests.
+google-cloud-storage>=2.18.0,<4.0.0
 tenacity>=9.0.0,<10.0.0
 
 # --- HTML parsing (130point scraper) ---

@@ -24,23 +24,58 @@ def _app_url() -> str:
     return get_settings().app_public_url.rstrip("/")
 
 
+# Brand palette — mirrors the loupe-frontend / loupe-web theme tokens.
+_INK = "#0E1117"
+_INK_DIM = "#5B6470"
+_LINE = "#E5E8EC"
+_PAGE_BG = "#F4F5F7"
+_MINT = "#00C896"
+_FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
+
+
 def _wrap(heading: str, body_html: str, cta: tuple[str, str] | None = None) -> str:
-    """Brand wrapper: heading + body + optional (label, href) CTA button."""
+    """Themed Loupe email: dark header band, white content card, mint CTA.
+
+    Inline styles only (email clients strip <style>), a 560px card on a soft
+    page background, dark-ink-on-mint button text for contrast.
+    """
     button = (
-        f'<p style="margin:24px 0;"><a href="{cta[1]}" style="background:#00a86e;'
-        f"color:#fff;text-decoration:none;padding:12px 20px;border-radius:10px;"
-        f'font-weight:600;">{cta[0]}</a></p>'
+        f'<table role="presentation" cellspacing="0" cellpadding="0" '
+        f'style="margin:26px 0 6px;"><tr><td '
+        f'style="border-radius:999px;background:{_MINT};">'
+        f'<a href="{cta[1]}" style="display:inline-block;padding:13px 26px;'
+        f"color:{_INK};text-decoration:none;font-weight:700;font-size:15px;"
+        f'font-family:{_FONT};">{cta[0]} &rarr;</a></td></tr></table>'
         if cta
         else ""
     )
+    app_url = _app_url()
     return (
-        f'<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;'
-        f'max-width:520px;margin:0 auto;color:#1c1c1e;line-height:1.6;">'
-        f'<h2 style="color:#0b0b0d;">{heading}</h2>'
-        f"{body_html}{button}"
-        f'<hr style="border:0;border-top:1px solid #e5e5ea;margin:28px 0 12px;">'
-        f'<p style="color:#6e6e73;font-size:13px;">— The Loupe team</p>'
+        f'<div style="background:{_PAGE_BG};padding:28px 16px;font-family:{_FONT};">'
+        f'<div style="max-width:560px;margin:0 auto;background:#ffffff;'
+        f"border:1px solid {_LINE};border-radius:18px;overflow:hidden;"
+        f'box-shadow:0 8px 24px rgba(16,24,40,0.06);">'
+        f'<div style="background:{_INK};padding:20px 28px;">'
+        f'<span style="color:{_MINT};font-size:17px;font-weight:800;'
+        f'letter-spacing:0.3px;">&#9670; LOUPE</span>'
+        f'<span style="color:#8A93A0;font-size:12px;font-weight:600;'
+        f'float:right;padding-top:5px;">PORTFOLIO &middot; MARKETS</span>'
         f"</div>"
+        f'<div style="padding:30px 28px 8px;color:{_INK};line-height:1.62;'
+        f'font-size:15px;">'
+        f'<h1 style="margin:0 0 14px;color:{_INK};font-size:22px;'
+        f'font-weight:800;letter-spacing:-0.02em;">{heading}</h1>'
+        f"{body_html}{button}"
+        f"</div>"
+        f'<div style="border-top:1px solid {_LINE};padding:18px 28px 24px;'
+        f'color:{_INK_DIM};font-size:13px;line-height:1.6;">'
+        f'<p style="margin:0 0 6px;font-weight:600;color:{_INK};">'
+        f"&mdash; The Loupe team</p>"
+        f'<p style="margin:0;">Track every card like a position &mdash; on the '
+        f'web and in your pocket. <a href="{app_url}" '
+        f'style="color:{_MINT};text-decoration:none;font-weight:600;">loupe</a></p>'
+        f"</div>"
+        f"</div></div>"
     )
 
 

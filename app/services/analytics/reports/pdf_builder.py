@@ -73,6 +73,11 @@ def _pct(v: float | None) -> str:
     return f"{sign}{v:.2f}%"
 
 
+def _eyebrow(text: str, st: dict[str, ParagraphStyle]) -> Paragraph:
+    """Small uppercase section kicker, like a statement's section labels."""
+    return Paragraph(text.upper(), st["eyebrow"])
+
+
 def _styles() -> dict[str, ParagraphStyle]:
     base = getSampleStyleSheet()
     return {
@@ -128,6 +133,15 @@ def _styles() -> dict[str, ParagraphStyle]:
             leading=44,
             textColor=INK,
         ),
+        "brand": ParagraphStyle(
+            "brand",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=15,
+            leading=18,
+            textColor=MINT,
+            spaceAfter=2,
+        ),
     }
 
 
@@ -144,16 +158,58 @@ def _section_cover(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
         st["body"],
     )
     return [
-        Paragraph("LOUPE", st["eyebrow"]),
+        Paragraph("◆ LOUPE", st["brand"]),
         Paragraph("Portfolio Statement", st["h1"]),
         Paragraph(snap.period_label, st["dim"]),
-        Spacer(1, 0.3 * inch),
-        Paragraph("Closing value", st["eyebrow"]),
+        Spacer(1, 0.28 * inch),
+        _account_table(snap, st),
+        Spacer(1, 0.32 * inch),
+        _eyebrow("Closing value", st),
         Paragraph(_money(snap.closing_value_usd), st["hero"]),
         delta_para,
-        Spacer(1, 0.3 * inch),
+        Spacer(1, 0.32 * inch),
+        _eyebrow("Account summary", st),
+        Spacer(1, 0.06 * inch),
         _summary_table(snap, st),
     ]
+
+
+def _account_table(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> Table:
+    """Two-column account-info strip, the way a brokerage statement opens."""
+    statement_date = datetime.now(UTC).strftime("%B %d, %Y")
+    period = (
+        f"{snap.period_start.strftime('%b %d, %Y')} – "
+        f"{snap.period_end.strftime('%b %d, %Y')}"
+    )
+    data = [
+        ["Account holder", snap.user_email, "Statement date", statement_date],
+        ["Statement period", period, "Vault holdings", f"{snap.card_count:,} cards"],
+    ]
+    t = Table(
+        data,
+        colWidths=[1.25 * inch, 2.0 * inch, 1.2 * inch, 1.45 * inch],
+    )
+    t.setStyle(
+        TableStyle(
+            [
+                ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+                ("FONTNAME", (1, 0), (1, -1), "Helvetica-Bold"),
+                ("FONTNAME", (3, 0), (3, -1), "Helvetica-Bold"),
+                ("TEXTCOLOR", (0, 0), (0, -1), INK_DIM),
+                ("TEXTCOLOR", (2, 0), (2, -1), INK_DIM),
+                ("TEXTCOLOR", (1, 0), (1, -1), INK),
+                ("TEXTCOLOR", (3, 0), (3, -1), INK),
+                ("BACKGROUND", (0, 0), (-1, -1), BG_ELEV),
+                ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.5, LINE),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    return t
 
 
 def _summary_table(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> Table:
@@ -190,6 +246,7 @@ def _summary_table(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> Table
 def _section_performance(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
     if len(snap.series) < 2:
         return [
+            _eyebrow("Performance", st),
             Paragraph("Performance", st["h2"]),
             Paragraph(
                 "Not enough price history was available during this period to "
@@ -199,6 +256,7 @@ def _section_performance(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) ->
             ),
         ]
     return [
+        _eyebrow("Performance", st),
         Paragraph("Performance", st["h2"]),
         Paragraph("Daily value across the period.", st["dim"]),
         Spacer(1, 0.15 * inch),
@@ -253,8 +311,9 @@ def _line_chart(snap: ReportSnapshot) -> Drawing:
 
 
 def _section_allocation(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
-    flow = [Paragraph("Allocation", st["h2"])]
-    if not snap.tcg_breakdown:
+    flow = [_eyebrow("Composition", st), Paragraph("Allocation", st["h2"])]
+    # A breakdown is only meaningful when at least one game carries value.
+    if not snap.tcg_breakdown or sum(v for _, v in snap.tcg_breakdown) <= 0:
         flow.append(
             Paragraph("No cards in vault yet — nothing to allocate.", st["dim"])
         )
@@ -264,7 +323,15 @@ def _section_allocation(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> 
     flow.append(_pie_chart(snap))
     flow.append(Spacer(1, 0.3 * inch))
     flow.append(Paragraph("Grade distribution", st["h2"]))
-    flow.append(_grade_bar_chart(snap))
+    # ReportLab's VerticalBarChart throws on empty data — guard it so a vault
+    # with no graded buckets degrades to an honest note instead of failing the
+    # whole statement.
+    if any(count > 0 for _, count in snap.grade_buckets):
+        flow.append(_grade_bar_chart(snap))
+    else:
+        flow.append(
+            Paragraph("No graded cards in this period yet.", st["dim"])
+        )
     return flow
 
 
@@ -334,7 +401,7 @@ def _grade_bar_chart(snap: ReportSnapshot) -> Drawing:
 
 
 def _section_movers(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
-    flow = [Paragraph("Top movers", st["h2"])]
+    flow = [_eyebrow("Markets", st), Paragraph("Top movers", st["h2"])]
     if not snap.top_gainers and not snap.top_losers:
         flow.append(
             Paragraph("No measurable price movement during this window.", st["dim"])
@@ -383,7 +450,7 @@ def _movers_table(rows, *, is_gain: bool) -> Table:
 
 
 def _section_holdings(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
-    flow = [Paragraph("Holdings", st["h2"])]
+    flow = [_eyebrow("Positions", st), Paragraph("Holdings", st["h2"])]
     if not snap.holdings:
         flow.append(
             Paragraph(
@@ -477,9 +544,7 @@ def _make_chrome(snap: ReportSnapshot) -> Callable:
 # ─── Public entry point ──────────────────────────────────────────────────
 
 
-def render_pdf(snap: ReportSnapshot) -> bytes:
-    """Render a portfolio statement to PDF bytes, ready for upload."""
-    buf = io.BytesIO()
+def _new_doc(buf: io.BytesIO, snap: ReportSnapshot) -> BaseDocTemplate:
     doc = BaseDocTemplate(
         buf,
         pagesize=LETTER,
@@ -505,21 +570,39 @@ def render_pdf(snap: ReportSnapshot) -> bytes:
     doc.addPageTemplates(
         [PageTemplate(id="default", frames=[frame], onPage=_make_chrome(snap))]
     )
+    return doc
 
+
+def render_pdf(snap: ReportSnapshot) -> bytes:
+    """Render a portfolio statement to PDF bytes, ready for upload.
+
+    Always returns a valid PDF: if the full (charted) build hits a ReportLab
+    edge case, we fall back to the text-only cover so statement generation can
+    never hard-fail.
+    """
     st = _styles()
-    flow: list = []
-    flow.extend(_section_cover(snap, st))
-    flow.append(PageBreak())
-    flow.extend(_section_performance(snap, st))
-    flow.append(PageBreak())
-    flow.extend(_section_allocation(snap, st))
-    flow.append(PageBreak())
-    flow.extend(_section_movers(snap, st))
-    flow.append(PageBreak())
-    flow.extend(_section_holdings(snap, st))
-
-    doc.build(flow)
-    return buf.getvalue()
+    try:
+        buf = io.BytesIO()
+        doc = _new_doc(buf, snap)
+        flow: list = []
+        flow.extend(_section_cover(snap, st))
+        flow.append(PageBreak())
+        flow.extend(_section_performance(snap, st))
+        flow.append(PageBreak())
+        flow.extend(_section_allocation(snap, st))
+        flow.append(PageBreak())
+        flow.extend(_section_movers(snap, st))
+        flow.append(PageBreak())
+        flow.extend(_section_holdings(snap, st))
+        doc.build(flow)
+        return buf.getvalue()
+    except Exception:  # pragma: no cover - defensive: never fail a statement
+        # Charts are the only thing that can throw here; rebuild the summary
+        # cover alone so the user always gets a downloadable statement.
+        buf = io.BytesIO()
+        doc = _new_doc(buf, snap)
+        doc.build(list(_section_cover(snap, st)))
+        return buf.getvalue()
 
 
 __all__ = ["render_pdf"]
