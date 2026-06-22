@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_user
 from app.db import get_db
+from app.integrations import pricecharting
 from app.models.enums import SealedProductTypeEnum, TcgEnum
 from app.models.user import User
 from app.schemas.sealed import (
@@ -92,9 +93,12 @@ async def get_catalog_item(
     response_model=SealedMarketRead,
     summary="Live market snapshot for a sealed product",
     description=(
-        "Current TCGplayer low/mid/high/market for one sealed product, plus its "
-        "MSRP. Sealed SKUs have no stored history, so this is a point-in-time "
-        "snapshot; price fields are null when no live quote resolves."
+        "Current low/mid/high/market for one sealed product, plus its MSRP. "
+        "The headline market comes from TCGplayer (richest quote) and falls "
+        "back to PriceCharting's structured per-SKU match when TCGplayer's "
+        "fuzzy catalog name doesn't resolve. Sealed SKUs have no stored "
+        "history, so this is a point-in-time snapshot; price fields are null "
+        "when no source resolves a quote."
     ),
 )
 async def get_market(
@@ -103,7 +107,17 @@ async def get_market(
 ) -> SealedMarketRead:
     row = await sealed_service.get_catalog_item(db, product_id)
     snap = await sealed_image_resolver.resolve_market(row) or {}
+
+    # TCGplayer (via TCGcsv) gives the richest quote (low/mid/high), so prefer
+    # it for the headline. PriceCharting indexes sealed SKUs cleanly, so it
+    # fills the gaps where TCGplayer's fuzzy name match found no market.
     market = snap.get("market")
+    source = snap.get("source") if market is not None else None
+    if market is None:
+        pc = await pricecharting.resolve_sealed_market(row) or {}
+        if pc.get("market") is not None:
+            market = pc["market"]
+            source = pc["source"]
     today = utcnow().date().isoformat()
 
     # Accumulate today's observation into the product's history (dedupe by day),
@@ -134,7 +148,7 @@ async def get_market(
         low=snap.get("low"),
         mid=snap.get("mid"),
         high=snap.get("high"),
-        source=snap.get("source"),
+        source=source,
         marketplace_url=snap.get("marketplace_url"),
         points=points,
     )

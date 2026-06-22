@@ -59,6 +59,9 @@
   "/v1/admin/users/{user_id}/ban": [
     "POST"
   ],
+  "/v1/admin/users/{user_id}/plan": [
+    "PATCH"
+  ],
   "/v1/admin/users/{user_id}/role": [
     "PATCH"
   ],
@@ -228,6 +231,15 @@
   "/v1/me": [
     "GET",
     "PATCH"
+  ],
+  "/v1/me/billing/checkout": [
+    "POST"
+  ],
+  "/v1/me/billing/config": [
+    "GET"
+  ],
+  "/v1/me/entitlements": [
+    "GET"
   ],
   "/v1/me/settings": [
     "GET",
