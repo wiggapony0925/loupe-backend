@@ -151,6 +151,10 @@ async def generate_report(
     await db.commit()
     await db.refresh(row)
 
+    # Track the stage we're in so a failure surfaces *where* it broke
+    # (snapshot / render / upload) rather than a bare, context-free
+    # exception string. This is what the web Statements page shows.
+    stage = "snapshot"
     try:
         snap = await build_snapshot(
             db,
@@ -159,7 +163,9 @@ async def generate_report(
             period_start=period_start,
             period_end=period_end,
         )
+        stage = "render"
         pdf_bytes = render_pdf(snap)
+        stage = "upload"
         storage_key = await upload_report_pdf(user.id, row.id, pdf_bytes)
         row.storage_key = storage_key
         row.file_size_bytes = len(pdf_bytes)
@@ -167,9 +173,14 @@ async def generate_report(
         row.generated_at = datetime.now(UTC)
         row.error_message = None
     except Exception as exc:
-        _log.exception("report generation failed for user=%s period=%s", user.id, label)
+        _log.exception(
+            "report generation failed for user=%s period=%s at stage=%s",
+            user.id,
+            label,
+            stage,
+        )
         row.status = ReportStatusEnum.failed
-        row.error_message = str(exc)[:500]
+        row.error_message = f"{stage}: {exc}"[:500]
     await db.commit()
     await db.refresh(row)
     return row

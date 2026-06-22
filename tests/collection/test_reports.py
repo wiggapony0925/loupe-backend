@@ -303,3 +303,116 @@ async def test_run_close_cycle_materialises_past_periods(db_session, created_use
     )
     assert len(rows) == first["generated"]
     assert all(r.status.value == "ready" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_run_close_cycle_retries_failed_reports(db_session, created_user):
+    """A previously-`failed` statement is re-attempted (not skipped forever).
+
+    Regression: the scheduler used to treat *any* existing row as "done",
+    so a statement that failed once (e.g. a transient storage/upload blip)
+    stayed `failed` permanently and never self-healed.
+    """
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from app.models.enums import GradeHouseEnum, ReportStatusEnum
+    from app.models.grade import GradedCard
+    from app.models.user import User
+    from app.models.user_report import UserReport
+    from app.services.analytics.reports.scheduler import run_close_cycle
+    from tests.factories import make_card
+
+    long_ago = datetime.now(UTC) - timedelta(days=400)
+    await db_session.execute(
+        User.__table__.update()
+        .where(User.id == created_user.id)
+        .values(created_at=long_ago)
+    )
+    card = await make_card(db_session)
+    grade = GradedCard(
+        user_id=created_user.id,
+        card_id=card.id,
+        grade=Decimal("9.5"),
+        house=GradeHouseEnum.psa,
+    )
+    db_session.add(grade)
+    await db_session.commit()
+    await db_session.execute(
+        GradedCard.__table__.update()
+        .where(GradedCard.id == grade.id)
+        .values(created_at=long_ago)
+    )
+    await db_session.commit()
+
+    # First cycle materialises everything as `ready`.
+    first = await run_close_cycle()
+    assert first["generated"] > 0
+    assert first["failed"] == 0
+
+    # Simulate a transient storage failure on one statement.
+    one = (
+        await db_session.execute(
+            select(UserReport).where(UserReport.user_id == created_user.id).limit(1)
+        )
+    ).scalar_one()
+    one.status = ReportStatusEnum.failed
+    one.error_message = "upload: Could not connect to the endpoint URL"
+    one.storage_key = None
+    one.file_size_bytes = None
+    await db_session.commit()
+    failed_id = one.id
+
+    # Next cycle should retry the failed row and bring it back to `ready`.
+    second = await run_close_cycle()
+    assert second["generated"] == 1  # only the failed one re-rendered
+    assert second["failed"] == 0
+
+    await db_session.refresh(one)
+    assert one.status is ReportStatusEnum.ready
+    assert one.storage_key is not None
+    assert one.error_message is None
+    assert one.id == failed_id  # same row, not a duplicate
+
+    # No duplicate rows were minted for that period.
+    same_period = (
+        (
+            await db_session.execute(
+                select(UserReport).where(
+                    UserReport.user_id == created_user.id,
+                    UserReport.period == one.period,
+                    UserReport.period_start == one.period_start,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(same_period) == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_report_labels_failing_stage(
+    db_session, created_user, monkeypatch
+):
+    """A storage failure is surfaced as a stage-labelled `error_message`."""
+    from app.models.enums import ReportPeriodEnum, ReportStatusEnum
+    from app.services.analytics.reports import service as report_service
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("Could not connect to the endpoint URL")
+
+    monkeypatch.setattr(report_service, "upload_report_pdf", _boom)
+
+    row = await report_service.generate_report(
+        db_session,
+        user=created_user,
+        period=ReportPeriodEnum.monthly,
+        year=2024,
+        month=3,
+    )
+    assert row.status is ReportStatusEnum.failed
+    assert row.error_message is not None
+    assert row.error_message.startswith("upload: ")

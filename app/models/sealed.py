@@ -41,7 +41,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.types import UuidCol
+from app.db.types import JsonCol, UuidCol
 from app.models.enums import SealedProductTypeEnum, TcgEnum
 
 
@@ -78,6 +78,10 @@ class SealedProduct(Base):
     image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     msrp_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     release_date: Mapped[date | None] = mapped_column(Date(), nullable=True)
+    # Accumulated daily market observations: [{"d": ISO-date, "p": price}, …].
+    # Appended best-effort on each market resolve so the value line grows into
+    # a real multi-point curve over time.
+    price_history: Mapped[list | None] = mapped_column(JsonCol, nullable=True)
     # Source + upstream id (e.g. "tcgplayer:1234567") so future ingestion
     # passes can dedupe without re-creating the catalog row. Unique
     # together via the table constraint below.

@@ -57,7 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_sessionmaker
-from app.models.enums import ReportPeriodEnum
+from app.models.enums import ReportPeriodEnum, ReportStatusEnum
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.models.user_report import UserReport
@@ -151,15 +151,23 @@ async def _users_with_any_grade_on_or_before(
 async def _existing_report_keys(
     db: AsyncSession,
 ) -> set[tuple[str, str, date]]:
-    """Return ``{(user_id, period.value, period_start)}`` already on file.
+    """Return ``{(user_id, period.value, period_start)}`` already **ready**.
 
     We pull the whole set once per cycle (typically tiny) and use it to
     skip generation that would no-op anyway. Cheaper than asking the
     DB per user × period.
+
+    Only ``ready`` rows count as "done". ``failed`` and stuck ``pending``
+    rows are deliberately excluded so the next cycle re-attempts them —
+    a statement that failed once (e.g. a transient storage/upload error)
+    self-heals instead of showing "failed" forever. ``generate_report``
+    reuses the existing row on retry, so this never mints duplicates.
     """
     rows = (
         await db.execute(
-            select(UserReport.user_id, UserReport.period, UserReport.period_start)
+            select(UserReport.user_id, UserReport.period, UserReport.period_start).where(
+                UserReport.status == ReportStatusEnum.ready
+            )
         )
     ).all()
     return {

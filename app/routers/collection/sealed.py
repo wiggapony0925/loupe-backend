@@ -104,18 +104,27 @@ async def get_market(
     row = await sealed_service.get_catalog_item(db, product_id)
     snap = await sealed_image_resolver.resolve_market(row) or {}
     market = snap.get("market")
+    today = utcnow().date().isoformat()
 
-    # Real value line: MSRP at release → current market. Two honest anchors
-    # (no fabricated points); a daily-snapshot pass can fill the middle later.
+    # Accumulate today's observation into the product's history (dedupe by day),
+    # so the value line grows into a real multi-point curve over time.
+    history = [
+        h for h in (row.price_history or []) if h.get("d") and h.get("p") is not None
+    ]
+    if market is not None and not any(h["d"] == today for h in history):
+        history.append({"d": today, "p": float(market)})
+        row.price_history = sorted(history, key=lambda h: h["d"])
+        await sealed_service.commit_quietly(db)
+
+    # Value line: MSRP-at-release anchor + every accumulated daily observation.
     points: list[SealedPricePoint] = []
     if row.release_date is not None and row.msrp_usd is not None:
         points.append(
             SealedPricePoint(ts=row.release_date.isoformat(), price=float(row.msrp_usd))
         )
-    if market is not None:
-        today = utcnow().date().isoformat()
-        if not points or points[-1].ts != today:
-            points.append(SealedPricePoint(ts=today, price=float(market)))
+    for h in sorted(history, key=lambda h: h["d"]):
+        if not points or points[-1].ts != h["d"]:
+            points.append(SealedPricePoint(ts=h["d"], price=float(h["p"])))
 
     return SealedMarketRead(
         product_id=row.id,
