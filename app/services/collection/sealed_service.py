@@ -23,6 +23,7 @@ from app.schemas.sealed import (
     SealedHoldingRead,
     SealedHoldingUpdate,
 )
+from app.services.catalog import sealed_image_resolver
 from app.utils.time import utcnow
 
 SortKey = Literal["recent", "oldest", "value_desc", "value_asc"]
@@ -88,14 +89,30 @@ async def search_catalog(
         .offset(cursor)
         .limit(limit)
     )
-    return list((await db.execute(stmt)).scalars().all())
+    rows = list((await db.execute(stmt)).scalars().all())
+    # Fill real TCGplayer product photos for SKUs we seeded without one, and
+    # persist the match so it's a one-time cost (best-effort; no-op when
+    # TCGCSV is disabled or unreachable — the UI falls back to generated art).
+    if await sealed_image_resolver.enrich_images(rows):
+        await _commit_quietly(db)
+    return rows
 
 
 async def get_catalog_item(db: AsyncSession, product_id: uuid.UUID) -> SealedProduct:
     row = await db.get(SealedProduct, product_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Sealed product not found")
+    if await sealed_image_resolver.enrich_images([row]):
+        await _commit_quietly(db)
     return row
+
+
+async def _commit_quietly(db: AsyncSession) -> None:
+    """Persist enrichment writes without ever failing the read that triggered them."""
+    try:
+        await db.commit()
+    except Exception:  # pragma: no cover - defensive
+        await db.rollback()
 
 
 # ── Holdings ───────────────────────────────────────────────────────────────
