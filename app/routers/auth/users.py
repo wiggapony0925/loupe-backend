@@ -89,13 +89,25 @@ async def get_billing_config() -> dict:
     return billing_service.public_config()
 
 
-@router.post("/billing/checkout", summary="Begin a Loupe Pro checkout")
+@router.post("/billing/checkout", summary="Begin a hosted Loupe Pro checkout")
 async def start_checkout(
     payload: CheckoutRequest,
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     return await billing_service.start_checkout(db, user, payload.interval)
+
+
+@router.post(
+    "/billing/subscribe",
+    summary="Create a subscription for the in-app Payment Element",
+)
+async def subscribe(
+    payload: CheckoutRequest,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await billing_service.create_subscription(db, user, payload.interval)
 
 
 @router.post(

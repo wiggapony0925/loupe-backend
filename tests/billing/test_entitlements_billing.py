@@ -14,7 +14,7 @@ import pytest
 
 from app.models.feature_flag import FeatureFlag
 from app.models.grade import GradedCard
-from app.services import billing_service, entitlement_service
+from app.services import billing_service, entitlement_service, site_config_service
 
 pytestmark = pytest.mark.asyncio
 
@@ -138,9 +138,105 @@ async def test_apply_subscription_grants_and_revokes_pro(db_session, created_use
     assert created_user.plan == "free"
 
 
+# ── Admin-tunable plan config ────────────────────────────────────────────
+
+
+async def test_admin_can_change_free_card_limit(db_session, created_user):
+    await _enable_subscriptions(db_session)
+    cfg = await site_config_service.get(db_session)
+    cfg.free_card_limit = 2
+    await db_session.commit()
+
+    ent = await entitlement_service.entitlements_for(db_session, created_user)
+    assert ent.limits.max_cards == 2
+
+    db_session.add_all(
+        [
+            GradedCard(
+                user_id=created_user.id, card_id=uuid.uuid4(), grade=10, house="psa"
+            )
+            for _ in range(2)
+        ]
+    )
+    await db_session.commit()
+    with pytest.raises(Exception) as exc:
+        await entitlement_service.enforce_can_add_card(db_session, created_user)
+    assert getattr(exc.value, "status_code", None) == 402
+    assert exc.value.detail["limit"] == 2
+
+
+async def test_admin_can_make_cards_unlimited(db_session, created_user):
+    await _enable_subscriptions(db_session)
+    cfg = await site_config_service.get(db_session)
+    cfg.gate_unlimited_cards = False  # cards no longer a Pro feature
+    await db_session.commit()
+    await _fill_to_cap(db_session, created_user)  # 50 cards
+    ent = await entitlement_service.entitlements_for(db_session, created_user)
+    assert ent.features.unlimited_cards is True
+    assert ent.limits.max_cards is None
+    await entitlement_service.enforce_can_add_card(db_session, created_user)  # no raise
+
+
+async def test_admin_can_free_a_feature(db_session, created_user):
+    await _enable_subscriptions(db_session)
+    cfg = await site_config_service.get(db_session)
+    cfg.gate_unlimited_alerts = False  # alerts free for everyone
+    await db_session.commit()
+    ent = await entitlement_service.entitlements_for(db_session, created_user)
+    assert ent.is_pro is False  # still a free user
+    assert ent.features.unlimited_alerts is True  # but alerts are unlocked
+    assert ent.features.statements is False  # other gates untouched
+
+
+async def test_announcement_public_payload(db_session):
+    cfg = await site_config_service.get(db_session)
+    cfg.announcement_enabled = True
+    cfg.announcement_message = "Scheduled maintenance tonight."
+    cfg.announcement_tone = "warning"
+    await db_session.commit()
+    ann = await site_config_service.public_announcement(db_session)
+    assert ann.enabled and ann.tone == "warning"
+    assert "maintenance" in ann.message
+
+
 async def test_apply_subscription_ignores_unknown_customer(db_session):
     # No user maps to this customer — must not raise.
     await billing_service._apply_subscription(
         db_session,
         {"id": "sub_x", "customer": "cus_nobody", "status": "active"},
     )
+
+
+async def test_trial_marks_user_trialing_then_clears(db_session, created_user):
+    await _enable_subscriptions(db_session)
+    created_user.stripe_customer_id = "cus_trial"
+    await db_session.commit()
+    trial_end = int((datetime.now(UTC) + timedelta(days=7)).timestamp())
+
+    # Trialing → Pro, flagged as a trial.
+    await billing_service._apply_subscription(
+        db_session,
+        {
+            "id": "sub_t",
+            "customer": "cus_trial",
+            "status": "trialing",
+            "current_period_end": trial_end,
+        },
+    )
+    await db_session.refresh(created_user)
+    ent = await entitlement_service.entitlements_for(db_session, created_user)
+    assert ent.is_pro and ent.trialing and ent.limits.max_cards is None
+
+    # Trial converts to a paid, active sub → trialing clears.
+    await billing_service._apply_subscription(
+        db_session,
+        {
+            "id": "sub_t",
+            "customer": "cus_trial",
+            "status": "active",
+            "current_period_end": trial_end,
+        },
+    )
+    await db_session.refresh(created_user)
+    ent = await entitlement_service.entitlements_for(db_session, created_user)
+    assert ent.is_pro and not ent.trialing

@@ -33,7 +33,9 @@ def _find_product() -> stripe.Product | None:
 
 
 def _find_price(product_id: str, interval: str) -> stripe.Price | None:
-    for pr in stripe.Price.list(product=product_id, active=True, limit=100).auto_paging_iter():
+    for pr in stripe.Price.list(
+        product=product_id, active=True, limit=100
+    ).auto_paging_iter():
         rec = pr.get("recurring") or {}
         if rec.get("interval") == interval and pr.currency == "usd":
             return pr

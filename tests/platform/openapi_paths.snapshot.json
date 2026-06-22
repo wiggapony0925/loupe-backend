@@ -23,6 +23,15 @@
     "GET",
     "PATCH"
   ],
+  "/v1/admin/config": [
+    "GET"
+  ],
+  "/v1/admin/config/announcement": [
+    "PATCH"
+  ],
+  "/v1/admin/config/plan": [
+    "PATCH"
+  ],
   "/v1/admin/flags": [
     "GET",
     "POST"
@@ -87,6 +96,9 @@
   "/v1/analytics/overview": [
     "GET"
   ],
+  "/v1/announcement": [
+    "GET"
+  ],
   "/v1/app/config": [
     "GET"
   ],
@@ -109,6 +121,9 @@
     "POST"
   ],
   "/v1/auth/register": [
+    "POST"
+  ],
+  "/v1/billing/webhook": [
     "POST"
   ],
   "/v1/blog/posts": [
@@ -237,6 +252,12 @@
   ],
   "/v1/me/billing/config": [
     "GET"
+  ],
+  "/v1/me/billing/portal": [
+    "POST"
+  ],
+  "/v1/me/billing/subscribe": [
+    "POST"
   ],
   "/v1/me/entitlements": [
     "GET"

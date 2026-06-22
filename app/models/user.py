@@ -52,6 +52,8 @@ class User(Base):
     pro_since: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # True while the subscription is in its free trial (Stripe `trialing`).
+    pro_trialing: Mapped[bool] = mapped_column(default=False, nullable=False)
     # Null = no expiry (a comp / lifetime grant). Set to the period end once
     # Stripe is wired so a lapsed subscription auto-downgrades to free.
     pro_expires_at: Mapped[datetime | None] = mapped_column(

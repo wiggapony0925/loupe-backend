@@ -139,6 +139,9 @@ def _map_item(raw: Any) -> tuple[Listing, dict[str, Any]] | None:
     price = _nested_number(raw, "listing_price", "amount") or _first_number(
         raw, "price", "amount", "priceAmount"
     )
+    # Per the contract above, a listing with no usable price is unusable data.
+    if price is None:
+        return None
     image_url = _nested_str(
         raw, "primary_listing_photo", "photo_image_url"
     ) or _first_str(raw, "image", "imageUrl", "primaryImage", "thumbnail")

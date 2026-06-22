@@ -25,7 +25,7 @@ from app.routers.catalog import cards, identify, image_proxy, providers
 from app.routers.collection import collections, grades, scans, sealed, watchlist
 from app.routers.collection import scan_devices as scanners
 from app.routers.market import alerts, market, prices
-from app.routers.ops import app_config
+from app.routers.ops import announcement, app_config
 from app.routers.ops import feature_flags as flags
 from app.routers.ops import health as system
 from app.routers.ops import websockets as ws
@@ -125,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(portal_blog.router, prefix=api_prefix)
     app.include_router(portal_waitlist.router, prefix=api_prefix)
     app.include_router(flags.router, prefix=api_prefix)
+    app.include_router(announcement.router, prefix=api_prefix)
     app.include_router(billing.router, prefix=api_prefix)
     app.include_router(admin_router, prefix=api_prefix)
 

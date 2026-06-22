@@ -173,9 +173,7 @@ async def set_admin(
     return to_read(target)
 
 
-async def set_plan(
-    db: AsyncSession, user_id: uuid.UUID, plan: str
-) -> AdminUserRead:
+async def set_plan(db: AsyncSession, user_id: uuid.UUID, plan: str) -> AdminUserRead:
     """Comp a user to Loupe Pro (or revoke). A no-expiry grant — handy for
     testers and support before Stripe is wired."""
     target = await _get(db, user_id)

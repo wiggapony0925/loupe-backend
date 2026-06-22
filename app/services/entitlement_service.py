@@ -24,9 +24,14 @@ from app.models.feature_flag import FeatureFlag
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.entitlement import EntitlementsRead, PlanFeatures, PlanLimits
+from app.services import site_config_service
 
-#: The free tier may track this many cards. Pro is unlimited.
+#: Default free card cap — the seeded value the admin can change live in the
+#: portal (the live value is read from SiteConfig, never this constant).
 FREE_CARD_LIMIT = 50
+
+#: Default free statement allowance (also admin-tunable via SiteConfig).
+FREE_STATEMENT_LIMIT = 1
 
 #: Feature-flag key for the global subscriptions kill switch.
 SUBSCRIPTIONS_FLAG = "subscriptions_enabled"
@@ -48,7 +53,12 @@ def _plan_is_pro(user: User) -> bool:
         return False
     if user.pro_expires_at is None:
         return True
-    return user.pro_expires_at > datetime.now(UTC)
+    # SQLite drops tzinfo on round-trip; treat a naive timestamp as UTC so the
+    # comparison never raises (Postgres keeps it aware).
+    expires = user.pro_expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=UTC)
+    return expires > datetime.now(UTC)
 
 
 async def is_pro(db: AsyncSession, user: User) -> bool:
@@ -72,45 +82,67 @@ async def count_cards(db: AsyncSession, user: User) -> int:
 
 
 async def entitlements_for(db: AsyncSession, user: User) -> EntitlementsRead:
-    """Compute the full entitlement payload the clients gate UI on."""
+    """Compute the full entitlement payload the clients gate UI on.
+
+    Reads the admin-tunable :class:`SiteConfig` for the live plan shape — the
+    free limits and which features are actually gated — so flipping a feature
+    free (or moving the cap) takes effect immediately with no deploy.
+    """
+    cfg = await site_config_service.get(db)
     enabled = await subscriptions_enabled(db)
     pro = (not enabled) or _plan_is_pro(user)
+
+    def avail(gated: bool) -> bool:
+        # A feature is available to you if you're Pro, or it isn't gated at all.
+        return pro or (not gated)
+
+    features = PlanFeatures(
+        unlimited_cards=avail(cfg.gate_unlimited_cards),
+        scanner_import=avail(cfg.gate_scanner_import),
+        full_history=avail(cfg.gate_full_history),
+        unlimited_alerts=avail(cfg.gate_unlimited_alerts),
+        statements=avail(cfg.gate_statements),
+        pro_badge=pro,
+    )
     return EntitlementsRead(
         plan="pro" if pro else "free",
         is_pro=pro,
+        trialing=pro and bool(user.pro_trialing),
         subscriptions_enabled=enabled,
         pro_since=user.pro_since,
         pro_expires_at=user.pro_expires_at,
         card_count=await count_cards(db, user),
-        limits=PlanLimits(max_cards=None if pro else FREE_CARD_LIMIT),
-        features=PlanFeatures(
-            unlimited_cards=pro,
-            scanner_import=pro,
-            full_history=pro,
-            unlimited_alerts=pro,
-            statements=pro,
-            pro_badge=pro,
+        limits=PlanLimits(
+            max_cards=None if features.unlimited_cards else cfg.free_card_limit,
+            free_statements=None if features.statements else cfg.free_statement_limit,
         ),
+        features=features,
     )
 
 
 async def enforce_can_add_card(db: AsyncSession, user: User) -> None:
     """Raise 402 if adding one more card would exceed the free-tier cap.
 
-    No-op when the user is Pro or the kill switch is off. The structured
-    ``detail`` lets the client recognise the limit and open the paywall
-    instead of showing a generic error.
+    No-op when the user is Pro, the kill switch is off, the cards feature isn't
+    gated, or no cap is set. The structured ``detail`` lets the client recognise
+    the limit and open the paywall instead of showing a generic error.
     """
     if await is_pro(db, user):
         return
-    if await count_cards(db, user) >= FREE_CARD_LIMIT:
+    cfg = await site_config_service.get(db)
+    if not cfg.gate_unlimited_cards:
+        return
+    limit = cfg.free_card_limit
+    if limit is None:
+        return
+    if await count_cards(db, user) >= limit:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
                 "code": "card_limit_reached",
-                "limit": FREE_CARD_LIMIT,
+                "limit": limit,
                 "message": (
-                    f"Free accounts can track up to {FREE_CARD_LIMIT} cards. "
+                    f"Free accounts can track up to {limit} cards. "
                     "Upgrade to Loupe Pro for unlimited."
                 ),
             },

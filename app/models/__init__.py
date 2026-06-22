@@ -34,6 +34,7 @@ from app.models.price_alert import PriceAlert
 from app.models.scan import ScanJob
 from app.models.scanner import Scanner
 from app.models.sealed import SealedHolding, SealedProduct
+from app.models.site_config import SiteConfig
 from app.models.user import User, UserSettings
 from app.models.user_report import UserReport
 from app.models.waitlist import WaitlistEntry
@@ -76,6 +77,7 @@ __all__ = [
     "SealedHolding",
     "SealedProduct",
     "SealedProductTypeEnum",
+    "SiteConfig",
     "TcgEnum",
     "User",
     "UserReport",

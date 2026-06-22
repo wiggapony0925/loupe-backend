@@ -19,10 +19,12 @@ from app.routers.admin import (
     users,
     waitlist,
 )
+from app.routers.admin import config as admin_config
 
 admin_router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 admin_router.include_router(metrics.router)
 admin_router.include_router(users.router)
+admin_router.include_router(admin_config.router)
 admin_router.include_router(flags.router)
 admin_router.include_router(jobs.router)
 admin_router.include_router(applications.router)

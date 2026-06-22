@@ -165,9 +165,9 @@ async def _existing_report_keys(
     """
     rows = (
         await db.execute(
-            select(UserReport.user_id, UserReport.period, UserReport.period_start).where(
-                UserReport.status == ReportStatusEnum.ready
-            )
+            select(
+                UserReport.user_id, UserReport.period, UserReport.period_start
+            ).where(UserReport.status == ReportStatusEnum.ready)
         )
     ).all()
     return {

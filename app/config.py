@@ -110,6 +110,9 @@ class Settings(BaseSettings):
     # still work (admins comp users to Pro from the portal), but the upgrade
     # CTA shows a graceful "launching soon" state instead of a checkout.
     stripe_secret_key: str = ""
+    # Publishable key (pk_test_/pk_live_). Safe to expose to the browser — the
+    # embedded Payment Element needs it. Served via /me/billing/config.
+    stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
     # Stripe Price ids for the two Pro plans the checkout offers.
     stripe_price_pro_monthly: str = ""
@@ -118,6 +121,8 @@ class Settings(BaseSettings):
     # and the real Stripe Prices stay in sync from one place.
     pro_price_monthly_usd: float = 9.99
     pro_price_yearly_usd: float = 99.0
+    # Free trial length (days) applied to every new Pro checkout. 0 disables.
+    pro_trial_days: int = 7
     # Where Stripe Checkout returns the user after success/cancel.
     billing_success_url: str = "https://loupe.app/app/settings?upgraded=1"
     billing_cancel_url: str = "https://loupe.app/app/settings"

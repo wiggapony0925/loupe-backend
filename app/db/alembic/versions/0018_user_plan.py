@@ -41,6 +41,14 @@ def upgrade() -> None:
             sa.Column("pro_since", sa.DateTime(timezone=True), nullable=True)
         )
         batch.add_column(
+            sa.Column(
+                "pro_trialing",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.false(),
+            )
+        )
+        batch.add_column(
             sa.Column("pro_expires_at", sa.DateTime(timezone=True), nullable=True)
         )
         batch.add_column(
@@ -81,12 +89,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        sa.text("DELETE FROM feature_flags WHERE key = 'subscriptions_enabled'")
-    )
+    op.execute(sa.text("DELETE FROM feature_flags WHERE key = 'subscriptions_enabled'"))
     with op.batch_alter_table("users") as batch:
         batch.drop_column("stripe_subscription_id")
         batch.drop_column("stripe_customer_id")
         batch.drop_column("pro_expires_at")
+        batch.drop_column("pro_trialing")
         batch.drop_column("pro_since")
         batch.drop_column("plan")

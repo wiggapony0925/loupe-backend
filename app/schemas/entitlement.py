@@ -15,6 +15,8 @@ class PlanLimits(BaseModel):
     """Hard numeric caps. ``None`` means unlimited."""
 
     max_cards: int | None = None
+    # Statement PDFs a free user may download (their latest N). Pro = unlimited.
+    free_statements: int | None = None
 
 
 class PlanFeatures(BaseModel):
@@ -33,6 +35,8 @@ class EntitlementsRead(BaseModel):
 
     plan: str  # "free" | "pro"
     is_pro: bool
+    # True while Pro access is a free trial (Stripe `trialing`).
+    trialing: bool = False
     # The global kill switch. When False the entitlement layer treats everyone
     # as Pro — the client should hide the paywall and all upgrade CTAs.
     subscriptions_enabled: bool

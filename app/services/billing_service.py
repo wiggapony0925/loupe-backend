@@ -55,14 +55,20 @@ def public_config() -> dict[str, Any]:
     s = get_settings()
     return {
         "checkout_available": billing_configured(),
+        "publishable_key": s.stripe_publishable_key,
         "price_monthly_usd": s.pro_price_monthly_usd,
         "price_yearly_usd": s.pro_price_yearly_usd,
+        "trial_days": s.pro_trial_days,
     }
 
 
 def _price_id(interval: str) -> str:
     s = get_settings()
-    price = s.stripe_price_pro_yearly if interval == "yearly" else s.stripe_price_pro_monthly
+    price = (
+        s.stripe_price_pro_yearly
+        if interval == "yearly"
+        else s.stripe_price_pro_monthly
+    )
     if not price:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -75,20 +81,20 @@ async def _ensure_customer(db: AsyncSession, user: User) -> str:
     """Return the user's Stripe customer id, creating + persisting it if needed."""
     if user.stripe_customer_id:
         return user.stripe_customer_id
-    customer = stripe.Customer.create(
-        email=user.email,
-        name=user.display_name or None,
-        metadata={"user_id": str(user.id)},
-    )
+    customer_params: dict[str, Any] = {
+        "email": user.email,
+        "metadata": {"user_id": str(user.id)},
+    }
+    if user.display_name:
+        customer_params["name"] = user.display_name
+    customer = stripe.Customer.create(**customer_params)
     user.stripe_customer_id = customer.id
     await db.commit()
     await db.refresh(user)
     return customer.id
 
 
-async def start_checkout(
-    db: AsyncSession, user: User, interval: str
-) -> dict[str, Any]:
+async def start_checkout(db: AsyncSession, user: User, interval: str) -> dict[str, Any]:
     """Begin a Pro checkout. Returns a checkout URL, or an availability notice
     the client renders inline while Stripe isn't wired yet."""
     if interval not in ("monthly", "yearly"):
@@ -108,6 +114,17 @@ async def start_checkout(
     _client()
     s = get_settings()
     customer_id = await _ensure_customer(db, user)
+    # A new subscriber who never had a trial gets the free trial; returning
+    # subscribers don't get a second one.
+    sub_data: dict[str, Any] = {"metadata": {"user_id": str(user.id)}}
+    if s.pro_trial_days > 0 and user.pro_since is None:
+        sub_data["trial_period_days"] = s.pro_trial_days
+    trial_note = (
+        f"Your first {s.pro_trial_days} days are free — cancel anytime before "
+        "then and you won't be charged."
+        if sub_data.get("trial_period_days")
+        else "Cancel anytime from Settings → Loupe Pro."
+    )
     session = stripe.checkout.Session.create(
         mode="subscription",
         customer=customer_id,
@@ -116,9 +133,62 @@ async def start_checkout(
         allow_promotion_codes=True,
         success_url=s.billing_success_url,
         cancel_url=s.billing_cancel_url,
-        subscription_data={"metadata": {"user_id": str(user.id)}},
+        subscription_data=sub_data,  # type: ignore[arg-type]
+        custom_text={"submit": {"message": trial_note}},
     )
     return {"status": "checkout", "url": session.url}
+
+
+async def create_subscription(
+    db: AsyncSession, user: User, interval: str
+) -> dict[str, Any]:
+    """Create a subscription up-front (``default_incomplete``) and return the
+    client secret the in-app Payment Element confirms — so checkout happens
+    inside our own themed UI instead of a redirect.
+
+    With a trial there's no charge now, so Stripe issues a SetupIntent (to vault
+    the card for after the trial); otherwise it's a PaymentIntent. Either way the
+    ``customer.subscription.*`` webhook is what actually grants the plan.
+    """
+    if interval not in ("monthly", "yearly"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="interval must be 'monthly' or 'yearly'",
+        )
+    if not billing_configured():
+        return {"status": "unavailable"}
+
+    _client()
+    s = get_settings()
+    customer_id = await _ensure_customer(db, user)
+    params: dict[str, Any] = {
+        "customer": customer_id,
+        "items": [{"price": _price_id(interval)}],
+        "payment_behavior": "default_incomplete",
+        "payment_settings": {"save_default_payment_method": "on_subscription"},
+        "expand": ["pending_setup_intent", "latest_invoice.payment_intent"],
+        "metadata": {"user_id": str(user.id)},
+    }
+    if s.pro_trial_days > 0 and user.pro_since is None:
+        params["trial_period_days"] = s.pro_trial_days
+
+    sub = stripe.Subscription.create(**params)
+    setup = sub.get("pending_setup_intent")
+    if setup:
+        return {
+            "status": "ready",
+            "mode": "setup",
+            "client_secret": setup["client_secret"],
+            "subscription_id": sub["id"],
+        }
+    invoice = sub.get("latest_invoice") or {}
+    intent = invoice.get("payment_intent") or {}
+    return {
+        "status": "ready",
+        "mode": "payment",
+        "client_secret": intent.get("client_secret"),
+        "subscription_id": sub["id"],
+    }
 
 
 async def create_portal_session(db: AsyncSession, user: User) -> dict[str, Any]:
@@ -168,9 +238,7 @@ async def _user_by_customer(db: AsyncSession, customer_id: str | None) -> User |
     if not customer_id:
         return None
     return (
-        await db.execute(
-            select(User).where(User.stripe_customer_id == customer_id)
-        )
+        await db.execute(select(User).where(User.stripe_customer_id == customer_id))
     ).scalar_one_or_none()
 
 
@@ -190,8 +258,10 @@ async def _apply_subscription(db: AsyncSession, sub: Any) -> None:
     user = await _user_by_customer(db, sub.get("customer"))
     if user is None:
         return
-    is_active = sub.get("status") in _ACTIVE_STATUSES
+    status_str = sub.get("status")
+    is_active = status_str in _ACTIVE_STATUSES
     user.stripe_subscription_id = sub.get("id")
+    user.pro_trialing = status_str == "trialing"
     if is_active:
         if user.plan != "pro" or user.pro_since is None:
             user.pro_since = user.pro_since or datetime.now(UTC)
@@ -199,6 +269,7 @@ async def _apply_subscription(db: AsyncSession, sub: Any) -> None:
         user.pro_expires_at = _period_end(sub)
     else:
         user.plan = "free"
+        user.pro_trialing = False
         user.pro_expires_at = _period_end(sub) or datetime.now(UTC)
     await db.commit()
 
@@ -256,6 +327,7 @@ __all__ = [
     "billing_configured",
     "construct_event",
     "create_portal_session",
+    "create_subscription",
     "handle_event",
     "public_config",
     "start_checkout",
