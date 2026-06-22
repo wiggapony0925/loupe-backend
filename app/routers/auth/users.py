@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_admin_user, require_user
 from app.db import get_db
 from app.models.user import User
+from app.schemas.entitlement import EntitlementsRead
 from app.schemas.user import (
     UserRead,
     UserSettingsRead,
     UserSettingsUpdate,
     UserUpdate,
 )
+from app.services import billing_service, entitlement_service
 from app.services.auth import user_service
 
 router = APIRouter(prefix="/me", tags=["users"])
@@ -59,6 +62,51 @@ async def patch_settings(
 ) -> UserSettingsRead:
     settings = await user_service.update_settings(db, user, payload)
     return UserSettingsRead.model_validate(settings)
+
+
+# ── Loupe Pro: entitlements + billing ──
+
+
+@router.get(
+    "/entitlements",
+    response_model=EntitlementsRead,
+    summary="The signed-in user's effective Loupe Pro access",
+)
+async def get_entitlements(
+    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+) -> EntitlementsRead:
+    return await entitlement_service.entitlements_for(db, user)
+
+
+class CheckoutRequest(BaseModel):
+    """Start a Pro checkout for the given billing interval."""
+
+    interval: str = Field("monthly", pattern="^(monthly|yearly)$")
+
+
+@router.get("/billing/config", summary="Pricing + checkout availability")
+async def get_billing_config() -> dict:
+    return billing_service.public_config()
+
+
+@router.post("/billing/checkout", summary="Begin a Loupe Pro checkout")
+async def start_checkout(
+    payload: CheckoutRequest,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await billing_service.start_checkout(db, user, payload.interval)
+
+
+@router.post(
+    "/billing/portal",
+    summary="Open the Stripe customer portal (manage/cancel Pro)",
+)
+async def billing_portal(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await billing_service.create_portal_session(db, user)
 
 
 __all__ = ["router"]

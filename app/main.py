@@ -14,6 +14,7 @@ from app.http.middleware import register_http_middleware
 from app.http.response_envelope import register_envelope_middleware
 from app.lifecycle import lifespan
 from app.platform.observability import init_otel, init_sentry
+from app.routers import billing
 from app.routers.admin import admin_router
 from app.routers.analytics import home_feed as home
 from app.routers.analytics import portfolio_overview as analytics
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(portal_blog.router, prefix=api_prefix)
     app.include_router(portal_waitlist.router, prefix=api_prefix)
     app.include_router(flags.router, prefix=api_prefix)
+    app.include_router(billing.router, prefix=api_prefix)
     app.include_router(admin_router, prefix=api_prefix)
 
     # WebSockets mount at root.

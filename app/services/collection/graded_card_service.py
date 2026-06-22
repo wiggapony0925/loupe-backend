@@ -20,6 +20,7 @@ from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
+from app.services import entitlement_service
 from app.services.catalog import card_resolver_service
 from app.utils.time import utcnow
 
@@ -138,6 +139,10 @@ async def list_for_user(
 
 
 async def create(db: AsyncSession, user: User, payload: GradedCardCreate) -> GradedCard:
+    # Free tier caps the vault; Pro (or a kill-switched-off app) is unlimited.
+    # Raises 402 with a structured detail the client turns into the paywall.
+    await entitlement_service.enforce_can_add_card(db, user)
+
     # Resolve / materialize the card identity first so users can submit
     # an upstream id without pre-creating a local Card.
     card_id = payload.card_id

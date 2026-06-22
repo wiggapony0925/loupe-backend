@@ -105,6 +105,23 @@ class Settings(BaseSettings):
     pricecharting_api_key: str = ""
     sci_api_key: str = ""
 
+    # --- Billing / Loupe Pro (Stripe; optional, wired later) ---
+    # Blank => billing is "not configured": the entitlement layer + paywall
+    # still work (admins comp users to Pro from the portal), but the upgrade
+    # CTA shows a graceful "launching soon" state instead of a checkout.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    # Stripe Price ids for the two Pro plans the checkout offers.
+    stripe_price_pro_monthly: str = ""
+    stripe_price_pro_yearly: str = ""
+    # Display prices (USD) shown in the paywall. Kept here so marketing copy
+    # and the real Stripe Prices stay in sync from one place.
+    pro_price_monthly_usd: float = 9.99
+    pro_price_yearly_usd: float = 99.0
+    # Where Stripe Checkout returns the user after success/cancel.
+    billing_success_url: str = "https://loupe.app/app/settings?upgraded=1"
+    billing_cancel_url: str = "https://loupe.app/app/settings"
+
     # --- Real Data Provider APIs (env-gated; graceful fallback when blank) ---
     # eBay Browse / Marketplace Insights — https://developer.ebay.com
     ebay_oauth_token: str | None = None  # optional pre-minted token

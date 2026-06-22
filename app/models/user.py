@@ -43,6 +43,27 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
     ban_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # ── Loupe Pro (subscription) ──
+    # `free` | `pro`. Effective entitlements are computed in
+    # `entitlement_service`, which also honours the `subscriptions_enabled`
+    # kill switch (off => everyone treated as Pro). Never trust the client.
+    plan: Mapped[str] = mapped_column(String(16), default="free", nullable=False)
+    # When the user first became Pro (for "Pro since" / lifetime-value stats).
+    pro_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Null = no expiry (a comp / lifetime grant). Set to the period end once
+    # Stripe is wired so a lapsed subscription auto-downgrades to free.
+    pro_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Stripe customer id (`cus_...`). Null until the user starts a checkout.
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Active Stripe subscription id (`sub_...`). Set by the billing webhook;
+    # used to drive the customer portal + reconcile lifecycle events.
+    stripe_subscription_id: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

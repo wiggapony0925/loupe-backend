@@ -26,6 +26,9 @@ class AdminUserRead(BaseModel):
     banned_at: datetime | None = None
     ban_reason: str | None = None
     deleted: bool = False
+    # Loupe Pro plan ("free" | "pro"). Comp a tester to Pro from the drawer.
+    plan: str = "free"
+    pro_expires_at: datetime | None = None
 
 
 class AdminUserDetail(AdminUserRead):
@@ -64,6 +67,12 @@ class AdminRoleUpdate(BaseModel):
     is_admin: bool
 
 
+class AdminPlanUpdate(BaseModel):
+    """Comp a user to Loupe Pro (or back to free) from the portal."""
+
+    plan: str = Field("free", pattern="^(free|pro)$")
+
+
 class BanRequest(BaseModel):
     """Ban a user with an optional reason shown in the audit trail."""
 
@@ -90,6 +99,7 @@ class AdminMetrics(BaseModel):
 
 __all__ = [
     "AdminMetrics",
+    "AdminPlanUpdate",
     "AdminRoleUpdate",
     "AdminUserDetail",
     "AdminUserPage",

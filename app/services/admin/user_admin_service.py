@@ -173,6 +173,24 @@ async def set_admin(
     return to_read(target)
 
 
+async def set_plan(
+    db: AsyncSession, user_id: uuid.UUID, plan: str
+) -> AdminUserRead:
+    """Comp a user to Loupe Pro (or revoke). A no-expiry grant — handy for
+    testers and support before Stripe is wired."""
+    target = await _get(db, user_id)
+    target.plan = plan
+    if plan == "pro":
+        if target.pro_since is None:
+            target.pro_since = datetime.now(UTC)
+        target.pro_expires_at = None  # comp = lifetime until changed
+    else:
+        target.pro_expires_at = None
+    await db.commit()
+    await db.refresh(target)
+    return to_read(target)
+
+
 async def ban(
     db: AsyncSession, actor: User, user_id: uuid.UUID, reason: str | None
 ) -> AdminUserRead:

@@ -15,6 +15,7 @@ from app.auth.dependencies import require_admin
 from app.db import get_db
 from app.models.user import User
 from app.schemas.admin import (
+    AdminPlanUpdate,
     AdminRoleUpdate,
     AdminUserDetail,
     AdminUserPage,
@@ -91,6 +92,31 @@ async def set_role(
         target_table="users",
         target_id=user_id,
         payload={"is_admin": payload.is_admin},
+    )
+    return result
+
+
+@router.patch(
+    "/{user_id}/plan",
+    response_model=AdminUserRead,
+    summary="Comp a user to Loupe Pro (or back to free)",
+)
+async def set_plan(
+    user_id: uuid.UUID,
+    payload: AdminPlanUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> AdminUserRead:
+    result = await user_admin_service.set_plan(db, user_id, payload.plan)
+    await audit_service.record(
+        db,
+        request=request,
+        user=actor,
+        action="user.plan",
+        target_table="users",
+        target_id=user_id,
+        payload={"plan": payload.plan},
     )
     return result
 
