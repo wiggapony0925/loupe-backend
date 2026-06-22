@@ -19,6 +19,7 @@ endpoint never surfaces a 5xx because Facebook/Apify hiccuped.
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import quote
 
 from app.config import get_settings
 from app.integrations.base import BaseProvider, Listing
@@ -65,14 +66,22 @@ class ApifyProvider(BaseProvider):
         if not token or not query:
             return []
 
-        actor = settings.apify_fb_marketplace_actor
+        # Apify's API path uses `username~actor-name`, not `username/actor-name`.
+        actor = settings.apify_fb_marketplace_actor.replace("/", "~")
         url = f"{_API_BASE}/acts/{actor}/run-sync-get-dataset-items?token={token}"
+        # apify/facebook-marketplace-scraper takes `startUrls` (a real FB
+        # Marketplace search URL), not query+lat/lng. Location is best-effort:
+        # FB honours latitude/longitude/radius on the search URL when present,
+        # otherwise it falls back to a general search.
+        fb_url = (
+            "https://www.facebook.com/marketplace/search/"
+            f"?query={quote(query)}"
+            f"&latitude={lat}&longitude={lng}&radius={radius_km}"
+        )
         payload = {
-            "query": query,
-            "latitude": lat,
-            "longitude": lng,
-            "radiusKm": radius_km,
-            "maxItems": limit,
+            "startUrls": [{"url": fb_url}],
+            "resultsLimit": limit,
+            "includeListingDetails": False,
         }
 
         try:
@@ -119,35 +128,32 @@ def _map_item(raw: Any) -> tuple[Listing, dict[str, Any]] | None:
     if not isinstance(raw, dict):
         return None
 
-    title = _first_str(raw, "title", "name", "marketplace_listing_title")
-    price = _first_number(raw, "price", "amount", "listing_price", "priceAmount")
-    if not title or price is None:
+    title = _first_str(
+        raw, "marketplace_listing_title", "custom_title", "title", "name"
+    )
+    if not title:
         return None
 
-    url = _first_str(raw, "url", "listingUrl", "link", "permalink") or ""
-    image_url = _first_str(
-        raw,
-        "image",
-        "imageUrl",
-        "primaryImage",
-        "thumbnail",
-        "primary_listing_photo",
+    # apify/facebook-marketplace-scraper nests price/photo/location; read those
+    # first, then fall back to flat spellings other actors might use.
+    price = _nested_number(raw, "listing_price", "amount") or _first_number(
+        raw, "price", "amount", "priceAmount"
     )
+    image_url = _nested_str(
+        raw, "primary_listing_photo", "photo_image_url"
+    ) or _first_str(raw, "image", "imageUrl", "primaryImage", "thumbnail")
+    url = _first_str(raw, "listingUrl", "url", "link", "permalink") or ""
     condition = _first_str(raw, "condition", "itemCondition")
     currency = _first_str(raw, "currency", "priceCurrency") or "USD"
     distance_km = _first_number(raw, "distanceKm", "distance_km", "distance")
-    location_label = _first_str(
-        raw,
-        "location",
-        "locationLabel",
-        "city",
-        "locationText",
+    location_label = _fb_location(raw) or _first_str(
+        raw, "locationLabel", "city", "locationText"
     )
 
     listing = Listing(
         source="facebook",
         title=str(title),
-        price=float(price),
+        price=float(price) if price is not None else 0.0,
         currency=str(currency).upper()[:3] or "USD",
         url=str(url),
         condition=condition,
@@ -177,6 +183,35 @@ def _first_number(data: dict[str, Any], *keys: str) -> float | None:
         if parsed is not None:
             return parsed
     return None
+
+
+def _nested_str(data: dict[str, Any], outer: str, inner: str) -> str | None:
+    obj = data.get(outer)
+    if isinstance(obj, dict):
+        value = obj.get(inner)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _nested_number(data: dict[str, Any], outer: str, inner: str) -> float | None:
+    obj = data.get(outer)
+    return _to_number(obj.get(inner)) if isinstance(obj, dict) else None
+
+
+def _fb_location(data: dict[str, Any]) -> str | None:
+    """Human label from FB's nested ``location.reverse_geocode`` block."""
+    loc = data.get("location")
+    geo = loc.get("reverse_geocode") if isinstance(loc, dict) else None
+    if not isinstance(geo, dict):
+        return None
+    page = geo.get("city_page")
+    if isinstance(page, dict):
+        name = page.get("display_name")
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    parts = [p for p in (geo.get("city"), geo.get("state")) if isinstance(p, str) and p]
+    return ", ".join(parts) or None
 
 
 def _to_number(value: Any) -> float | None:
