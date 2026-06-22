@@ -310,6 +310,9 @@
   "/v1/sealed/{product_id}": [
     "GET"
   ],
+  "/v1/sealed/{product_id}/market": [
+    "GET"
+  ],
   "/v1/sets": [
     "GET"
   ],

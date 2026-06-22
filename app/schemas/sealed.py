@@ -48,6 +48,25 @@ class SealedProductRead(BaseModel):
     release_date: date | None = None
 
 
+class SealedMarketRead(BaseModel):
+    """Live market snapshot for one sealed product (``GET /v1/sealed/{id}/market``).
+
+    Sealed SKUs have no stored price history, so this is a current TCGplayer
+    snapshot — low/mid/high/market + the MSRP for a premium/discount read.
+    All price fields are ``None`` when no live quote could be resolved.
+    """
+
+    product_id: uuid.UUID
+    currency: str = "USD"
+    msrp_usd: Decimal | None = None
+    market: float | None = None
+    low: float | None = None
+    mid: float | None = None
+    high: float | None = None
+    source: str | None = None
+    marketplace_url: str | None = None
+
+
 # ── Holdings ──────────────────────────────────────────────────────────────
 
 

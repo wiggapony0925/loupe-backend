@@ -31,8 +31,10 @@ from app.schemas.sealed import (
     SealedHoldingCreate,
     SealedHoldingRead,
     SealedHoldingUpdate,
+    SealedMarketRead,
     SealedProductRead,
 )
+from app.services.catalog import sealed_image_resolver
 from app.services.collection import sealed_service
 
 # ── Catalog router ────────────────────────────────────────────────────────
@@ -81,6 +83,35 @@ async def get_catalog_item(
 ) -> SealedProductRead:
     row = await sealed_service.get_catalog_item(db, product_id)
     return SealedProductRead.model_validate(row)
+
+
+@catalog_router.get(
+    "/{product_id}/market",
+    response_model=SealedMarketRead,
+    summary="Live market snapshot for a sealed product",
+    description=(
+        "Current TCGplayer low/mid/high/market for one sealed product, plus its "
+        "MSRP. Sealed SKUs have no stored history, so this is a point-in-time "
+        "snapshot; price fields are null when no live quote resolves."
+    ),
+)
+async def get_market(
+    product_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> SealedMarketRead:
+    row = await sealed_service.get_catalog_item(db, product_id)
+    snap = await sealed_image_resolver.resolve_market(row) or {}
+    return SealedMarketRead(
+        product_id=row.id,
+        msrp_usd=row.msrp_usd,
+        currency=snap.get("currency", "USD"),
+        market=snap.get("market"),
+        low=snap.get("low"),
+        mid=snap.get("mid"),
+        high=snap.get("high"),
+        source=snap.get("source"),
+        marketplace_url=snap.get("marketplace_url"),
+    )
 
 
 # ── Holdings router ───────────────────────────────────────────────────────

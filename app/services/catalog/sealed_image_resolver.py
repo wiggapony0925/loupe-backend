@@ -1,13 +1,14 @@
-"""Resolve real TCGplayer product photos for our sealed catalog.
+"""Resolve TCGplayer catalog data (photos + live prices) for sealed products.
 
-Our ``sealed_products`` are hand-seeded SKUs with no image. TCGcsv
-(https://tcgcsv.com) mirrors the full TCGplayer catalog — including sealed
-products — each with a product ``imageUrl`` on TCGplayer's CDN. We match a
-``(tcg, set_name, product_type)`` to the right TCGcsv group + product and
-fill ``image_url`` with the real photo, cached in-process.
+Our ``sealed_products`` are hand-seeded SKUs with no image or price history.
+TCGcsv (https://tcgcsv.com) mirrors the full TCGplayer catalog — including
+sealed products — with a product ``imageUrl`` and daily low/mid/high/market
+prices. We match a ``(tcg, set_name, product_type)`` to the right TCGcsv group
++ product and surface the real photo + current market snapshot, cached
+in-process.
 
 Best-effort and gated on ``TCGCSV_ENABLED`` — if the upstream is slow or down,
-callers just keep the generated cover art (the frontend's ``SealedArt``).
+callers fall back to generated art / MSRP only.
 """
 
 from __future__ import annotations
@@ -56,9 +57,12 @@ class _Cache:
         # category -> [(group_id, name_lower)]
         self.groups: dict[int, list[tuple[int, str]]] = {}
         self.groups_at: dict[int, float] = {}
-        # (category, group_id) -> products [{name, imageUrl}]
+        # (category, group_id) -> products [{name, image, id, url}]
         self.products: dict[tuple[int, int], list[dict[str, Any]]] = {}
         self.products_at: dict[tuple[int, int], float] = {}
+        # (category, group_id) -> {product_id: {low, mid, high, market}}
+        self.prices: dict[tuple[int, int], dict[int, dict[str, float | None]]] = {}
+        self.prices_at: dict[tuple[int, int], float] = {}
         self.lock = asyncio.Lock()
 
 
@@ -68,6 +72,14 @@ _c = _Cache()
 def _big(image_url: str) -> str:
     """Upgrade TCGplayer's thumbnail (``_200w.jpg``) to a crisp square."""
     return image_url.replace("_200w.jpg", "_in_1000x1000.jpg")
+
+
+def _f(v: Any) -> float | None:
+    try:
+        n = float(v)
+        return round(n, 2) if n > 0 else None
+    except (TypeError, ValueError):
+        return None
 
 
 async def _ensure_groups(category: int) -> None:
@@ -94,11 +106,43 @@ async def _ensure_products(category: int, group_id: int) -> None:
     resp.raise_for_status()
     results = (resp.json() or {}).get("results") or []
     _c.products[key] = [
-        {"name": (p.get("name") or ""), "image": p.get("imageUrl") or ""}
+        {
+            "name": (p.get("name") or ""),
+            "image": p.get("imageUrl") or "",
+            "id": int(p["productId"]) if p.get("productId") is not None else None,
+            "url": p.get("url") or "",
+        }
         for p in results
-        if p.get("imageUrl")
+        if p.get("name")
     ]
     _c.products_at[key] = time.time()
+
+
+async def _ensure_prices(category: int, group_id: int) -> None:
+    key = (category, group_id)
+    if key in _c.prices and time.time() - _c.prices_at.get(key, 0) < _TTL:
+        return
+    client = await get_http_client()
+    resp = await client.get(f"{_BASE}/{category}/{group_id}/prices", timeout=20.0)
+    resp.raise_for_status()
+    results = (resp.json() or {}).get("results") or []
+    out: dict[int, dict[str, float | None]] = {}
+    for r in results:
+        pid = r.get("productId")
+        if pid is None:
+            continue
+        # First non-empty subtype wins (sealed usually has one "Normal" row).
+        out.setdefault(
+            int(pid),
+            {
+                "low": _f(r.get("lowPrice")),
+                "mid": _f(r.get("midPrice")),
+                "high": _f(r.get("highPrice")),
+                "market": _f(r.get("marketPrice")),
+            },
+        )
+    _c.prices[key] = out
+    _c.prices_at[key] = time.time()
 
 
 def _find_group(category: int, set_name: str) -> int | None:
@@ -115,26 +159,26 @@ def _find_group(category: int, set_name: str) -> int | None:
     return best[1] if best else None
 
 
-def _pick_image(
+def _pick_product(
     products: list[dict[str, Any]], product_type: SealedProductTypeEnum
-) -> str | None:
-    """Best image for a product type — required tokens present, excluded absent,
-    preferring the shortest (most canonical) product name."""
+) -> dict[str, Any] | None:
+    """The canonical TCGplayer product for a type — required tokens present,
+    excluded absent, preferring the shortest (most canonical) name."""
     tokens = _TYPE_TOKENS.get(product_type)
     if not tokens:
         return None
     must, never = tokens
-    best: tuple[int, str] | None = None
+    best: tuple[int, dict[str, Any]] | None = None
     for p in products:
         name = p["name"].lower()
         if not all(t in name for t in must):
             continue
         if any(t in name for t in never):
             continue
-        cand = (len(name), p["image"])
-        if best is None or cand < best:
+        cand = (len(name), p)
+        if best is None or cand[0] < best[0]:
             best = cand
-    return _big(best[1]) if best else None
+    return best[1] if best else None
 
 
 async def _resolve(targets: list[SealedProduct]) -> bool:
@@ -161,9 +205,9 @@ async def _resolve(targets: list[SealedProduct]) -> bool:
 
     changed = False
     for p, cat, gid in plan:
-        img = _pick_image(_c.products.get((cat, gid), []), p.product_type)
-        if img:
-            p.image_url = img
+        match = _pick_product(_c.products.get((cat, gid), []), p.product_type)
+        if match and match.get("image"):
+            p.image_url = _big(match["image"])
             changed = True
     return changed
 
@@ -188,4 +232,46 @@ async def enrich_images(products: list[SealedProduct]) -> bool:
         return False
 
 
-__all__ = ["enrich_images"]
+async def resolve_market(product: SealedProduct) -> dict[str, Any] | None:
+    """Live TCGplayer market snapshot for one sealed product (best-effort).
+
+    Returns ``{low, mid, high, market, currency, source, marketplace_url,
+    image_url}`` or ``None`` when TCGCSV is off / unreachable / unmatched.
+    """
+    cat = _CATEGORY.get(product.tcg)
+    if not get_settings().tcgcsv_enabled or cat is None or not product.set_name:
+        return None
+    try:
+        return await asyncio.wait_for(_resolve_market(product, cat), timeout=9.0)
+    except Exception as exc:
+        _log.debug("sealed market resolve skipped: %s", exc)
+        return None
+
+
+async def _resolve_market(product: SealedProduct, cat: int) -> dict[str, Any] | None:
+    await _ensure_groups(cat)
+    gid = _find_group(cat, product.set_name or "")
+    if gid is None:
+        return None
+    await asyncio.gather(
+        _ensure_products(cat, gid), _ensure_prices(cat, gid), return_exceptions=True
+    )
+    match = _pick_product(_c.products.get((cat, gid), []), product.product_type)
+    if match is None or match.get("id") is None:
+        return None
+    price = _c.prices.get((cat, gid), {}).get(int(match["id"]))
+    if price is None or price.get("market") is None:
+        return None
+    return {
+        "low": price.get("low"),
+        "mid": price.get("mid"),
+        "high": price.get("high"),
+        "market": price.get("market"),
+        "currency": "USD",
+        "source": "tcgplayer",
+        "marketplace_url": match.get("url") or None,
+        "image_url": _big(match["image"]) if match.get("image") else None,
+    }
+
+
+__all__ = ["enrich_images", "resolve_market"]
