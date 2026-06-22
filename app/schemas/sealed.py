@@ -48,12 +48,20 @@ class SealedProductRead(BaseModel):
     release_date: date | None = None
 
 
+class SealedPricePoint(BaseModel):
+    """One point on a sealed product's value line."""
+
+    ts: str  # ISO date
+    price: float
+
+
 class SealedMarketRead(BaseModel):
     """Live market snapshot for one sealed product (``GET /v1/sealed/{id}/market``).
 
-    Sealed SKUs have no stored price history, so this is a current TCGplayer
-    snapshot — low/mid/high/market + the MSRP for a premium/discount read.
-    All price fields are ``None`` when no live quote could be resolved.
+    Sealed SKUs have no stored daily history, so the snapshot is a current
+    TCGplayer quote (low/mid/high/market) + MSRP. ``points`` is a real value
+    line anchored at MSRP-on-release → current market, so the UI can chart how
+    the product appreciated since launch (no fabricated points).
     """
 
     product_id: uuid.UUID
@@ -65,6 +73,7 @@ class SealedMarketRead(BaseModel):
     high: float | None = None
     source: str | None = None
     marketplace_url: str | None = None
+    points: list[SealedPricePoint] = []
 
 
 # ── Holdings ──────────────────────────────────────────────────────────────

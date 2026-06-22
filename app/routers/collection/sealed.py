@@ -32,10 +32,12 @@ from app.schemas.sealed import (
     SealedHoldingRead,
     SealedHoldingUpdate,
     SealedMarketRead,
+    SealedPricePoint,
     SealedProductRead,
 )
 from app.services.catalog import sealed_image_resolver
 from app.services.collection import sealed_service
+from app.utils.time import utcnow
 
 # ── Catalog router ────────────────────────────────────────────────────────
 
@@ -101,16 +103,31 @@ async def get_market(
 ) -> SealedMarketRead:
     row = await sealed_service.get_catalog_item(db, product_id)
     snap = await sealed_image_resolver.resolve_market(row) or {}
+    market = snap.get("market")
+
+    # Real value line: MSRP at release → current market. Two honest anchors
+    # (no fabricated points); a daily-snapshot pass can fill the middle later.
+    points: list[SealedPricePoint] = []
+    if row.release_date is not None and row.msrp_usd is not None:
+        points.append(
+            SealedPricePoint(ts=row.release_date.isoformat(), price=float(row.msrp_usd))
+        )
+    if market is not None:
+        today = utcnow().date().isoformat()
+        if not points or points[-1].ts != today:
+            points.append(SealedPricePoint(ts=today, price=float(market)))
+
     return SealedMarketRead(
         product_id=row.id,
         msrp_usd=row.msrp_usd,
         currency=snap.get("currency", "USD"),
-        market=snap.get("market"),
+        market=market,
         low=snap.get("low"),
         mid=snap.get("mid"),
         high=snap.get("high"),
         source=snap.get("source"),
         marketplace_url=snap.get("marketplace_url"),
+        points=points,
     )
 
 
