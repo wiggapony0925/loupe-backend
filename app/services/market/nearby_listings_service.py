@@ -28,6 +28,12 @@ _CACHE_TTL = 300  # seconds — FB listings churn, but 5 min keeps it snappy.
 # Round coordinates to 2 dp (~1.1 km) for the cache key.
 _COORD_PRECISION = 2
 
+# When nothing sells within the asked radius, widen the search to ~national
+# scope so we can still surface the *closest* listings (FB returns results
+# ordered by distance from the point). The client shows the per-listing
+# distance, so the user always sees how far the nearest copy actually is.
+_FALLBACK_RADIUS_KM = 800
+
 
 def _build_query(card: dict[str, Any]) -> str:
     parts: list[str] = []
@@ -93,6 +99,14 @@ async def get_nearby_listings_for_card(
         query, lat=lat, lng=lng, radius_km=radius_km, limit=limit
     )
 
+    # Nothing in the asked radius → widen so we still return the closest copies.
+    expanded = False
+    if not pairs and radius_km < _FALLBACK_RADIUS_KM:
+        expanded = True
+        pairs = await provider.search_nearby_listings(
+            query, lat=lat, lng=lng, radius_km=_FALLBACK_RADIUS_KM, limit=limit
+        )
+
     listings = [
         {
             "source": listing.source,
@@ -118,7 +132,9 @@ async def get_nearby_listings_for_card(
         "card_id": card_id,
         "query": query,
         "center": {"lat": rlat, "lng": rlng},
-        "radius_km": radius_km,
+        "radius_km": _FALLBACK_RADIUS_KM if expanded else radius_km,
+        # True when we widened past the requested radius to find the closest.
+        "expanded": expanded,
         "listings": listings,
     }
     await _cache_set(cache_key, body)
