@@ -133,6 +133,13 @@ application_track_limit = rate_limit(limit=30, window_seconds=60, name="careers.
 # action — a tight cap stops signup spam while leaving room for a visitor
 # who fat-fingers the form a couple of times.
 waitlist_join_limit = rate_limit(limit=10, window_seconds=300, name="waitlist.join")
+# Auth endpoints. A first line of defence against credential-stuffing /
+# password-guessing from a single source (the per-account lockout in
+# user_service is the second, and survives an attacker rotating IPs). Tight
+# enough to throttle a script, loose enough that a human mistyping their
+# password a few times is unaffected.
+login_limit = rate_limit(limit=10, window_seconds=60, name="auth.login")
+mfa_verify_limit = rate_limit(limit=10, window_seconds=60, name="auth.mfa_verify")
 
 
 __all__ = [
@@ -140,6 +147,8 @@ __all__ = [
     "application_track_limit",
     "catalog_read_limit",
     "image_proxy_limit",
+    "login_limit",
+    "mfa_verify_limit",
     "rate_limit",
     "resolve_limit",
     "scan_create_limit",

@@ -9,16 +9,32 @@ Supports four sign-in mechanisms:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.passwords import hash_password, needs_rehash, verify_password
+from app.config import get_settings
 from app.models.user import User, UserSettings
 from app.schemas.user import UserSettingsUpdate, UserUpdate
 from app.utils.logger import get_logger
 
 logger = get_logger("services.user")
+
+
+class AccountLockedError(Exception):
+    """Raised when sign-in is refused because the account is temporarily locked
+    after too many failed password attempts.
+
+    Attributes:
+        retry_after: seconds until the lock lifts (for the ``Retry-After`` header).
+    """
+
+    def __init__(self, retry_after: int) -> None:
+        super().__init__("Account temporarily locked")
+        self.retry_after = retry_after
 
 
 async def get_by_id(db: AsyncSession, user_id) -> User | None:
@@ -108,21 +124,58 @@ async def create_with_password(
 async def authenticate_with_password(
     db: AsyncSession, *, email: str, password: str
 ) -> User | None:
-    """Return the user if password matches; ``None`` otherwise (timing-safe)."""
+    """Return the user if the password matches; ``None`` otherwise (timing-safe).
+
+    Enforces per-account brute-force lockout: after
+    ``login_max_attempts`` consecutive failures the account is locked for
+    ``login_lockout_seconds`` and this raises :class:`AccountLockedError`
+    until the lock lifts. A correct password always resets the counter.
+    """
     user = await get_by_email(db, email)
-    # Hash a dummy value when the user is missing so attackers can't enumerate
-    # accounts by measuring response time.
+    # Hash a dummy value when the user is missing (or is SSO-only) so attackers
+    # can't enumerate accounts by measuring response time.
     if user is None or user.password_hash is None:
         _ = verify_password(
             password, "$argon2id$v=19$m=65536,t=3,p=4$ZmFrZXNhbHQ$ZmFrZWhhc2g"
         )
         return None
+
+    settings = get_settings()
+    now = datetime.now(UTC)
+
+    # Already locked? Refuse before even checking the password.
+    locked_until = _as_aware(user.locked_until)
+    if locked_until is not None and locked_until > now:
+        raise AccountLockedError(retry_after=int((locked_until - now).total_seconds()))
+
     if not verify_password(password, user.password_hash):
+        user.failed_login_count = (user.failed_login_count or 0) + 1
+        if user.failed_login_count >= settings.login_max_attempts:
+            user.locked_until = now + timedelta(seconds=settings.login_lockout_seconds)
+            user.failed_login_count = 0  # reset; the lock is the deterrent now
+            logger.warning(
+                "account locked after failed logins user=%s email=%s",
+                user.id,
+                user.email,
+            )
+        await db.commit()
         return None
+
+    # Success — clear any failure state and opportunistically upgrade the hash.
+    if user.failed_login_count or user.locked_until is not None:
+        user.failed_login_count = 0
+        user.locked_until = None
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(password)
-        await db.commit()
+    await db.commit()
     return user
+
+
+def _as_aware(value: datetime | None) -> datetime | None:
+    """SQLite drops tzinfo on round-trip; treat naive timestamps as UTC."""
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
 # ── Dev login (no password) ───────────────────────────────────────────────
@@ -243,6 +296,7 @@ async def update_settings(
 
 
 __all__ = [
+    "AccountLockedError",
     "EmailAlreadyExistsError",
     "authenticate_with_password",
     "create_with_password",

@@ -50,6 +50,23 @@ class Settings(BaseSettings):
     # Seconds of clock-skew tolerance applied to ``iat``/``exp``/``nbf`` so
     # tiny drift between pods doesn't manifest as 401s for valid users.
     jwt_leeway_seconds: int = 30
+    # Short-lived token issued after the password step when MFA is on; the
+    # client exchanges it (+ a TOTP/backup code) for a real token pair.
+    jwt_mfa_ttl_seconds: int = 300
+
+    # --- Login hardening ---
+    # Consecutive failed password attempts before an account is temporarily
+    # locked, and how long the lock lasts. Lockout is per-account; the login
+    # endpoint is additionally rate-limited per-IP (see rate_limit.py).
+    login_max_attempts: int = 5
+    login_lockout_seconds: int = 900  # 15 minutes
+
+    # --- Two-factor auth (TOTP) ---
+    # Optional Fernet key (urlsafe base64, 32 bytes) used to seal TOTP secrets
+    # at rest. When unset, secrets are stored un-encrypted with a startup
+    # warning — fine for dev/test, set it in production.
+    mfa_secret_key: str = ""
+    mfa_issuer: str = "Loupe"
 
     # --- Apple Sign-In ---
     apple_client_id: str = "com.loupe.app"

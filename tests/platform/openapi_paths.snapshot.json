@@ -117,6 +117,21 @@
   "/v1/auth/logout": [
     "POST"
   ],
+  "/v1/auth/mfa/disable": [
+    "POST"
+  ],
+  "/v1/auth/mfa/enable": [
+    "POST"
+  ],
+  "/v1/auth/mfa/setup": [
+    "POST"
+  ],
+  "/v1/auth/mfa/status": [
+    "GET"
+  ],
+  "/v1/auth/mfa/verify": [
+    "POST"
+  ],
   "/v1/auth/refresh": [
     "POST"
   ],

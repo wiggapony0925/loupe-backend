@@ -2,29 +2,40 @@
 
 from __future__ import annotations
 
+import uuid
+
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.apple import verify_apple_identity_token
-from app.auth.dependencies import AUTH_COOKIE
+from app.auth.dependencies import AUTH_COOKIE, require_user
 from app.auth.google import verify_google_id_token
-from app.auth.jwt import issue_token, verify_token
+from app.auth.jwt import issue_mfa_token, issue_token, verify_token
 from app.config import get_settings
 from app.db import get_db
+from app.models.user import User
+from app.platform.rate_limit import login_limit, mfa_verify_limit
 from app.schemas.auth import (
     AppleSignInRequest,
     DevLoginRequest,
     EmailSignInRequest,
     EmailSignUpRequest,
     GoogleSignInRequest,
+    LoginResult,
+    MfaCodeRequest,
+    MfaEnableResponse,
+    MfaSetupResponse,
+    MfaStatusResponse,
+    MfaVerifyRequest,
     RefreshRequest,
     TokenPair,
 )
 from app.schemas.user import UserRead
 from app.services import email_service
-from app.services.auth import user_service
-from app.services.auth.user_service import EmailAlreadyExistsError
+from app.services.auth import mfa_service, user_service
+from app.services.auth.mfa_service import MfaError
+from app.services.auth.user_service import AccountLockedError, EmailAlreadyExistsError
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -99,23 +110,38 @@ async def register(
 
 @router.post(
     "/login",
-    response_model=TokenPair,
+    response_model=LoginResult,
     summary="Sign in with email + password",
 )
 async def login(
     payload: EmailSignInRequest,
     response: Response,
     db: AsyncSession = Depends(get_db),
-) -> TokenPair:
-    user = await user_service.authenticate_with_password(
-        db, email=payload.email, password=payload.password
-    )
+    _throttle: None = Depends(login_limit),
+) -> LoginResult:
+    try:
+        user = await user_service.authenticate_with_password(
+            db, email=payload.email, password=payload.password
+        )
+    except AccountLockedError as exc:
+        # Too many failed attempts — refuse for a cooling-off window.
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later.",
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
     if user is None or user.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
         )
-    return _issue(response, user.id, UserRead.model_validate(user))
+    # Password OK. If the account has two-factor enabled, withhold the tokens
+    # and hand back a short-lived challenge for /auth/mfa/verify.
+    if user.mfa_enabled:
+        mfa_token, _ = issue_mfa_token(user.id)
+        return LoginResult(mfa_required=True, mfa_token=mfa_token)
+    pair = _issue(response, user.id, UserRead.model_validate(user))
+    return LoginResult.model_validate(pair, from_attributes=True)
 
 
 @router.post(
@@ -218,6 +244,102 @@ async def logout(response: Response) -> None:
     """Expire the HttpOnly auth cookie. JS can't clear it, so the web calls this
     on sign-out. Bearer clients (mobile) simply drop their stored token."""
     response.delete_cookie(AUTH_COOKIE, path="/")
+
+
+# ── Two-factor auth (TOTP) ────────────────────────────────────────────────
+
+
+@router.post(
+    "/mfa/verify",
+    response_model=TokenPair,
+    summary="Complete sign-in with a 2FA code (login second step)",
+)
+async def mfa_verify(
+    payload: MfaVerifyRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _throttle: None = Depends(mfa_verify_limit),
+) -> TokenPair:
+    """Exchange the login ``mfa_token`` + a TOTP/backup code for a token pair."""
+    try:
+        claims = verify_token(payload.mfa_token)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired sign-in. Start again.",
+        ) from exc
+    if claims.get("typ") != "mfa":
+        raise HTTPException(status_code=401, detail="Invalid sign-in token")
+    try:
+        user_id = uuid.UUID(claims["sub"])
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Malformed token subject") from exc
+    user = await user_service.get_by_id(db, user_id)
+    if user is None or user.deleted_at is not None or not user.mfa_enabled:
+        raise HTTPException(status_code=401, detail="Invalid sign-in")
+    if not await mfa_service.verify_login(db, user, payload.code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="That code didn't match.",
+        )
+    return _issue(response, user.id, UserRead.model_validate(user))
+
+
+@router.get(
+    "/mfa/status",
+    response_model=MfaStatusResponse,
+    summary="Whether two-factor is enabled for the signed-in user",
+)
+async def mfa_status(user: User = Depends(require_user)) -> MfaStatusResponse:
+    return MfaStatusResponse(enabled=bool(user.mfa_enabled))
+
+
+@router.post(
+    "/mfa/setup",
+    response_model=MfaSetupResponse,
+    summary="Begin 2FA enrollment — returns a secret + QR",
+)
+async def mfa_setup(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> MfaSetupResponse:
+    if user.mfa_enabled:
+        raise HTTPException(status_code=409, detail="Two-factor is already enabled.")
+    material = await mfa_service.start_enrollment(db, user)
+    return MfaSetupResponse(**material)
+
+
+@router.post(
+    "/mfa/enable",
+    response_model=MfaEnableResponse,
+    summary="Confirm enrollment with a code; returns one-time backup codes",
+)
+async def mfa_enable(
+    payload: MfaCodeRequest,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> MfaEnableResponse:
+    try:
+        codes = await mfa_service.confirm_enrollment(db, user, payload.code)
+    except MfaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return MfaEnableResponse(backup_codes=codes)
+
+
+@router.post(
+    "/mfa/disable",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Disable 2FA after re-verifying a code",
+)
+async def mfa_disable(
+    payload: MfaCodeRequest,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    try:
+        await mfa_service.disable(db, user, payload.code)
+    except MfaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 __all__ = ["router"]

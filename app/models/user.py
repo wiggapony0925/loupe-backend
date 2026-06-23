@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -43,6 +44,25 @@ class User(Base):
         DateTime(timezone=True), nullable=True
     )
     ban_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # ── Brute-force lockout ──
+    # Consecutive failed password attempts; reset to 0 on success. Once it hits
+    # the configured threshold, `locked_until` is stamped and sign-in is refused
+    # until it passes (defends admin + all accounts from password guessing).
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # ── Two-factor auth (TOTP) ──
+    # Sealed TOTP secret ("f:<fernet>" when MFA_SECRET_KEY is set, else
+    # "p:<base32>"). Set while enrolling and kept while MFA is on.
+    mfa_secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mfa_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # One-time recovery codes, stored as a JSON list of argon2 hashes; each is
+    # consumed (removed) on use so a leaked code can't be replayed.
+    mfa_backup_codes: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    mfa_enrolled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # ── Loupe Pro (subscription) ──
     # `free` | `pro`. Effective entitlements are computed in
     # `entitlement_service`, which also honours the `subscriptions_enabled`

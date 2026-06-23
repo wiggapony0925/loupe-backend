@@ -98,6 +98,30 @@ def issue_token(
     return token, ttl
 
 
+def issue_mfa_token(user_id: uuid.UUID | str) -> tuple[str, int]:
+    """Sign a short-lived ``typ="mfa"`` token proving the password step passed.
+
+    The client exchanges it (plus a TOTP/backup code) at ``/auth/mfa/verify``
+    for a real access+refresh pair. Deliberately *not* an access token: it
+    can't authenticate any API call on its own.
+    """
+    s = get_settings()
+    ttl = s.jwt_mfa_ttl_seconds
+    now = int(time.time())
+    payload: dict[str, Any] = {
+        "iss": s.jwt_issuer,
+        "aud": s.jwt_audience,
+        "sub": str(user_id),
+        "iat": now,
+        "nbf": now,
+        "exp": now + ttl,
+        "jti": uuid.uuid4().hex,
+        "typ": "mfa",
+    }
+    token = jwt.encode(payload, _private_key(), algorithm="RS256")
+    return token, ttl
+
+
 def verify_token(token: str, expected_type: TokenType | None = None) -> dict[str, Any]:
     """Verify signature, audience, issuer, expiry.  Raise ``jwt.PyJWTError`` on failure."""
     s = get_settings()
@@ -122,4 +146,4 @@ def verify_token(token: str, expected_type: TokenType | None = None) -> dict[str
     return decoded
 
 
-__all__ = ["issue_token", "verify_token"]
+__all__ = ["issue_mfa_token", "issue_token", "verify_token"]
