@@ -37,7 +37,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC
 from typing import Any, TypeVar
 
@@ -128,6 +128,32 @@ class CardIdentifier:
         prepared: PreparedImage = await asyncio.to_thread(
             prepare_image_for_ocr, image_bytes
         )
+        phash_str = prepared.fingerprint.phash if prepared.fingerprint else None
+
+        # Step 1.5 — pHash fast path. The single biggest speed (and cost) win:
+        # if the frame's perceptual hash is a near-exact match for a catalog
+        # art hash, the card's identity is already settled — there's nothing
+        # OCR can add. Resolve the catalog pHash ONCE here; if it's within the
+        # tight fast-path distance, return immediately and skip the slow, paid
+        # Google Vision round-trip entirely. A looser match is reused below as
+        # the normal pipeline's pHash candidate (no second catalog scan).
+        catalog_phash = await self._resolve_catalog_phash(db, phash_str)
+        if (
+            catalog_phash is not None
+            and catalog_phash.unified is not None
+            and phash_str
+        ):
+            bits = max(1, len(phash_str) * 4)
+            distance = round((1.0 - catalog_phash.confidence) * bits)
+            if distance <= settings.phash_fast_path_max_distance:
+                return await self._phash_fast_outcome(
+                    db,
+                    prepared=prepared,
+                    resolved=catalog_phash,
+                    tcg_hint=tcg_hint,
+                    user_id=user_id,
+                    started=started,
+                )
 
         # Step 2 — OCR. Errors become an empty result so the pipeline still
         # produces a (low-confidence) identification + analytics row.
@@ -181,14 +207,20 @@ class CardIdentifier:
         # Step 4 — infer TCG.
         tcg_inferred = infer_tcg(parsed, user_hint=tcg_hint)
 
-        # Steps 5+6 — gather candidates from text search + phash in parallel.
+        # Steps 5+6 — gather candidates from text search + phash.
+        # The catalog pHash was already resolved above (Step 1.5); reuse it
+        # rather than scanning the catalog twice. Only fall back to the
+        # user-submission fingerprint index when the catalog had no match.
         text_task = self._search_text(parsed=parsed, tcg=tcg_inferred)
-        phash_task = self._search_phash(
-            db, phash=prepared.fingerprint.phash if prepared.fingerprint else None
-        )
-        text_candidates, phash_candidate = await asyncio.gather(
-            text_task, phash_task, return_exceptions=False
-        )
+        if catalog_phash is not None and catalog_phash.unified is not None:
+            text_candidates = await text_task
+            phash_candidate: dict[str, Any] | None = catalog_phash.unified
+        else:
+            text_candidates, phash_candidate = await asyncio.gather(
+                text_task,
+                self._search_user_phash(db, phash_str),
+                return_exceptions=False,
+            )
 
         # Step 7 — de-duplicate by upstream_id (preferred) or name+set.
         merged = self._dedupe(text_candidates, phash_candidate)
@@ -502,29 +534,104 @@ class CardIdentifier:
             logger.exception("identify catalog %s lookup failed", label)
         return default
 
-    async def _search_phash(
-        self, db: AsyncSession, *, phash: str | None
-    ) -> dict[str, Any] | None:
-        """Match the frame's perceptual hash against the catalog.
+    async def _resolve_catalog_phash(
+        self, db: AsyncSession, phash: str | None
+    ) -> card_resolver_service.ResolvedCard | None:
+        """Best catalog art-hash match for a frame's pHash (with confidence).
 
-        Tries the catalog art hashes first (``cards.image_phash``, the
-        strongest identity signal for a fresh scan) and falls back to the
-        user-submission fingerprints. ``None`` when neither matches.
+        Returns the full :class:`ResolvedCard` so the caller can read the
+        match confidence/distance and decide between the fast path (skip OCR)
+        and using it as a normal pipeline candidate. ``None`` when pHash is
+        disabled or nothing is within ``phash_max_distance``.
         """
-        if not phash:
-            return None
-        if not get_settings().phash_enabled:
+        if not phash or not get_settings().phash_enabled:
             return None
         try:
-            resolved = await card_resolver_service.resolve_catalog_by_phash(db, phash)
-            if resolved is None:
-                resolved = await card_resolver_service.resolve_by_phash(db, phash)
+            return await card_resolver_service.resolve_catalog_by_phash(db, phash)
         except Exception:
-            logger.exception("phash resolve failed")
+            logger.exception("catalog phash resolve failed")
             return None
-        if resolved is None or resolved.unified is None:
+
+    async def _search_user_phash(
+        self, db: AsyncSession, phash: str | None
+    ) -> dict[str, Any] | None:
+        """Fallback pHash match against user-submission fingerprints.
+
+        Only consulted when the catalog art hashes miss — lets a card a user
+        has graded before be recognised even if it isn't in the catalog index.
+        """
+        if not phash or not get_settings().phash_enabled:
             return None
-        return resolved.unified
+        try:
+            resolved = await card_resolver_service.resolve_by_phash(db, phash)
+        except Exception:
+            logger.exception("user phash resolve failed")
+            return None
+        return resolved.unified if resolved and resolved.unified else None
+
+    async def _phash_fast_outcome(
+        self,
+        db: AsyncSession,
+        *,
+        prepared: PreparedImage,
+        resolved: card_resolver_service.ResolvedCard,
+        tcg_hint: str | None,
+        user_id: uuid.UUID | None,
+        started: float,
+    ) -> IdentifyOutcome:
+        """Build + persist an identification from a near-exact pHash match,
+        with no OCR. The card's identity is settled by the art hash."""
+        unified = resolved.unified or {}
+        parsed = parse_ocr_text("")  # no OCR ran — empty parse
+        breakdown = score_candidate(
+            parsed=parsed,
+            candidate=unified,
+            ocr_confidence=0.0,
+            phash_hit=True,
+            feedback_prior=0.0,
+        )
+        candidate = self._to_candidate(unified, "phash", breakdown)
+        # The art-hash identity is the signal here; trust the resolver's
+        # confidence when it's stronger than the generic scorer (which has no
+        # OCR text to lean on).
+        candidate = replace(
+            candidate,
+            confidence=round(max(candidate.confidence, resolved.confidence), 3),
+        )
+        ocr_result = OcrResult(
+            full_text="",
+            blocks=[],
+            mean_confidence=0.0,
+            language_codes=[],
+            provider="phash_fast_path",
+            latency_ms=0,
+        )
+        tcg_inferred = tcg_hint or candidate.tcg or "unknown"
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        identification_id = await self._persist(
+            db,
+            user_id=user_id,
+            prepared=prepared,
+            ocr_result=ocr_result,
+            parsed=parsed,
+            tcg_inferred=tcg_inferred,
+            candidates=[candidate],
+            accuracy=candidate.confidence,
+            primary_source="phash",
+            latency_ms=latency_ms,
+            cost_usd=0.0,
+        )
+        return IdentifyOutcome(
+            identification_id=identification_id,
+            candidates=[candidate],
+            accuracy_score=candidate.confidence,
+            primary_source="phash",
+            parsed=parsed,
+            ocr=ocr_result,
+            latency_ms=latency_ms,
+            tcg_inferred=tcg_inferred,
+            cost_usd=0.0,
+        )
 
     @staticmethod
     def _dedupe(

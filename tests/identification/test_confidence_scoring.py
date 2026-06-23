@@ -79,6 +79,30 @@ def test_no_synergy_without_number_match() -> None:
     assert score.final < 0.7
 
 
+def test_set_code_plus_number_synergy_lifts_poor_name_match() -> None:
+    # Vintage/foil case: Vision mangled the title, but the set symbol +
+    # collector number read clean. set_code + number uniquely pin a printing,
+    # so the frame that reads BOTH must score materially higher than the same
+    # frame that couldn't read the set code — even with a weak name match.
+    common = {
+        "title": "zzqx",  # deliberately unlike "Pikachu" → low text similarity
+        "title_candidates": [("zzqx", 0.4)],
+        "card_number": "58/102",
+        "hp": 40,
+    }
+    with_set = ParsedCard(set_code="base1", **common)
+    without_set = ParsedCard(set_code=None, **common)
+    s_with = score_candidate(
+        parsed=with_set, candidate=_EXACT, ocr_confidence=0.6, phash_hit=False
+    )
+    s_without = score_candidate(
+        parsed=without_set, candidate=_EXACT, ocr_confidence=0.6, phash_hit=False
+    )
+    # The gap must exceed the bare set-code field bonus alone (~0.175),
+    # proving the set+number synergy actually fired.
+    assert s_with.final > s_without.final + 0.3
+
+
 # ── Wrong-match guard ──────────────────────────────────────────────────
 # Regression for the live "Pikachu read as Energizer #285" bug: an attack
 # name ("Energize") fuzzy-matches a different card ("Energizer") whose

@@ -250,6 +250,12 @@ class Settings(BaseSettings):
     # positives; a live photo of a card differs more from clean catalog art
     # than two scans of each other, so we allow a little slack here.
     phash_max_distance: int = 12
+    # Fast-path gate: when a fresh scan's pHash is within this (tighter)
+    # Hamming distance of a catalog art hash, we trust it as a definite match
+    # and return *without* calling the paid/slow OCR provider at all. Must be
+    # noticeably stricter than `phash_max_distance` so we only short-circuit on
+    # near-certain matches; below it the normal OCR+text+pHash pipeline runs.
+    phash_fast_path_max_distance: int = 6
 
     # --- Observability (optional; no-ops when DSN is missing) ---
     sentry_dsn: str | None = None

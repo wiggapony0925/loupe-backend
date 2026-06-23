@@ -42,14 +42,14 @@ logger = get_logger("routers.cards.identify")
 
 router = APIRouter(prefix="/cards", tags=["cards"])
 
-# Tight on the identify endpoint — Vision calls are expensive and we
-# rate-limit per-user / per-IP rather than per-route globally. The live
-# scanner polls ~1 frame/sec while open, so 30/min got blown out within
-# seconds (a burst of 429s mid-scan corrupted the result stream). 60/min
-# matches the other fan-out endpoints and keeps a continuous scan under
-# the cap; absolute Vision spend is still guarded by the monthly budget
-# check inside the identifier.
-identify_limit = rate_limit(limit=60, window_seconds=60, name="cards.identify")
+# Identify is polled continuously while the scanner is open. Raised to
+# 120/min so the client can stream frames roughly twice as fast (≈700ms
+# cadence) for a snappier "results appear as you hover" feel. This is now
+# affordable because the pHash fast path resolves most real cards with NO
+# Vision call at all — only genuinely unknown frames reach paid OCR, and
+# absolute Vision spend stays guarded by the monthly budget check inside
+# the identifier. The per-IP window still stops a runaway script cold.
+identify_limit = rate_limit(limit=120, window_seconds=60, name="cards.identify")
 feedback_limit = rate_limit(limit=60, window_seconds=60, name="cards.identify.feedback")
 
 

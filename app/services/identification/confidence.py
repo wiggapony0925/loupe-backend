@@ -125,6 +125,13 @@ _W_FEEDBACK = 0.05
 # threshold while a name-only match stays in carousel territory.
 _SYNERGY_TITLE_NUMBER = 0.18
 
+# Extra confidence when the set code *and* collector number both match. That
+# pair pins a single printing even when the NAME reads poorly — common on
+# vintage, foil, and non-English cards where Vision mangles the title but the
+# set symbol + number come back clean. Mirrors the title+number synergy so a
+# strong *structured* read still locks without leaning on name similarity.
+_SYNERGY_SET_NUMBER = 0.16
+
 # Penalty when we read a collector number cleanly off the card but the
 # candidate's printed number contradicts it. A number conflict is strong
 # evidence the candidate is the WRONG card (e.g. a fuzzy name look-alike
@@ -155,6 +162,18 @@ def _string_similarity(a: str, b: str) -> float:
         from difflib import SequenceMatcher
 
         return SequenceMatcher(None, a_norm, b_norm).ratio()
+
+
+def _set_code_matches(parsed: ParsedCard, candidate: dict[str, Any]) -> bool:
+    """True when the parsed set code matches the candidate's (case-insensitive)."""
+    cand_set = (
+        (candidate.get("set") or {}).get("code") or candidate.get("set_code") or ""
+    )
+    return bool(
+        parsed.set_code
+        and cand_set
+        and parsed.set_code.upper() == str(cand_set).upper()
+    )
 
 
 def _number_matches(parsed: ParsedCard, candidate: dict[str, Any]) -> bool:
@@ -198,10 +217,7 @@ def _field_bonus(parsed: ParsedCard, candidate: dict[str, Any]) -> float:
     """
     bonus = 0.0
     # Set code (case-insensitive). Strong signal.
-    cand_set = (
-        (candidate.get("set") or {}).get("code") or candidate.get("set_code") or ""
-    )
-    if parsed.set_code and cand_set and parsed.set_code.upper() == cand_set.upper():
+    if _set_code_matches(parsed, candidate):
         bonus += 0.5
     # Card number ("123/198" → match against the candidate "number" field).
     if _number_matches(parsed, candidate):
@@ -269,6 +285,10 @@ def score_candidate(
     # locks, while cards that share a name but not the number stay put.
     if text_sim >= 0.85 and _number_matches(parsed, candidate):
         final += _SYNERGY_TITLE_NUMBER
+    elif _set_code_matches(parsed, candidate) and _number_matches(parsed, candidate):
+        # Name read poorly, but two unique structured identifiers agree —
+        # still a near-certain printing, so lift it clear of the carousel.
+        final += _SYNERGY_SET_NUMBER
     # Number conflict guard: if we read a number off the card and the
     # candidate's printed number contradicts it, this is almost certainly
     # the wrong card (a fuzzy name look-alike from another set). Push it
