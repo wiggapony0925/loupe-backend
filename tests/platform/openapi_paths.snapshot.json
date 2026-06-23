@@ -262,6 +262,10 @@
   "/v1/me/entitlements": [
     "GET"
   ],
+  "/v1/me/recents": [
+    "GET",
+    "PUT"
+  ],
   "/v1/me/settings": [
     "GET",
     "PATCH"

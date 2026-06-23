@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import is_admin_user, require_user
 from app.db import get_db
 from app.models.user import User
+from app.models.user_recents import UserRecents
 from app.schemas.entitlement import EntitlementsRead
 from app.schemas.user import (
     UserRead,
@@ -96,6 +99,55 @@ async def start_checkout(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     return await billing_service.start_checkout(db, user, payload.interval)
+
+
+# ── Recents: cross-device recent searches + recently-viewed ──
+
+
+class RecentsPayload(BaseModel):
+    """A user's recents. ``viewed`` items are stored verbatim (the client's
+    camelCase ``{id, name, imageUrl, setName, kind}``), so no field mapping
+    is needed in either direction."""
+
+    searches: list[str] = Field(default_factory=list)
+    viewed: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.get(
+    "/recents",
+    response_model=RecentsPayload,
+    summary="My recent searches + recently-viewed",
+)
+async def get_recents(
+    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+) -> RecentsPayload:
+    row = await db.get(UserRecents, user.id)
+    if row is None:
+        return RecentsPayload()
+    return RecentsPayload(searches=row.searches or [], viewed=row.viewed or [])
+
+
+@router.put(
+    "/recents",
+    response_model=RecentsPayload,
+    summary="Replace my recents (client sends the merged, capped list)",
+)
+async def put_recents(
+    payload: RecentsPayload,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> RecentsPayload:
+    # Defensive caps — the client already dedupes/caps, but never trust it.
+    searches = [s for s in payload.searches if isinstance(s, str) and s.strip()][:50]
+    viewed = [v for v in payload.viewed if isinstance(v, dict) and v.get("id")][:50]
+    row = await db.get(UserRecents, user.id)
+    if row is None:
+        db.add(UserRecents(user_id=user.id, searches=searches, viewed=viewed))
+    else:
+        row.searches = searches
+        row.viewed = viewed
+    await db.commit()
+    return RecentsPayload(searches=searches, viewed=viewed)
 
 
 @router.post(

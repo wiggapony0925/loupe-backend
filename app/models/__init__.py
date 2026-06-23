@@ -36,6 +36,7 @@ from app.models.scanner import Scanner
 from app.models.sealed import SealedHolding, SealedProduct
 from app.models.site_config import SiteConfig
 from app.models.user import User, UserSettings
+from app.models.user_recents import UserRecents
 from app.models.user_report import UserReport
 from app.models.waitlist import WaitlistEntry
 from app.models.watchlist import WatchlistItem
@@ -80,6 +81,7 @@ __all__ = [
     "SiteConfig",
     "TcgEnum",
     "User",
+    "UserRecents",
     "UserReport",
     "UserSettings",
     "WaitlistEntry",
