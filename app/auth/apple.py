@@ -72,7 +72,8 @@ def _select_key(jwks: dict[str, Any], kid: str) -> dict[str, Any]:
 async def verify_apple_identity_token(identity_token: str) -> AppleClaims:
     """Validate an Apple identity token and return the relevant claims."""
     s = get_settings()
-    if not s.apple_client_id:
+    audiences = s.apple_audiences
+    if not audiences:
         raise RuntimeError(
             "APPLE_CLIENT_ID is not configured; cannot verify Apple sign-in tokens."
         )
@@ -87,7 +88,7 @@ async def verify_apple_identity_token(identity_token: str) -> AppleClaims:
         identity_token,
         public_key,  # type: ignore[arg-type]
         algorithms=["RS256"],
-        audience=s.apple_client_id,
+        audience=audiences,
         issuer=APPLE_ISSUER,
         options={"require": ["exp", "iat", "sub"]},
     )

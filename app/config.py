@@ -69,9 +69,17 @@ class Settings(BaseSettings):
     mfa_issuer: str = "Loupe"
 
     # --- Apple Sign-In ---
-    apple_client_id: str = "com.loupe.app"
+    # Comma-separated list of accepted audiences: the iOS app **bundle id**
+    # (native Sign in with Apple) plus any web **Services ID**. A token's `aud`
+    # must match one of these. `app.loupe.client` is the current iOS bundle id.
+    apple_client_id: str = "com.loupe.app,app.loupe.client"
     apple_jwks_url: str = "https://appleid.apple.com/auth/keys"
     apple_issuer: str = "https://appleid.apple.com"
+
+    @property
+    def apple_audiences(self) -> list[str]:
+        """Accepted Apple token audiences (bundle id + Services ID), normalised."""
+        return [a.strip() for a in self.apple_client_id.split(",") if a.strip()]
 
     # --- Google Sign-In ---
     google_ios_client_id: str = ""
