@@ -51,12 +51,18 @@ INK_MUTED = colors.HexColor("#9BA3AD")
 LINE = colors.HexColor("#E5E8EC")
 BG_ELEV = colors.HexColor("#F7F8FA")
 MINT = colors.HexColor("#16C09C")
+MINT_DARK = colors.HexColor("#0E8A6C")  # mint that reads on light tints
+MINT_TINT = colors.HexColor("#E9F9F4")  # card / chip background wash
+INK_BAND = colors.HexColor("#0B0E14")  # near-black cover band
 ROSE = colors.HexColor("#E5484D")
+ROSE_TINT = colors.HexColor("#FDECEC")
 AMBER = colors.HexColor("#F5A524")
 BLUE = colors.HexColor("#2F6CFB")
+WHITE = colors.white
 
 PAGE_W, PAGE_H = LETTER
 MARGIN = 0.6 * inch
+CONTENT_W = PAGE_W - 2 * MARGIN
 
 
 def _money(v: float | None) -> str:
@@ -142,32 +148,217 @@ def _styles() -> dict[str, ParagraphStyle]:
             textColor=MINT,
             spaceAfter=2,
         ),
+        # ── Cover band (white text on the dark band) ──
+        "bandBrand": ParagraphStyle(
+            "bandBrand",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=13,
+            leading=15,
+            textColor=MINT,
+        ),
+        "bandTitle": ParagraphStyle(
+            "bandTitle",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=22,
+            leading=25,
+            textColor=WHITE,
+        ),
+        "bandSub": ParagraphStyle(
+            "bandSub",
+            parent=base["Normal"],
+            fontName="Helvetica",
+            fontSize=10,
+            leading=13,
+            textColor=colors.HexColor("#AEB6C2"),
+        ),
+        # ── KPI metric cards ──
+        "kpiLabel": ParagraphStyle(
+            "kpiLabel",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=7,
+            leading=9,
+            textColor=INK_MUTED,
+        ),
+        "kpiValue": ParagraphStyle(
+            "kpiValue",
+            parent=base["Normal"],
+            fontName="Helvetica-Bold",
+            fontSize=15,
+            leading=18,
+            textColor=INK,
+        ),
     }
 
 
 # ─── Section renderers (each returns a list of flowables) ────────────────
 
 
-def _section_cover(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
-    up = snap.delta_usd >= 0
-    chip_color = MINT if up else ROSE
-    chip_text = f"{_money(snap.delta_usd)} ({_pct(snap.delta_pct)})"
-    delta_para = Paragraph(
-        f'<font color="{chip_color.hexval()}"><b>{chip_text}</b></font> '
-        f'<font color="{INK_MUTED.hexval()}">over {snap.period_label}</font>',
-        st["body"],
+def _band(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> Table:
+    """Full-width dark header band that opens the cover — brand on the left,
+    'Portfolio Statement' + period stacked, like a premium account statement."""
+    left = [
+        Paragraph("◆ LOUPE", st["bandBrand"]),
+        Spacer(1, 6),
+        Paragraph("Portfolio Statement", st["bandTitle"]),
+        Paragraph(snap.period_label, st["bandSub"]),
+    ]
+    right = Paragraph(
+        f'<font color="#AEB6C2" size="8">STATEMENT PERIOD</font><br/>'
+        f'<font color="#FFFFFF" size="10"><b>{snap.period_start.strftime("%b %d")} – '
+        f"{snap.period_end.strftime('%b %d, %Y')}</b></font>",
+        st["bandSub"],
     )
-    return [
-        Paragraph("◆ LOUPE", st["brand"]),
-        Paragraph("Portfolio Statement", st["h1"]),
-        Paragraph(snap.period_label, st["dim"]),
-        Spacer(1, 0.28 * inch),
-        _account_table(snap, st),
-        Spacer(1, 0.32 * inch),
+    t = Table([[left, right]], colWidths=[CONTENT_W * 0.62, CONTENT_W * 0.38])
+    t.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), INK_BAND),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 18),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 18),
+                ("TOPPADDING", (0, 0), (-1, -1), 18),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 18),
+                ("ROUNDEDCORNERS", [6, 6, 6, 6]),
+            ]
+        )
+    )
+    return t
+
+
+def _hero(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> Table:
+    """Closing-value hero with a tinted, color-coded P/L chip beside it."""
+    up = snap.delta_usd >= 0
+    chip_bg = MINT_TINT if up else ROSE_TINT
+    chip_fg = MINT_DARK if up else ROSE
+    chip = Table(
+        [
+            [
+                Paragraph(
+                    f'<font color="{chip_fg.hexval()}" size="11"><b>'
+                    f"{'▲' if up else '▼'} {_money(snap.delta_usd)}</b></font>"
+                    f'  <font color="{chip_fg.hexval()}" size="10">'
+                    f"({_pct(snap.delta_pct)})</font>",
+                    st["body"],
+                )
+            ]
+        ]
+    )
+    chip.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), chip_bg),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 7),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+                ("ROUNDEDCORNERS", [10, 10, 10, 10]),
+            ]
+        )
+    )
+    left = [
         _eyebrow("Closing value", st),
         Paragraph(_money(snap.closing_value_usd), st["hero"]),
-        delta_para,
-        Spacer(1, 0.32 * inch),
+        Paragraph(f"over {snap.period_label}", st["dim"]),
+    ]
+    t = Table([[left, chip]], colWidths=[CONTENT_W * 0.6, CONTENT_W * 0.4])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (0, 0), "TOP"),
+                ("VALIGN", (1, 0), (1, 0), "MIDDLE"),
+                ("ALIGN", (1, 0), (1, 0), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    return t
+
+
+def _kpi_card(
+    label: str, value: str, st: dict[str, ParagraphStyle], accent=None
+) -> Table:
+    card = Table(
+        [
+            [Paragraph(label.upper(), st["kpiLabel"])],
+            [
+                Paragraph(
+                    f'<font color="{(accent or INK).hexval()}">{value}</font>',
+                    st["kpiValue"],
+                )
+            ],
+        ]
+    )
+    card.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, -1), BG_ELEV),
+                ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+                ("LEFTPADDING", (0, 0), (-1, -1), 11),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 11),
+                ("TOPPADDING", (0, 0), (0, 0), 11),
+                ("BOTTOMPADDING", (0, 0), (0, 0), 1),
+                ("TOPPADDING", (0, 1), (0, 1), 1),
+                ("BOTTOMPADDING", (0, 1), (0, 1), 12),
+                ("ROUNDEDCORNERS", [6, 6, 6, 6]),
+            ]
+        )
+    )
+    return card
+
+
+def _kpi_cards(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> Table:
+    """A row of four at-a-glance metric cards under the hero."""
+    pnl_accent = MINT_DARK if (snap.unrealized_pnl_usd or 0) >= 0 else ROSE
+    cards = [
+        _kpi_card("Opening value", _money(snap.opening_value_usd), st),
+        _kpi_card(
+            "Unrealized P/L",
+            f"{_money(snap.unrealized_pnl_usd)}",
+            st,
+            accent=pnl_accent,
+        ),
+        _kpi_card("Cards in vault", f"{snap.card_count:,}", st),
+        _kpi_card(
+            "Avg grade",
+            f"{snap.avg_grade:.1f}" if snap.avg_grade else "—",
+            st,
+        ),
+    ]
+    gap = 0.12 * inch
+    cw = (CONTENT_W - 3 * gap) / 4
+    row = [cards[0], "", cards[1], "", cards[2], "", cards[3]]
+    t = Table([row], colWidths=[cw, gap, cw, gap, cw, gap, cw])
+    t.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    return t
+
+
+def _section_cover(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
+    return [
+        _band(snap, st),
+        Spacer(1, 0.30 * inch),
+        _hero(snap, st),
+        Spacer(1, 0.26 * inch),
+        _kpi_cards(snap, st),
+        Spacer(1, 0.30 * inch),
+        _eyebrow("Account information", st),
+        Spacer(1, 0.06 * inch),
+        _account_table(snap, st),
+        Spacer(1, 0.28 * inch),
         _eyebrow("Account summary", st),
         Spacer(1, 0.06 * inch),
         _summary_table(snap, st),
