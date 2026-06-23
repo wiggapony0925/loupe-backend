@@ -50,9 +50,7 @@ async def test_successful_login_resets_failure_counter(client, no_rate_limit):
 
     # Four failures (one below the threshold), then a success clears the count.
     for _ in range(4):
-        await client.post(
-            "/v1/auth/login", json={"email": email, "password": "nope"}
-        )
+        await client.post("/v1/auth/login", json={"email": email, "password": "nope"})
     ok = await client.post(
         "/v1/auth/login", json={"email": email, "password": "Password123"}
     )
@@ -74,9 +72,7 @@ async def test_mfa_enrollment_and_login_challenge(client, no_rate_limit):
     headers = {"Authorization": f"Bearer {reg['access_token']}"}
 
     # Enroll: setup → confirm with a live TOTP code → backup codes returned.
-    setup = assert_envelope_ok(
-        await client.post("/v1/auth/mfa/setup", headers=headers)
-    )
+    setup = assert_envelope_ok(await client.post("/v1/auth/mfa/setup", headers=headers))
     secret = setup["secret"]
     assert setup["qr_svg"].startswith("data:image/svg+xml")
 
@@ -123,9 +119,7 @@ async def test_mfa_backup_code_consumed_once(client, no_rate_limit):
     reg = await _register(client, email)
     headers = {"Authorization": f"Bearer {reg['access_token']}"}
 
-    setup = assert_envelope_ok(
-        await client.post("/v1/auth/mfa/setup", headers=headers)
-    )
+    setup = assert_envelope_ok(await client.post("/v1/auth/mfa/setup", headers=headers))
     totp = pyotp.TOTP(setup["secret"])
     enable = assert_envelope_ok(
         await client.post(
