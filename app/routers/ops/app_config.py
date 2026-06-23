@@ -20,7 +20,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_db
+from app.services.admin import flag_service
 
 router = APIRouter(prefix="/app", tags=["app"])
 
@@ -66,11 +70,21 @@ _DEFAULT_FLAGS: dict[str, bool] = {
         "offline-tolerant."
     ),
 )
-async def get_app_config(clientVersion: str | None = None) -> dict[str, Any]:
+async def get_app_config(
+    clientVersion: str | None = None, db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    # Dashboard-managed flags (the same `feature_flags` table the dev portal +
+    # web read) override the baked-in defaults, so toggling a flag in the
+    # dashboard reaches the app too — no release required.
+    flags = dict(_DEFAULT_FLAGS)
+    try:
+        flags.update(await flag_service.public_map(db))
+    except Exception:  # never let a flag read break the launch config
+        pass
     return {
         "minSupportedVersion": _MIN_SUPPORTED_VERSION,
         "forceUpdate": _is_below_min(clientVersion, _MIN_SUPPORTED_VERSION),
-        "flags": dict(_DEFAULT_FLAGS),
+        "flags": flags,
         "homeRails": list(_DEFAULT_HOME_RAILS),
     }
 
