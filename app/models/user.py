@@ -52,6 +52,13 @@ class User(Base):
     locked_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # ── Session revocation ──
+    # Monotonic "token epoch". Every issued access/refresh token carries the
+    # value current at sign-in as a ``ver`` claim; bumping this column instantly
+    # invalidates *all* of a user's outstanding tokens (the "sign out everywhere"
+    # / "revoke a stolen token" kill switch). Bumped by /auth/logout-all and any
+    # future password-change. Stateless: no per-token store to maintain.
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # ── Two-factor auth (TOTP) ──
     # Sealed TOTP secret ("f:<fernet>" when MFA_SECRET_KEY is set, else
     # "p:<base32>"). Set while enrolling and kept while MFA is on.

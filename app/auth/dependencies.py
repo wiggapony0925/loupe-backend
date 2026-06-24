@@ -85,6 +85,17 @@ async def _resolve_user(
         if required:
             raise HTTPException(status_code=403, detail="Account suspended")
         return None
+    # Token epoch: a token minted before the user's last "sign out everywhere"
+    # (or password change) carries a stale `ver` and is rejected. Absent claim
+    # defaults to 0 so tokens issued before this feature still validate.
+    if user is not None and int(claims.get("ver", 0)) != user.token_version:
+        if required:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return None
     if user is not None:
         # Stamp the user-id on the request context so structured logs
         # downstream (and Sentry events) can attribute requests to a user

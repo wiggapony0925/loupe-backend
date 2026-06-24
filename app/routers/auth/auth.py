@@ -42,9 +42,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger("routers.auth")
 
 
-def _build_pair(user_id, user_read: UserRead) -> TokenPair:
-    access, ttl = issue_token(user_id, "access")
-    refresh, _ = issue_token(user_id, "refresh")
+def _build_pair(user_id, user_read: UserRead, *, token_version: int = 0) -> TokenPair:
+    # `ver` pins each token to the user's current token epoch; bumping
+    # `User.token_version` (e.g. /auth/logout-all) invalidates every token that
+    # carries an older value. See app.auth.dependencies for the check.
+    claims = {"ver": token_version}
+    access, ttl = issue_token(user_id, "access", claims)
+    refresh, _ = issue_token(user_id, "refresh", claims)
     # Effective admin = the DB grant (carried by model_validate) OR the env
     # bootstrap allowlist. Lets the client route admins straight to the
     # developer portal on sign-in (still enforced server-side on every call).
@@ -60,7 +64,9 @@ def _build_pair(user_id, user_read: UserRead) -> TokenPair:
     )
 
 
-def _issue(response: Response, user_id, user_read: UserRead) -> TokenPair:
+def _issue(
+    response: Response, user_id, user_read: UserRead, *, token_version: int = 0
+) -> TokenPair:
     """Build a TokenPair AND set the access token as an HttpOnly cookie.
 
     The body still carries the tokens (mobile reads them for its Bearer flow);
@@ -68,7 +74,7 @@ def _issue(response: Response, user_id, user_read: UserRead) -> TokenPair:
     JS-readable storage. `Secure` is on in production; `SameSite=Lax` is safe
     because the web calls the API same-origin (nginx proxies /v1).
     """
-    pair = _build_pair(user_id, user_read)
+    pair = _build_pair(user_id, user_read, token_version=token_version)
     response.set_cookie(
         key=AUTH_COOKIE,
         value=pair.access_token,
@@ -105,7 +111,12 @@ async def register(
             detail="An account with that email already exists.",
         ) from exc
     await email_service.send_welcome(user)  # best-effort; no-op without a provider
-    return _issue(response, user.id, UserRead.model_validate(user))
+    return _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
+    )
 
 
 @router.post(
@@ -140,7 +151,12 @@ async def login(
     if user.mfa_enabled:
         mfa_token, _ = issue_mfa_token(user.id)
         return LoginResult(mfa_required=True, mfa_token=mfa_token)
-    pair = _issue(response, user.id, UserRead.model_validate(user))
+    pair = _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
+    )
     return LoginResult.model_validate(pair, from_attributes=True)
 
 
@@ -163,7 +179,12 @@ async def dev_login(
     user = await user_service.find_or_create_dev_user(
         db, email=payload.email, display_name=payload.display_name
     )
-    return _issue(response, user.id, UserRead.model_validate(user))
+    return _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
+    )
 
 
 @router.post("/apple", response_model=TokenPair, summary="Sign in with Apple")
@@ -186,7 +207,12 @@ async def sign_in_with_apple(
         email=claims.email,
         display_name=payload.display_name,
     )
-    return _issue(response, user.id, UserRead.model_validate(user))
+    return _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
+    )
 
 
 @router.post("/google", response_model=TokenPair, summary="Sign in with Google")
@@ -210,7 +236,12 @@ async def sign_in_with_google(
         display_name=payload.display_name or claims.name,
         avatar_url=claims.picture,
     )
-    return _issue(response, user.id, UserRead.model_validate(user))
+    return _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
+    )
 
 
 @router.post("/refresh", response_model=TokenPair, summary="Refresh access token")
@@ -235,7 +266,15 @@ async def refresh(
     # A banned user must not be able to mint fresh access tokens by refreshing.
     if user.banned_at is not None:
         raise HTTPException(status_code=403, detail="Account suspended")
-    return _issue(response, user.id, UserRead.model_validate(user))
+    # Reject a refresh token from before the user's last revocation epoch.
+    if int(claims.get("ver", 0)) != user.token_version:
+        raise HTTPException(status_code=401, detail="Session has been revoked")
+    return _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
+    )
 
 
 @router.post(
@@ -246,6 +285,23 @@ async def refresh(
 async def logout(response: Response) -> None:
     """Expire the HttpOnly auth cookie. JS can't clear it, so the web calls this
     on sign-out. Bearer clients (mobile) simply drop their stored token."""
+    response.delete_cookie(AUTH_COOKIE, path="/")
+
+
+@router.post(
+    "/logout-all",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke every session for the signed-in user",
+)
+async def logout_all(
+    response: Response,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Bump the user's token epoch, instantly invalidating *all* of their
+    outstanding access + refresh tokens (every device). The kill switch for a
+    lost device or a stolen token. Also clears this browser's cookie."""
+    await user_service.bump_token_version(db, user)
     response.delete_cookie(AUTH_COOKIE, path="/")
 
 
@@ -285,7 +341,12 @@ async def mfa_verify(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="That code didn't match.",
         )
-    return _issue(response, user.id, UserRead.model_validate(user))
+    return _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
+    )
 
 
 @router.get(

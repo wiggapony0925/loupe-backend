@@ -43,6 +43,20 @@ async def get_by_id(db: AsyncSession, user_id) -> User | None:
     ).scalar_one_or_none()
 
 
+async def bump_token_version(db: AsyncSession, user: User) -> int:
+    """Increment the user's token epoch → revoke every outstanding token.
+
+    Powers "sign out everywhere" and is the kill switch for a stolen token; any
+    future password-change flow should call this too. Returns the new version.
+    """
+    user.token_version = (user.token_version or 0) + 1
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    logger.info("Bumped token_version for user=%s → %s", user.id, user.token_version)
+    return user.token_version
+
+
 async def get_by_email(db: AsyncSession, email: str) -> User | None:
     return (
         await db.execute(select(User).where(User.email == email.lower()))
