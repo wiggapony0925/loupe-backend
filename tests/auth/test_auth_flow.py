@@ -74,3 +74,19 @@ async def test_refresh_token_rotation(client, monkeypatch):
 async def test_refresh_rejects_invalid(client):
     resp = await client.post("/v1/auth/refresh", json={"refresh_token": "a" * 50})
     assert_envelope_error(resp, expected_status=401)
+
+
+@pytest.mark.asyncio
+async def test_refresh_rejects_banned_user(client, created_user, db_session):
+    """A banned user must not be able to mint fresh access tokens via refresh."""
+    from datetime import UTC, datetime
+
+    from app.auth.jwt import issue_token
+
+    refresh, _ = issue_token(created_user.id, "refresh")
+    created_user.banned_at = datetime.now(UTC)
+    db_session.add(created_user)
+    await db_session.commit()
+
+    resp = await client.post("/v1/auth/refresh", json={"refresh_token": refresh})
+    assert_envelope_error(resp, expected_status=403)

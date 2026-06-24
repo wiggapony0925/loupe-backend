@@ -232,6 +232,9 @@ async def refresh(
     user = await user_service.get_by_id(db, user_id)
     if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=401, detail="User not found")
+    # A banned user must not be able to mint fresh access tokens by refreshing.
+    if user.banned_at is not None:
+        raise HTTPException(status_code=403, detail="Account suspended")
     return _issue(response, user.id, UserRead.model_validate(user))
 
 

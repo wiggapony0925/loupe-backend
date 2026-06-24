@@ -14,6 +14,7 @@ from app.http.middleware import register_http_middleware
 from app.http.response_envelope import register_envelope_middleware
 from app.lifecycle import lifespan
 from app.platform.observability import init_otel, init_sentry
+from app.platform.startup_checks import validate_production_config
 from app.routers import billing
 from app.routers.admin import admin_router
 from app.routers.analytics import home_feed as home
@@ -39,6 +40,9 @@ from app.routers.public import storefront as public
 def create_app() -> FastAPI:
     """Factory used by uvicorn (``app.main:app``) and tests."""
     s = get_settings()
+
+    # Refuse to boot on an insecure production configuration (no-op in dev/test).
+    validate_production_config(s)
 
     # Wire Sentry first so any subsequent init failure is reported. The helper
     # is a graceful no-op when SENTRY_DSN is unset, so dev environments stay
