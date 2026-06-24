@@ -22,6 +22,13 @@ class EmailSignInRequest(BaseModel):
     password: str = Field(..., min_length=1, max_length=128)
 
 
+class ChangePasswordRequest(BaseModel):
+    """Body for ``POST /v1/auth/change-password`` (signed-in users)."""
+
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
 class DevLoginRequest(BaseModel):
     """Body for ``POST /v1/auth/dev-login`` (dev/test only, no password)."""
 

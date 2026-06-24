@@ -105,6 +105,41 @@ class EmailAlreadyExistsError(Exception):
     """Raised when ``create_with_password`` is called for an existing email."""
 
 
+class PasswordChangeError(Exception):
+    """Raised when a password change can't proceed.
+
+    ``reason`` is a stable code: ``"no_password"`` (SSO-only account, nothing to
+    change) or ``"wrong_current"`` (the supplied current password didn't match).
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+async def change_password(
+    db: AsyncSession, user: User, *, current_password: str, new_password: str
+) -> User:
+    """Verify the current password, set the new one, and revoke all other sessions.
+
+    Bumps ``token_version`` in the same commit, so every outstanding access +
+    refresh token is invalidated — the caller re-issues a fresh pair for the
+    current device so it stays signed in. Raises :class:`PasswordChangeError`
+    for SSO-only accounts or a wrong current password.
+    """
+    if user.password_hash is None:
+        raise PasswordChangeError("no_password")
+    if not verify_password(current_password, user.password_hash):
+        raise PasswordChangeError("wrong_current")
+    user.password_hash = hash_password(new_password)
+    user.token_version = (user.token_version or 0) + 1
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    logger.info("Password changed; sessions revoked for user=%s", user.id)
+    return user
+
+
 async def create_with_password(
     db: AsyncSession,
     *,

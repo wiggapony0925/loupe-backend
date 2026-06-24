@@ -15,9 +15,14 @@ from app.auth.jwt import issue_mfa_token, issue_token, verify_token
 from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
-from app.platform.rate_limit import login_limit, mfa_verify_limit
+from app.platform.rate_limit import (
+    change_password_limit,
+    login_limit,
+    mfa_verify_limit,
+)
 from app.schemas.auth import (
     AppleSignInRequest,
+    ChangePasswordRequest,
     DevLoginRequest,
     EmailSignInRequest,
     EmailSignUpRequest,
@@ -303,6 +308,47 @@ async def logout_all(
     lost device or a stolen token. Also clears this browser's cookie."""
     await user_service.bump_token_version(db, user)
     response.delete_cookie(AUTH_COOKIE, path="/")
+
+
+@router.post(
+    "/change-password",
+    response_model=TokenPair,
+    summary="Change password (revokes other sessions)",
+)
+async def change_password(
+    payload: ChangePasswordRequest,
+    response: Response,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+    _throttle: None = Depends(change_password_limit),
+) -> TokenPair:
+    """Set a new password after verifying the current one. Bumps the token epoch
+    so every *other* session is revoked, then re-issues a fresh pair for this
+    device — so the user stays signed in here but is signed out everywhere else.
+    """
+    try:
+        updated = await user_service.change_password(
+            db,
+            user,
+            current_password=payload.current_password,
+            new_password=payload.new_password,
+        )
+    except user_service.PasswordChangeError as exc:
+        if exc.reason == "no_password":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This account signs in with Apple or Google — there's no password to change.",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect.",
+        ) from exc
+    return _issue(
+        response,
+        updated.id,
+        UserRead.model_validate(updated),
+        token_version=updated.token_version,
+    )
 
 
 # ── Two-factor auth (TOTP) ────────────────────────────────────────────────
