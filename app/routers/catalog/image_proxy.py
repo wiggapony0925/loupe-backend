@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -78,6 +78,11 @@ _ALLOWED_HOSTS: frozenset[str] = frozenset(
 _MAX_CACHE_ENTRIES = 256
 _MAX_BYTES_PER_IMAGE = 5 * 1024 * 1024  # 5 MB hard ceiling
 _UPSTREAM_TIMEOUT = httpx.Timeout(8.0, connect=4.0)
+# Redirects are followed manually (not via httpx's follow_redirects) so every
+# hop can be re-checked against the host allowlist — otherwise an allowlisted
+# host could 30x-redirect us to an internal address and turn the proxy into an
+# SSRF relay. Card CDNs rarely redirect, so a small bound is plenty.
+_MAX_REDIRECTS = 3
 # Browser / expo-image cache duration. Card art is effectively immutable
 # once the upstream URL exists, so we tell clients "never re-validate".
 _PUBLIC_CACHE_SECONDS = 60 * 60 * 24 * 30  # 30 days
@@ -131,6 +136,28 @@ def _validate_url(raw: str) -> str:
     return raw
 
 
+async def _fetch_allowlisted(client: httpx.AsyncClient, url: str) -> httpx.Response:
+    """GET ``url``, following redirects manually so each hop is re-validated
+    against the host allowlist. Without this, ``follow_redirects=True`` would let
+    an allowlisted host bounce us to an internal address (SSRF). A redirect to a
+    non-allowlisted host raises ``HTTPException(400)`` via :func:`_validate_url`.
+    """
+    current = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        resp = await client.get(
+            current, timeout=_UPSTREAM_TIMEOUT, follow_redirects=False
+        )
+        if resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("location")
+            if not location:
+                return resp  # malformed redirect — let the caller handle non-200
+            # Resolve relative redirects, then re-validate the destination host.
+            current = _validate_url(urljoin(current, location))
+            continue
+        return resp
+    raise HTTPException(status_code=502, detail="too_many_redirects")
+
+
 # ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
@@ -178,7 +205,10 @@ async def proxy_image(
 
     client = await get_http_client()
     try:
-        resp = await client.get(url, timeout=_UPSTREAM_TIMEOUT, follow_redirects=True)
+        # `_fetch_allowlisted` re-validates every redirect hop; a redirect to a
+        # non-allowlisted host raises HTTPException(400) here (not httpx.HTTPError),
+        # which propagates straight out as a 400 — the SSRF guard.
+        resp = await _fetch_allowlisted(client, url)
     except httpx.HTTPError as exc:
         logger.warning("image_proxy upstream error url=%s err=%s", url, exc)
         raise HTTPException(status_code=502, detail="upstream_unreachable") from exc

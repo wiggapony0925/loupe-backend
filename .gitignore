@@ -48,3 +48,7 @@ app/db/alembic/versions/*.py.bak
 # GCP service account keys and local secrets
 secrets/
 loupe_test.db
+
+# Ad-hoc Cloud Run log/error dumps (never commit — leak infra details)
+last_error.json
+logs.json

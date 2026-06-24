@@ -49,9 +49,19 @@ def _fernet() -> Fernet | None:
 
 
 def seal_secret(plain: str) -> str:
-    """Encrypt a TOTP secret for storage (or mark it plaintext in dev)."""
+    """Encrypt a TOTP secret for storage (or mark it plaintext in dev).
+
+    In production we refuse to persist an unencrypted TOTP secret: storing 2FA
+    seeds in the clear would let a single DB read defeat every user's 2FA. New
+    enrollments fail loudly until ``MFA_SECRET_KEY`` is configured.
+    """
     fernet = _fernet()
     if fernet is None:
+        if get_settings().is_production:
+            raise RuntimeError(
+                "MFA_SECRET_KEY is not set; refusing to store a TOTP secret "
+                "unencrypted in production. Configure a Fernet key to enable 2FA."
+            )
         logger.warning(
             "MFA_SECRET_KEY not set; storing TOTP secret unencrypted (dev only)"
         )

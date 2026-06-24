@@ -85,6 +85,41 @@ async def test_image_proxy_502_on_upstream_failure(client):
 
 
 @pytest.mark.asyncio
+async def test_image_proxy_blocks_redirect_to_disallowed_host(client):
+    """SSRF guard: an allowlisted host that 30x-redirects to an internal address
+    must NOT be followed — each redirect hop is re-validated against the allowlist."""
+    url = "https://images.pokemontcg.io/base1/6.png"
+    with respx.mock(assert_all_called=False) as router:
+        router.get(url).mock(
+            return_value=httpx.Response(
+                302, headers={"location": "http://169.254.169.254/latest/meta-data/"}
+            )
+        )
+        resp = await client.get("/v1/img", params={"u": url})
+    # Redirect destination host isn't allowlisted → rejected (not followed).
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_image_proxy_follows_redirect_to_allowed_host(client):
+    """A redirect from one allowlisted CDN to another is still served."""
+    url = "https://images.pokemontcg.io/base1/7.png"
+    dest = "https://cards.scryfall.io/normal/front/redirected.png"
+    with respx.mock(assert_all_called=False) as router:
+        router.get(url).mock(
+            return_value=httpx.Response(301, headers={"location": dest})
+        )
+        router.get(dest).mock(
+            return_value=httpx.Response(
+                200, content=_TINY_PNG, headers={"content-type": "image/png"}
+            )
+        )
+        resp = await client.get("/v1/img", params={"u": url})
+    assert resp.status_code == 200
+    assert resp.content == _TINY_PNG
+
+
+@pytest.mark.asyncio
 async def test_image_proxy_502_on_non_image_content_type(client):
     url = "https://images.pokemontcg.io/base1/5.png"
     with respx.mock(assert_all_called=False) as router:
