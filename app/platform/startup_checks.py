@@ -48,7 +48,10 @@ def validate_production_config(settings: Settings) -> None:
     fatal: list[str] = []
     warn: list[str] = []
 
-    if not settings.jwt_private_key_pem.strip() or not settings.jwt_public_key_pem.strip():
+    if (
+        not settings.jwt_private_key_pem.strip()
+        or not settings.jwt_public_key_pem.strip()
+    ):
         fatal.append(
             "JWT_PRIVATE_KEY_PEM / JWT_PUBLIC_KEY_PEM must be set in production "
             "(ephemeral per-process keys break auth across instances)."
@@ -65,7 +68,9 @@ def validate_production_config(settings: Settings) -> None:
             "Set a Fernet key (new MFA enrollments are blocked until you do)."
         )
     if not settings.admin_email_set:
-        warn.append("ADMIN_EMAILS is empty — no account can access the developer portal.")
+        warn.append(
+            "ADMIN_EMAILS is empty — no account can access the developer portal."
+        )
     if not os.environ.get("DOCS_ACCESS_TOKEN", "").strip():
         warn.append(
             "DOCS_ACCESS_TOKEN is unset — the OpenAPI spec and API docs are "

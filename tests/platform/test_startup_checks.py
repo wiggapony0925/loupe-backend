@@ -29,7 +29,9 @@ def _prod(**overrides) -> Settings:
 def test_noop_outside_production():
     # development/test never raise, whatever the config.
     validate_production_config(Settings(app_env="development", jwt_private_key_pem=""))
-    validate_production_config(Settings(app_env="test", database_url="sqlite+aiosqlite://"))
+    validate_production_config(
+        Settings(app_env="test", database_url="sqlite+aiosqlite://")
+    )
 
 
 def test_fully_configured_production_boots():
