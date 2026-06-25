@@ -248,12 +248,23 @@ async def cancel_subscription(
     return await get_detail(db, user_id)
 
 
+async def refund_latest(db: AsyncSession, user_id: uuid.UUID) -> dict:
+    """Refund a user's most recent charge (super-admin support action).
+
+    Raises 400 if there's no billing account / refundable charge, 503 if billing
+    is off. Returns the Stripe refund result.
+    """
+    target = await _get(db, user_id)
+    return await billing_service.refund_latest(db, target)
+
+
 __all__ = [
     "ban",
     "cancel_subscription",
     "create_test_account",
     "get_detail",
     "list_users",
+    "refund_latest",
     "revoke_sessions",
     "set_admin",
     "soft_delete",

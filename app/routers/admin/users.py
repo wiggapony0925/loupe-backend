@@ -21,6 +21,7 @@ from app.schemas.admin import (
     AdminUserPage,
     AdminUserRead,
     BanRequest,
+    RefundResult,
     SubscriptionCancelRequest,
     TestAccountCreated,
 )
@@ -210,6 +211,33 @@ async def cancel_subscription(
         payload={"immediately": payload.immediately},
     )
     return result
+
+
+@router.post(
+    "/{user_id}/refund",
+    response_model=RefundResult,
+    summary="Refund a user's latest charge (super-admin)",
+)
+async def refund_latest(
+    user_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+) -> RefundResult:
+    result = await user_admin_service.refund_latest(db, user_id)
+    await audit_service.record(
+        db,
+        request=request,
+        user=actor,
+        action="user.refund",
+        target_table="users",
+        target_id=user_id,
+        payload={
+            "amount_usd": result.get("amount_usd"),
+            "refund_id": result.get("refund_id"),
+        },
+    )
+    return RefundResult(**result)
 
 
 @router.delete(

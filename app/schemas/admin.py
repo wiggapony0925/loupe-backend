@@ -89,6 +89,16 @@ class SubscriptionCancelRequest(BaseModel):
     immediately: bool = False
 
 
+class RefundResult(BaseModel):
+    """The outcome of refunding a user's latest charge."""
+
+    refund_id: str
+    charge_id: str
+    amount_usd: float
+    currency: str
+    status: str
+
+
 class AdminMetrics(BaseModel):
     """At-a-glance portal metrics."""
 
@@ -115,6 +125,7 @@ __all__ = [
     "AdminUserPage",
     "AdminUserRead",
     "BanRequest",
+    "RefundResult",
     "SubscriptionCancelRequest",
     "TestAccountCreated",
 ]

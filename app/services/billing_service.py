@@ -222,6 +222,46 @@ async def cancel_subscription(
     }
 
 
+async def refund_latest(db: AsyncSession, user: User) -> dict[str, Any]:
+    """Refund a user's most recent successful charge (admin support action).
+
+    Issues a full refund of the latest paid, not-yet-refunded charge on the
+    user's Stripe customer. Money-out — callers gate this behind super-admin +
+    confirmation + audit.
+    """
+    if not user.stripe_customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This user has no billing account.",
+        )
+    _client()  # raises 503 when billing isn't configured
+    charges = stripe.Charge.list(customer=user.stripe_customer_id, limit=10)
+    charge = next(
+        (
+            c
+            for c in charges.get("data", [])
+            if c.get("paid")
+            and not c.get("refunded")
+            and c.get("status") == "succeeded"
+            and (c.get("amount", 0) - c.get("amount_refunded", 0)) > 0
+        ),
+        None,
+    )
+    if charge is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No refundable charge found for this user.",
+        )
+    refund = stripe.Refund.create(charge=charge["id"])
+    return {
+        "refund_id": refund["id"],
+        "charge_id": charge["id"],
+        "amount_usd": round((refund.get("amount", 0) or 0) / 100, 2),
+        "currency": (refund.get("currency") or "usd").upper(),
+        "status": refund.get("status") or "pending",
+    }
+
+
 async def create_portal_session(db: AsyncSession, user: User) -> dict[str, Any]:
     """A Stripe Customer Portal link so Pro members manage/cancel their plan."""
     if not billing_configured():
@@ -362,5 +402,6 @@ __all__ = [
     "create_subscription",
     "handle_event",
     "public_config",
+    "refund_latest",
     "start_checkout",
 ]
