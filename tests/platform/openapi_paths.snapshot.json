@@ -79,6 +79,9 @@
     "DELETE",
     "PATCH"
   ],
+  "/v1/admin/grades": [
+    "GET"
+  ],
   "/v1/admin/health": [
     "GET"
   ],
