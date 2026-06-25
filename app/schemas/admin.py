@@ -99,6 +99,14 @@ class RefundResult(BaseModel):
     status: str
 
 
+class ImpersonateResult(BaseModel):
+    """A short-lived access token for viewing the app as another user."""
+
+    token: str
+    email: EmailStr
+    expires_in: int
+
+
 class AdminMetrics(BaseModel):
     """At-a-glance portal metrics."""
 
@@ -125,6 +133,7 @@ __all__ = [
     "AdminUserPage",
     "AdminUserRead",
     "BanRequest",
+    "ImpersonateResult",
     "RefundResult",
     "SubscriptionCancelRequest",
     "TestAccountCreated",

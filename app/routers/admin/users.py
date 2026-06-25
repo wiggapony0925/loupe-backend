@@ -21,6 +21,7 @@ from app.schemas.admin import (
     AdminUserPage,
     AdminUserRead,
     BanRequest,
+    ImpersonateResult,
     RefundResult,
     SubscriptionCancelRequest,
     TestAccountCreated,
@@ -238,6 +239,30 @@ async def refund_latest(
         },
     )
     return RefundResult(**result)
+
+
+@router.post(
+    "/{user_id}/impersonate",
+    response_model=ImpersonateResult,
+    summary="Get a short-lived token to view the app as a user (super-admin)",
+)
+async def impersonate(
+    user_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+) -> ImpersonateResult:
+    result = await user_admin_service.impersonate(db, actor, user_id)
+    await audit_service.record(
+        db,
+        request=request,
+        user=actor,
+        action="user.impersonate",
+        target_table="users",
+        target_id=user_id,
+        payload={"email": result["email"]},
+    )
+    return ImpersonateResult(**result)
 
 
 @router.delete(

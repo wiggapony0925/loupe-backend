@@ -125,6 +125,9 @@
   "/v1/admin/users/{user_id}/ban": [
     "POST"
   ],
+  "/v1/admin/users/{user_id}/impersonate": [
+    "POST"
+  ],
   "/v1/admin/users/{user_id}/plan": [
     "PATCH"
   ],

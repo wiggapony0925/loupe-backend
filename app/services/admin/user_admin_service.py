@@ -258,11 +258,34 @@ async def refund_latest(db: AsyncSession, user_id: uuid.UUID) -> dict:
     return await billing_service.refund_latest(db, target)
 
 
+async def impersonate(db: AsyncSession, actor: User, user_id: uuid.UUID) -> dict:
+    """Mint a short-lived access token for viewing the app as ``user_id``.
+
+    Super-admin only (enforced at the router). Refuses to impersonate yourself,
+    a protected super-admin, or a deleted account. The token carries the
+    target's current ``token_version`` so a later "revoke sessions" invalidates
+    it too.
+    """
+    from app.auth.jwt import issue_token
+
+    target = await _get(db, user_id)
+    _guard_not_self(actor, target)
+    _guard_not_super(target)
+    if target.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can't impersonate a deleted account.",
+        )
+    token, ttl = issue_token(target.id, "access", {"ver": target.token_version})
+    return {"token": token, "email": target.email, "expires_in": ttl}
+
+
 __all__ = [
     "ban",
     "cancel_subscription",
     "create_test_account",
     "get_detail",
+    "impersonate",
     "list_users",
     "refund_latest",
     "revoke_sessions",
