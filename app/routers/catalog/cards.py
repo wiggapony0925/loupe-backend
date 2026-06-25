@@ -18,8 +18,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import require_user
 from app.db import get_db
 from app.models.enums import TcgEnum
+from app.models.user import User
 from app.platform.rate_limit import (
     catalog_read_limit,
     resolve_limit,
@@ -27,12 +29,14 @@ from app.platform.rate_limit import (
 )
 from app.schemas.card import CardRead
 from app.schemas.common import Pagination
+from app.schemas.ownership import CardOwnership
 from app.services.catalog import (
     canonical_card_service,
     card_catalog_service,
     card_resolver_service,
     card_search_service,
 )
+from app.services.collection import graded_card_service
 from app.services.market import (
     grade_summary_service,
     listings_service,
@@ -222,6 +226,22 @@ async def get_market(card_id: str) -> dict[str, Any]:
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
     return result
+
+
+@router.get(
+    "/{card_id}/ownership",
+    response_model=CardOwnership,
+    summary="My ownership of this card (signed-in)",
+)
+async def get_ownership(
+    card_id: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> CardOwnership:
+    """Per-user ownership context: every copy the signed-in user owns of this
+    card, with grade/scan data and rolled-up cost basis, holding value, and
+    unrealized P/L. Returns ``owned=false`` when they own none."""
+    return await graded_card_service.get_card_ownership(db, user, card_id)
 
 
 @router.get(

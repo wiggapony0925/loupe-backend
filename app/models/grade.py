@@ -11,7 +11,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 from app.db.types import JsonCol, UuidCol
-from app.models.enums import GradeHouseEnum, RawConditionEnum
+from app.models.enums import AcquisitionSourceEnum, GradeHouseEnum, RawConditionEnum
 
 
 class GradedCard(Base):
@@ -70,6 +70,12 @@ class GradedCard(Base):
     fingerprint_hash: Mapped[str | None] = mapped_column(
         String(128), index=True, nullable=True
     )
+    # How the card entered the collection (scan / manual / import). Nullable so
+    # legacy rows stay valid; the UI reads it as "unknown" when absent.
+    acquired_via: Mapped[AcquisitionSourceEnum | None] = mapped_column(
+        Enum(AcquisitionSourceEnum, name="acquisition_source_enum"),
+        nullable=True,
+    )
     notes: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     graded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -88,6 +94,12 @@ class GradedCard(Base):
     )
 
     __table_args__ = (Index("ix_graded_cards_user_graded_at", "user_id", "graded_at"),)
+
+    @property
+    def is_graded(self) -> bool:
+        """True when slabbed by a third-party house; ``loupe`` is our raw/ungraded
+        placeholder, so it reads as not graded."""
+        return self.house != GradeHouseEnum.loupe
 
 
 __all__ = ["GradedCard"]
