@@ -65,6 +65,9 @@
   "/v1/admin/database/tables/{name}": [
     "GET"
   ],
+  "/v1/admin/engagement": [
+    "GET"
+  ],
   "/v1/admin/flags": [
     "GET",
     "POST"
