@@ -201,6 +201,9 @@
   "/v1/cards/{card_id}/nearby-listings": [
     "GET"
   ],
+  "/v1/cards/{card_id}/ownership": [
+    "GET"
+  ],
   "/v1/cards/{card_id}/prices": [
     "GET"
   ],

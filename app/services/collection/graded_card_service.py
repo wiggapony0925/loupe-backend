@@ -10,6 +10,7 @@ covers the *grading computation* (image → grade); this one covers the
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
@@ -17,9 +18,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import Card, CardSet
+from app.models.card_external_ref import CardExternalRef
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
+from app.schemas.ownership import CardHolding, CardOwnership
 from app.services import entitlement_service
 from app.services.catalog import card_resolver_service
 from app.utils.time import utcnow
@@ -253,9 +256,127 @@ async def soft_delete(db: AsyncSession, user: User, grade_id: uuid.UUID) -> None
     await db.commit()
 
 
+async def _resolve_local_card_id(db: AsyncSession, card_ref: str) -> uuid.UUID | None:
+    """Local Card UUID for a ref (UUID or `<source>:<external_id>`), or None.
+
+    Pure DB lookup — no provider fetch, no materialization: a card that isn't
+    local yet can't be owned, so a miss correctly yields "not owned".
+    """
+    try:
+        as_uuid: uuid.UUID | None = uuid.UUID(card_ref)
+    except (ValueError, AttributeError, TypeError):
+        as_uuid = None
+    if as_uuid is not None:
+        return (
+            await db.execute(select(Card.id).where(Card.id == as_uuid))
+        ).scalar_one_or_none()
+    if ":" not in card_ref:
+        return None
+    source, _, external = card_ref.partition(":")
+    return (
+        await db.execute(
+            select(CardExternalRef.card_id).where(
+                CardExternalRef.source == source.lower(),
+                CardExternalRef.external_id == external,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def get_card_ownership(
+    db: AsyncSession, user: User, card_ref: str
+) -> CardOwnership:
+    """Compose the signed-in user's ownership of one card (by local UUID or
+    upstream composite id): every copy + per-holding and rolled-up cost basis,
+    holding value, and unrealized P/L."""
+    local_id = await _resolve_local_card_id(db, card_ref)
+    if local_id is None:
+        return CardOwnership()
+
+    rows = (
+        (
+            await db.execute(
+                select(GradedCard).where(
+                    GradedCard.user_id == user.id,
+                    GradedCard.card_id == local_id,
+                    GradedCard.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return CardOwnership()
+
+    today = utcnow().date()
+    holdings: list[CardHolding] = []
+    cost_total = Decimal("0")
+    value_total = Decimal("0")
+    has_cost = False
+    has_value = False
+
+    for r in rows:
+        pl: Decimal | None = None
+        pct: float | None = None
+        if r.estimated_value_usd is not None and r.purchase_price_usd is not None:
+            pl = r.estimated_value_usd - r.purchase_price_usd
+            if r.purchase_price_usd > 0:
+                pct = float(pl / r.purchase_price_usd * 100)
+        anchor = r.purchase_date or r.graded_at.date()
+        days = (today - anchor).days if anchor is not None else None
+        if r.purchase_price_usd is not None:
+            cost_total += r.purchase_price_usd
+            has_cost = True
+        if r.estimated_value_usd is not None:
+            value_total += r.estimated_value_usd
+            has_value = True
+        holdings.append(
+            CardHolding(
+                holding_id=r.id,
+                grade=r.grade,
+                house=r.house,
+                is_graded=r.is_graded,
+                condition=r.condition,
+                subgrades=r.subgrades,
+                estimated_value_usd=r.estimated_value_usd,
+                purchase_price_usd=r.purchase_price_usd,
+                purchase_date=r.purchase_date,
+                acquired_via=r.acquired_via,
+                scan_job_id=r.scan_job_id,
+                fingerprint_hash=r.fingerprint_hash,
+                notes=r.notes,
+                graded_at=r.graded_at,
+                days_held=max(days, 0) if days is not None else None,
+                unrealized_pl_usd=pl,
+                unrealized_pl_pct=pct,
+            )
+        )
+
+    cost_basis = cost_total if has_cost else None
+    holding_value = value_total if has_value else None
+    total_pl: Decimal | None = None
+    total_pct: float | None = None
+    if cost_basis is not None and holding_value is not None:
+        total_pl = holding_value - cost_basis
+        if cost_basis > 0:
+            total_pct = float(total_pl / cost_basis * 100)
+
+    return CardOwnership(
+        owned=True,
+        copies=len(rows),
+        holdings=holdings,
+        cost_basis_usd=cost_basis,
+        holding_value_usd=holding_value,
+        unrealized_pl_usd=total_pl,
+        unrealized_pl_pct=total_pct,
+    )
+
+
 __all__ = [
     "SORT_OPTIONS",
     "create",
+    "get_card_ownership",
     "get_one",
     "list_for_user",
     "soft_delete",

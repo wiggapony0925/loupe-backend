@@ -43,6 +43,14 @@ class RawConditionEnum(str, enum.Enum):
     dmg = "dmg"  # Damaged
 
 
+class AcquisitionSourceEnum(str, enum.Enum):
+    """How a :class:`~app.models.grade.GradedCard` entered a user's collection."""
+
+    scan = "scan"  # graded by our scanner / identify pipeline
+    manual = "manual"  # added by hand from a card page
+    import_ = "import"  # bulk/CSV import (member name avoids the `import` keyword)
+
+
 class ScanStatusEnum(str, enum.Enum):
     """Lifecycle states of a :class:`~app.models.scan.ScanJob`."""
 
