@@ -106,6 +106,9 @@
   "/v1/admin/pulse": [
     "GET"
   ],
+  "/v1/admin/retention": [
+    "GET"
+  ],
   "/v1/admin/revenue": [
     "GET"
   ],
