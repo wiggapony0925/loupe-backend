@@ -22,6 +22,7 @@ from app.routers.admin import (
     health,
     jobs,
     metrics,
+    pulse,
     revenue,
     scanner,
     users,
@@ -41,6 +42,8 @@ admin_router.include_router(revenue.router)
 admin_router.include_router(catalog.router)
 admin_router.include_router(scanner.router)
 admin_router.include_router(cards.router)
+# Growth.
+admin_router.include_router(pulse.router)
 # Metrics, people, content, config.
 admin_router.include_router(metrics.router)
 admin_router.include_router(users.router)

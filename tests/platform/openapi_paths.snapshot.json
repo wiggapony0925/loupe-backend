@@ -91,6 +91,9 @@
   "/v1/admin/metrics": [
     "GET"
   ],
+  "/v1/admin/pulse": [
+    "GET"
+  ],
   "/v1/admin/revenue": [
     "GET"
   ],
