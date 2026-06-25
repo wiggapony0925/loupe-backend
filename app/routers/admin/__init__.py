@@ -21,6 +21,7 @@ from app.routers.admin import (
     engagement,
     flags,
     health,
+    insights,
     jobs,
     metrics,
     pulse,
@@ -46,6 +47,8 @@ admin_router.include_router(cards.router)
 # Growth.
 admin_router.include_router(pulse.router)
 admin_router.include_router(engagement.router)
+# Tools.
+admin_router.include_router(insights.router)
 # Metrics, people, content, config.
 admin_router.include_router(metrics.router)
 admin_router.include_router(users.router)

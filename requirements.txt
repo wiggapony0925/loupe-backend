@@ -62,5 +62,9 @@ segno>=1.6.0,<2.0.0
 # --- Billing (Loupe Pro subscriptions; optional, no-ops without STRIPE_SECRET_KEY) ---
 stripe>=11.0,<13
 
+# --- AI: natural-language data queries (admin "Ask your data"; optional) ---
+# No-ops without ANTHROPIC_API_KEY — the endpoint reports "not configured".
+anthropic>=0.40,<1
+
 # --- Observability (optional; no-ops without SENTRY_DSN) ---
 sentry-sdk[fastapi]>=2.18,<3

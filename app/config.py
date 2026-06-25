@@ -281,6 +281,15 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_profiles_sample_rate: float = 0.1
 
+    # --- AI: natural-language data queries ("Ask your data") ---
+    # Optional. When set, the admin "Ask your data" tool uses Claude to turn a
+    # question into a read-only SQL SELECT (executed in a read-only transaction
+    # with a row cap + statement timeout). Blank => the tool reports "not
+    # configured" and never calls out. Defaults to Opus per Anthropic guidance;
+    # override with a cheaper model (e.g. claude-sonnet-4-6) for this internal tool.
+    anthropic_api_key: str = ""
+    nl_query_model: str = "claude-opus-4-8"
+
     # --- Authorization ---
     # Comma-separated list of email addresses with admin privileges.
     # Pragmatic stand-in until a proper RBAC model lands on `User`.
