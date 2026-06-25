@@ -14,6 +14,7 @@ from app.routers.admin import (
     applications,
     audit,
     blog,
+    cards,
     catalog,
     cloud,
     database,
@@ -39,6 +40,7 @@ admin_router.include_router(revenue.router)
 # Catalog & product.
 admin_router.include_router(catalog.router)
 admin_router.include_router(scanner.router)
+admin_router.include_router(cards.router)
 # Metrics, people, content, config.
 admin_router.include_router(metrics.router)
 admin_router.include_router(users.router)
