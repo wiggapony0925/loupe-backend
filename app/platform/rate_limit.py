@@ -27,6 +27,8 @@ from threading import Lock
 
 from fastapi import HTTPException, Request, status
 
+from app.config import get_settings
+
 
 class _SlidingWindow:
     """Per-key sliding window counter."""
@@ -72,17 +74,24 @@ class _SlidingWindow:
 
 
 def _client_key(request: Request) -> str:
-    """Best-effort client identifier.
+    """Best-effort client identifier for rate-limit bucketing.
 
-    Behind Cloud Run / load balancers the real IP arrives in
-    ``X-Forwarded-For`` (the first entry is the client). Fall back to
-    the direct socket address. We deliberately do NOT trust user-supplied
-    headers like ``X-Real-IP`` if XFF is absent — that header is forged
-    trivially.
+    ``X-Forwarded-For`` is ``<client-supplied…>, <appended by each trusted proxy>``.
+    A client can spoof the LEFT end but not the entries appended by trusted
+    proxies on the RIGHT, so with ``rate_limit_trusted_proxy_hops = N`` we take
+    the entry ``N`` from the right (the real client, just inside the trust
+    boundary). ``N = 0`` (default) keeps the legacy leftmost behaviour. We never
+    trust ``X-Real-IP`` — that header is forged trivially. Falls back to the
+    socket address when there's no XFF.
     """
     xff = request.headers.get("x-forwarded-for")
     if xff:
-        return xff.split(",", 1)[0].strip() or "unknown"
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            hops = get_settings().rate_limit_trusted_proxy_hops
+            if hops > 0 and len(parts) >= hops:
+                return parts[-hops]
+            return parts[0]
     client = request.client
     return (client.host if client else None) or "unknown"
 

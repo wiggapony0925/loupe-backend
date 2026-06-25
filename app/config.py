@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     # client exchanges it (+ a TOTP/backup code) for a real token pair.
     jwt_mfa_ttl_seconds: int = 300
 
+    # --- Rate limiting ---
+    # Number of *trusted* reverse proxies in front of the app, used to pick the
+    # real client IP out of ``X-Forwarded-For``. A client can spoof the LEFT end
+    # of XFF, but not the entries appended by trusted proxies on the RIGHT, so we
+    # take the entry `N` from the right. 0 (default) keeps the legacy behaviour
+    # (leftmost entry) for backward-compatibility. Set to 1 for direct Cloud Run
+    # (the Google Front End appends the real client IP as the rightmost entry) —
+    # verify with one request before enabling, since a wrong value would bucket
+    # users together. See app/platform/rate_limit.py:_client_key.
+    rate_limit_trusted_proxy_hops: int = 0
+
     # --- Login hardening ---
     # Consecutive failed password attempts before an account is temporarily
     # locked, and how long the lock lasts. Lockout is per-account; the login
