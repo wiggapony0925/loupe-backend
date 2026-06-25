@@ -191,6 +191,37 @@ async def create_subscription(
     }
 
 
+async def cancel_subscription(
+    db: AsyncSession, user: User, *, immediately: bool = False
+) -> dict[str, Any]:
+    """Admin-side cancel of a user's Stripe subscription.
+
+    Defaults to ``cancel_at_period_end`` (the user keeps Pro until the paid
+    period runs out); ``immediately=True`` ends it now. The actual plan
+    downgrade is still driven by the ``customer.subscription.*`` webhook — this
+    only tells Stripe what to do, keeping Stripe the source of truth.
+    """
+    if not user.stripe_subscription_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This user has no active Stripe subscription.",
+        )
+    _client()  # raises 503 when billing isn't configured
+    if immediately:
+        sub = stripe.Subscription.cancel(user.stripe_subscription_id)
+    else:
+        sub = stripe.Subscription.modify(
+            user.stripe_subscription_id, cancel_at_period_end=True
+        )
+    return {
+        "status": sub.get("status"),
+        "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
+        "current_period_end": _period_end(sub).isoformat()
+        if _period_end(sub)
+        else None,
+    }
+
+
 async def create_portal_session(db: AsyncSession, user: User) -> dict[str, Any]:
     """A Stripe Customer Portal link so Pro members manage/cancel their plan."""
     if not billing_configured():
@@ -325,6 +356,7 @@ async def handle_event(db: AsyncSession, event: stripe.Event) -> None:
 
 __all__ = [
     "billing_configured",
+    "cancel_subscription",
     "construct_event",
     "create_portal_session",
     "create_subscription",

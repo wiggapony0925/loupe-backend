@@ -156,6 +156,24 @@ async def require_admin(user: User = Depends(require_user)) -> User:
     return user
 
 
+async def require_super_admin(user: User = Depends(require_admin)) -> User:
+    """Dependency: a **super-admin** (email in ``ADMIN_EMAILS``).
+
+    Reserved for the highest-blast-radius actions (impersonation, financial
+    operations) — a DB-granted ``is_admin`` flag is not enough.
+
+    Raises:
+        HTTPException(403): when the caller is an ordinary admin, not a super.
+    """
+    if not is_super_admin(user):
+        logger.warning("super-admin-gate denied user=%s email=%s", user.id, user.email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super-admin privileges required",
+        )
+    return user
+
+
 __all__ = [
     "AUTH_COOKIE",
     "bearer_scheme",
@@ -163,5 +181,6 @@ __all__ = [
     "is_super_admin",
     "optional_user",
     "require_admin",
+    "require_super_admin",
     "require_user",
 ]

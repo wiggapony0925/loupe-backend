@@ -11,7 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_admin
+from app.auth.dependencies import require_admin, require_super_admin
 from app.db import get_db
 from app.models.user import User
 from app.schemas.admin import (
@@ -21,6 +21,7 @@ from app.schemas.admin import (
     AdminUserPage,
     AdminUserRead,
     BanRequest,
+    SubscriptionCancelRequest,
     TestAccountCreated,
 )
 from app.services import audit_service
@@ -157,6 +158,56 @@ async def unban_user(
         action="user.unban",
         target_table="users",
         target_id=user_id,
+    )
+    return result
+
+
+@router.post(
+    "/{user_id}/revoke-sessions",
+    response_model=AdminUserDetail,
+    summary="Sign a user out of every device (revoke all tokens)",
+)
+async def revoke_sessions(
+    user_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> AdminUserDetail:
+    result = await user_admin_service.revoke_sessions(db, user_id)
+    await audit_service.record(
+        db,
+        request=request,
+        user=actor,
+        action="user.revoke_sessions",
+        target_table="users",
+        target_id=user_id,
+    )
+    return result
+
+
+@router.post(
+    "/{user_id}/subscription/cancel",
+    response_model=AdminUserDetail,
+    summary="Cancel a user's Stripe subscription (super-admin)",
+)
+async def cancel_subscription(
+    user_id: uuid.UUID,
+    payload: SubscriptionCancelRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_super_admin),
+) -> AdminUserDetail:
+    result = await user_admin_service.cancel_subscription(
+        db, user_id, immediately=payload.immediately
+    )
+    await audit_service.record(
+        db,
+        request=request,
+        user=actor,
+        action="user.subscription_cancel",
+        target_table="users",
+        target_id=user_id,
+        payload={"immediately": payload.immediately},
     )
     return result
 

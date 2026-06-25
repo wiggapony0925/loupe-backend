@@ -29,6 +29,10 @@ class AdminUserRead(BaseModel):
     # Loupe Pro plan ("free" | "pro"). Comp a tester to Pro from the drawer.
     plan: str = "free"
     pro_expires_at: datetime | None = None
+    # True while in a Stripe free trial.
+    pro_trialing: bool = False
+    # Whether a real Stripe subscription backs this user (vs. an admin comp).
+    has_subscription: bool = False
 
 
 class AdminUserDetail(AdminUserRead):
@@ -79,6 +83,12 @@ class BanRequest(BaseModel):
     reason: str | None = Field(None, max_length=500)
 
 
+class SubscriptionCancelRequest(BaseModel):
+    """Cancel a user's subscription; defaults to end-of-period (keeps Pro)."""
+
+    immediately: bool = False
+
+
 class AdminMetrics(BaseModel):
     """At-a-glance portal metrics."""
 
@@ -105,5 +115,6 @@ __all__ = [
     "AdminUserPage",
     "AdminUserRead",
     "BanRequest",
+    "SubscriptionCancelRequest",
     "TestAccountCreated",
 ]

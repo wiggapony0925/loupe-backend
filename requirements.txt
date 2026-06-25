@@ -26,6 +26,11 @@ aioboto3>=13.2.0,<14.0.0
 # Native GCS for persisting PDF statements (Cloud Run SA has objectAdmin on
 # the reports bucket; ADC — no HMAC keys). Falls back to the S3 stub in tests.
 google-cloud-storage>=2.18.0,<4.0.0
+# Read-only Cloud Run + Cloud Logging for the admin portal's Google Cloud panel.
+# Lazy-imported (app/services/admin/gcp_service.py): absence degrades to a
+# "not configured" status rather than breaking boot, so they stay optional.
+google-cloud-run>=0.10.0,<1.0.0
+google-cloud-logging>=3.11.0,<4.0.0
 tenacity>=9.0.0,<10.0.0
 
 # --- HTML parsing (130point scraper) ---

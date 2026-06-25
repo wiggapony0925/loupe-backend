@@ -26,7 +26,7 @@ from app.schemas.admin import (
     AdminUserRead,
     TestAccountCreated,
 )
-from app.services import email_service
+from app.services import billing_service, email_service
 from app.services.auth import user_service
 
 
@@ -45,6 +45,7 @@ def to_read(user: User) -> AdminUserRead:
     out.is_super_admin = is_super_admin(user)
     out.banned = user.banned_at is not None
     out.deleted = user.deleted_at is not None
+    out.has_subscription = bool(user.stripe_subscription_id)
     return out
 
 
@@ -75,6 +76,7 @@ async def get_detail(db: AsyncSession, user_id: uuid.UUID) -> AdminUserDetail:
     out.is_super_admin = is_super_admin(user)
     out.banned = user.banned_at is not None
     out.deleted = user.deleted_at is not None
+    out.has_subscription = bool(user.stripe_subscription_id)
     out.auth_method = _auth_method(user)
     out.grades_count = await count(GradedCard)
     out.watchlist_count = await count(WatchlistItem)
@@ -220,11 +222,39 @@ async def soft_delete(db: AsyncSession, actor: User, user_id: uuid.UUID) -> None
     await db.commit()
 
 
+async def revoke_sessions(db: AsyncSession, user_id: uuid.UUID) -> AdminUserDetail:
+    """Sign a user out everywhere by bumping their token epoch.
+
+    Every outstanding access/refresh token carries the ``token_version`` current
+    at sign-in, so incrementing it invalidates all of them at once (the support
+    "revoke a stolen/compromised session" action). Stateless — no token store.
+    """
+    target = await _get(db, user_id)
+    target.token_version += 1
+    await db.commit()
+    return await get_detail(db, user_id)
+
+
+async def cancel_subscription(
+    db: AsyncSession, user_id: uuid.UUID, *, immediately: bool = False
+) -> AdminUserDetail:
+    """Cancel a user's Stripe subscription on their behalf (support action).
+
+    Delegates to Stripe via :mod:`billing_service`; the webhook reconciles the
+    plan. Raises 400 if the user has no subscription, 503 if billing is off.
+    """
+    target = await _get(db, user_id)
+    await billing_service.cancel_subscription(db, target, immediately=immediately)
+    return await get_detail(db, user_id)
+
+
 __all__ = [
     "ban",
+    "cancel_subscription",
     "create_test_account",
     "get_detail",
     "list_users",
+    "revoke_sessions",
     "set_admin",
     "soft_delete",
     "to_read",
