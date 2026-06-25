@@ -61,9 +61,7 @@ async def test_impersonate_returns_token_for_target(client, db_session):
         assert resp.status_code == 200
         token = resp.json()["data"]["token"]
         # The minted token resolves to the TARGET, not the acting admin.
-        me = await client.get(
-            "/v1/me", headers={"Authorization": f"Bearer {token}"}
-        )
+        me = await client.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["data"]["email"] == target.email
 

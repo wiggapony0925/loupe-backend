@@ -213,12 +213,11 @@ async def cancel_subscription(
         sub = stripe.Subscription.modify(
             user.stripe_subscription_id, cancel_at_period_end=True
         )
+    period_end = _period_end(sub)
     return {
         "status": sub.get("status"),
         "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
-        "current_period_end": _period_end(sub).isoformat()
-        if _period_end(sub)
-        else None,
+        "current_period_end": period_end.isoformat() if period_end else None,
     }
 
 

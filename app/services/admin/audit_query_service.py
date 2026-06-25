@@ -75,16 +75,22 @@ async def page(
 async def facets(db: AsyncSession) -> AuditFacets:
     """Distinct actions and target tables — populates the filter dropdowns."""
     actions = (
-        await db.execute(select(AuditLog.action).distinct().order_by(AuditLog.action))
-    ).scalars().all()
+        (await db.execute(select(AuditLog.action).distinct().order_by(AuditLog.action)))
+        .scalars()
+        .all()
+    )
     tables = (
-        await db.execute(
-            select(AuditLog.target_table)
-            .where(AuditLog.target_table.is_not(None))
-            .distinct()
-            .order_by(AuditLog.target_table)
+        (
+            await db.execute(
+                select(AuditLog.target_table)
+                .where(AuditLog.target_table.is_not(None))
+                .distinct()
+                .order_by(AuditLog.target_table)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return AuditFacets(actions=list(actions), tables=[t for t in tables if t])
 
 

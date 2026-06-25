@@ -98,9 +98,7 @@ async def test_audit_page_filters_and_joins_actor(db_session, created_user):
     assert flags_only.results[0].actor_email == created_user.email
 
     # Filter by actor email substring.
-    by_actor = await audit_query_service.page(
-        db_session, actor=created_user.email[:5]
-    )
+    by_actor = await audit_query_service.page(db_session, actor=created_user.email[:5])
     assert by_actor.total == 1
 
     facets = await audit_query_service.facets(db_session)
@@ -111,6 +109,7 @@ async def test_audit_page_filters_and_joins_actor(db_session, created_user):
 # ── gcp_service (status enum + project resolution) ──
 def test_gcp_service_status_maps_condition_enum():
     """SUCCEEDED(4)→ready, FAILED(3)→error, PENDING(1)→deploying."""
+
     def svc(state: int) -> object:
         cond = SimpleNamespace(type_="Ready", state=state)
         return SimpleNamespace(terminal_condition=cond, conditions=[])
@@ -122,7 +121,9 @@ def test_gcp_service_status_maps_condition_enum():
 
 
 def test_gcp_project_id_resolution():
-    explicit = SimpleNamespace(gcp_project_id="explicit", cloud_sql_connection_name=None)
+    explicit = SimpleNamespace(
+        gcp_project_id="explicit", cloud_sql_connection_name=None
+    )
     assert gcp_service._project_id(explicit) == "explicit"
 
     # Derived from the Cloud SQL connection name ("project:region:instance").

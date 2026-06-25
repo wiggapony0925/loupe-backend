@@ -103,6 +103,8 @@ async def test_card_search_endpoint(client, created_user, auth_headers, db_sessi
     await _seed_card(db_session)
     await db_session.commit()
     with _as_admin(created_user.email):
-        resp = await client.get("/v1/admin/cards", headers=auth_headers, params={"q": "pika"})
+        resp = await client.get(
+            "/v1/admin/cards", headers=auth_headers, params={"q": "pika"}
+        )
     assert resp.status_code == 200
     assert resp.json()["data"]["total"] >= 1

@@ -152,9 +152,11 @@ def _load_status_sync(settings: Settings, project: str) -> CloudStatus:
             )
         )
     services.sort(
-        key=lambda s: _KNOWN_SERVICES.index(s.name)
-        if s.name in _KNOWN_SERVICES
-        else len(_KNOWN_SERVICES)
+        key=lambda s: (
+            _KNOWN_SERVICES.index(s.name)
+            if s.name in _KNOWN_SERVICES
+            else len(_KNOWN_SERVICES)
+        )
     )
     return CloudStatus(
         configured=True,

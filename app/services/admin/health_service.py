@@ -129,7 +129,7 @@ async def _check_redis(settings: Settings) -> HealthCheck:
         try:
             await asyncio.wait_for(client.ping(), timeout=2.0)
         finally:
-            await client.aclose()
+            await client.aclose()  # type: ignore[attr-defined]  # stub lags redis 5.x
         return HealthCheck(
             key="redis",
             label="Redis / queue",

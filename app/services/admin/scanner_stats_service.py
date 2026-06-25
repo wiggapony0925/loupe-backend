@@ -24,21 +24,25 @@ async def summary(db: AsyncSession, *, days: int = 30) -> ScannerStats:
     cutoff = datetime.now(UTC) - timedelta(days=days)
 
     sources = (
-        await db.execute(
-            select(CardIdentification.primary_source).where(
-                CardIdentification.created_at >= cutoff
+        (
+            await db.execute(
+                select(CardIdentification.primary_source).where(
+                    CardIdentification.created_at >= cutoff
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     by_source: dict[str, int] = dict(Counter(s or "none" for s in sources))
     total = len(sources)
     fast_path_rate = (by_source.get("phash", 0) / total) if total else 0.0
 
     scan_rows = (
-        await db.execute(
-            select(ScanJob.status).where(ScanJob.created_at >= cutoff)
-        )
-    ).scalars().all()
+        (await db.execute(select(ScanJob.status).where(ScanJob.created_at >= cutoff)))
+        .scalars()
+        .all()
+    )
     scans_by_status: dict[str, int] = dict(
         Counter(s.value if hasattr(s, "value") else str(s) for s in scan_rows)
     )

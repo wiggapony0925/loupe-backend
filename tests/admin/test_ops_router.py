@@ -63,7 +63,10 @@ async def test_database_explorer_is_metadata_only(client, created_user, auth_hea
     assert detail.status_code == 200
     cols = detail.json()["data"]["columns"]
     # Columns carry shape, not values.
-    assert all(set(c) == {"name", "type", "nullable", "primary_key", "foreign_key"} for c in cols)
+    assert all(
+        set(c) == {"name", "type", "nullable", "primary_key", "foreign_key"}
+        for c in cols
+    )
 
     assert missing.status_code == 404
 

@@ -87,14 +87,18 @@ async def _pro_by_month(db: AsyncSession, now: datetime) -> list[RevenueMonthPoi
         day=1
     )
     rows = (
-        await db.execute(
-            select(User.pro_since).where(
-                User.deleted_at.is_(None),
-                User.pro_since.is_not(None),
-                User.pro_since >= since,
+        (
+            await db.execute(
+                select(User.pro_since).where(
+                    User.deleted_at.is_(None),
+                    User.pro_since.is_not(None),
+                    User.pro_since >= since,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     counts: Counter[str] = Counter(d.strftime("%Y-%m") for d in rows if d)
 
     # Emit a continuous run of months (zero-filled) ending with the current one.

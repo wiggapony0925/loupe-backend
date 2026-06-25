@@ -58,5 +58,9 @@ async def test_engagement_summary(db_session, created_user):
     # Funnel: signed-up >= activated >= pro.
     counts = [f.count for f in s.funnel]
     assert counts == sorted(counts, reverse=True)
-    assert [f.label for f in s.funnel] == ["Signed up", "Added a card", "Upgraded to Pro"]
+    assert [f.label for f in s.funnel] == [
+        "Signed up",
+        "Added a card",
+        "Upgraded to Pro",
+    ]
     assert len(s.new_users_by_week) == 8

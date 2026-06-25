@@ -28,17 +28,25 @@ async def _count(db: AsyncSession, stmt) -> int:
 async def _active_user_ids(db: AsyncSession, since: datetime) -> set:
     """Distinct users who scanned or added a card since ``since``."""
     scanned = (
-        await db.execute(
-            select(ScanJob.user_id.distinct()).where(ScanJob.created_at >= since)
-        )
-    ).scalars().all()
-    added = (
-        await db.execute(
-            select(GradedCard.user_id.distinct()).where(
-                GradedCard.created_at >= since, GradedCard.deleted_at.is_(None)
+        (
+            await db.execute(
+                select(ScanJob.user_id.distinct()).where(ScanJob.created_at >= since)
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    added = (
+        (
+            await db.execute(
+                select(GradedCard.user_id.distinct()).where(
+                    GradedCard.created_at >= since, GradedCard.deleted_at.is_(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
     return {u for u in scanned if u} | {u for u in added if u}
 
 
@@ -86,19 +94,25 @@ async def _new_users_by_week(db: AsyncSession, now: datetime) -> list[WeekPoint]
     )
     since = monday - timedelta(weeks=_TREND_WEEKS - 1)
     rows = (
-        await db.execute(
-            select(User.created_at).where(
-                User.deleted_at.is_(None), User.created_at >= since
+        (
+            await db.execute(
+                select(User.created_at).where(
+                    User.deleted_at.is_(None), User.created_at >= since
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     def week_key(d: datetime) -> str:
         start = (d - timedelta(days=d.weekday())).date()
         return start.isoformat()
 
     counts: Counter[str] = Counter(week_key(d) for d in rows if d)
-    weeks = [(monday - timedelta(weeks=i)).date().isoformat() for i in range(_TREND_WEEKS)]
+    weeks = [
+        (monday - timedelta(weeks=i)).date().isoformat() for i in range(_TREND_WEEKS)
+    ]
     weeks.reverse()
     return [WeekPoint(week=w, new_users=counts.get(w, 0)) for w in weeks]
 

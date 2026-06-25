@@ -94,21 +94,29 @@ async def get_detail(db: AsyncSession, card_id: uuid.UUID) -> AdminCardDetail:
     card, set_name = await _get_card(db, card_id)
 
     refs = (
-        await db.execute(
-            select(CardExternalRef).where(CardExternalRef.card_id == card_id)
-        )
-    ).scalars().all()
-    prices = (
-        await db.execute(
-            select(PriceSnapshot)
-            .where(PriceSnapshot.card_id == card_id)
-            .order_by(
-                PriceSnapshot.sale_date.desc().nulls_last(),
-                PriceSnapshot.created_at.desc(),
+        (
+            await db.execute(
+                select(CardExternalRef).where(CardExternalRef.card_id == card_id)
             )
-            .limit(_MAX_PRICES)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    prices = (
+        (
+            await db.execute(
+                select(PriceSnapshot)
+                .where(PriceSnapshot.card_id == card_id)
+                .order_by(
+                    PriceSnapshot.sale_date.desc().nulls_last(),
+                    PriceSnapshot.created_at.desc(),
+                )
+                .limit(_MAX_PRICES)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     return AdminCardDetail(
         **_row(card, set_name).model_dump(),

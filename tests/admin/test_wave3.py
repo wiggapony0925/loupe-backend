@@ -21,7 +21,12 @@ async def test_catalog_coverage_counts_and_phash(db_session):
     await db_session.flush()
     db_session.add_all(
         [
-            Card(set_id=card_set.id, tcg=TcgEnum.pokemon, name="Pikachu", image_phash="abc"),
+            Card(
+                set_id=card_set.id,
+                tcg=TcgEnum.pokemon,
+                name="Pikachu",
+                image_phash="abc",
+            ),
             Card(set_id=card_set.id, tcg=TcgEnum.pokemon, name="Charizard"),  # no phash
         ]
     )
@@ -64,9 +69,7 @@ async def test_scanner_funnel_metrics(db_session, created_user):
     ]
     db_session.add_all(ids)
     await db_session.flush()
-    db_session.add(
-        IdentificationFeedback(identification_id=ids[0].id, correct=True)
-    )
+    db_session.add(IdentificationFeedback(identification_id=ids[0].id, correct=True))
     db_session.add(
         ScanJob(
             user_id=created_user.id,

@@ -30,7 +30,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
     events: list[PulseEvent] = []
 
     # ── Sign-ups ──
-    rows = (
+    signup_rows = (
         await db.execute(
             select(User.id, User.email, User.display_name, User.created_at)
             .where(User.deleted_at.is_(None))
@@ -38,7 +38,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
             .limit(limit)
         )
     ).all()
-    for uid, email, name, at in rows:
+    for uid, email, name, at in signup_rows:
         events.append(
             PulseEvent(
                 id=f"signup:{uid}",
@@ -50,7 +50,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
         )
 
     # ── Scans ──
-    rows = (
+    scan_rows = (
         await db.execute(
             select(
                 ScanJob.id,
@@ -64,7 +64,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
             .limit(limit)
         )
     ).all()
-    for sid, status, email, name, at in rows:
+    for sid, status, email, name, at in scan_rows:
         events.append(
             PulseEvent(
                 id=f"scan:{sid}",
@@ -77,7 +77,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
         )
 
     # ── Acquisitions (added to a collection) ──
-    rows = (
+    acq_rows = (
         await db.execute(
             select(
                 GradedCard.id,
@@ -96,7 +96,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
             .limit(limit)
         )
     ).all()
-    for gid, card_name, grade, house, est, email, name, at in rows:
+    for gid, card_name, grade, house, est, email, name, at in acq_rows:
         events.append(
             PulseEvent(
                 id=f"acquisition:{gid}",
@@ -110,7 +110,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
         )
 
     # ── Admin actions ──
-    rows = (
+    admin_rows = (
         await db.execute(
             select(
                 AuditLog.id,
@@ -124,7 +124,7 @@ async def recent(db: AsyncSession, *, limit: int = _DEFAULT_LIMIT) -> PulseFeed:
             .limit(limit)
         )
     ).all()
-    for aid, action, target, email, at in rows:
+    for aid, action, target, email, at in admin_rows:
         events.append(
             PulseEvent(
                 id=f"admin:{aid}",

@@ -64,9 +64,7 @@ async def table_detail(db: AsyncSession, name: str) -> TableDetail | None:
             type=str(col.type),
             nullable=bool(col.nullable),
             primary_key=bool(col.primary_key),
-            foreign_key=next(
-                (fk.target_fullname for fk in col.foreign_keys), None
-            ),
+            foreign_key=next((fk.target_fullname for fk in col.foreign_keys), None),
         )
         for col in table.columns
     ]
@@ -89,9 +87,7 @@ async def table_detail(db: AsyncSession, name: str) -> TableDetail | None:
     referenced_by = sorted(
         other.name
         for other in _TABLES.values()
-        if any(
-            fk.referred_table is table for fk in other.foreign_key_constraints
-        )
+        if any(fk.referred_table is table for fk in other.foreign_key_constraints)
     )
     return TableDetail(
         name=name,

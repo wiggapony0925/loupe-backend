@@ -39,7 +39,11 @@ async def test_pulse_merges_all_sources(db_session, created_user):
                 estimated_value_usd=Decimal("1200.00"),
                 graded_at=datetime.now(UTC),
             ),
-            AuditLog(user_id=created_user.id, action="flag.update", target_table="feature_flags"),
+            AuditLog(
+                user_id=created_user.id,
+                action="flag.update",
+                target_table="feature_flags",
+            ),
         ]
     )
     await db_session.commit()

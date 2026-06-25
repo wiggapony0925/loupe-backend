@@ -54,12 +54,16 @@ async def list_grades(
     ).all()
 
     houses = (
-        await db.execute(
-            select(GradedCard.house)
-            .where(GradedCard.deleted_at.is_(None))
-            .distinct()
+        (
+            await db.execute(
+                select(GradedCard.house)
+                .where(GradedCard.deleted_at.is_(None))
+                .distinct()
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     results = [
         GradeReviewRow(
