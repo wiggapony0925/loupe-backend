@@ -105,6 +105,9 @@
   "/v1/auth/apple": [
     "POST"
   ],
+  "/v1/auth/change-password": [
+    "POST"
+  ],
   "/v1/auth/dev-login": [
     "POST"
   ],

@@ -140,12 +140,18 @@ waitlist_join_limit = rate_limit(limit=10, window_seconds=300, name="waitlist.jo
 # password a few times is unaffected.
 login_limit = rate_limit(limit=10, window_seconds=60, name="auth.login")
 mfa_verify_limit = rate_limit(limit=10, window_seconds=60, name="auth.mfa_verify")
+# Changing a password re-checks the current one — throttle so a hijacked session
+# can't be used to brute-force it (argon2 cost is the second line of defence).
+change_password_limit = rate_limit(
+    limit=10, window_seconds=60, name="auth.change_password"
+)
 
 
 __all__ = [
     "application_submit_limit",
     "application_track_limit",
     "catalog_read_limit",
+    "change_password_limit",
     "image_proxy_limit",
     "login_limit",
     "mfa_verify_limit",
