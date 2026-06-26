@@ -28,6 +28,7 @@ from app.platform.rate_limit import (
     search_live_limit,
 )
 from app.schemas.card import CardRead
+from app.schemas.card_analytics import CardAnalytics
 from app.schemas.common import Pagination
 from app.schemas.ownership import CardOwnership
 from app.services.catalog import (
@@ -38,6 +39,7 @@ from app.services.catalog import (
 )
 from app.services.collection import graded_card_service
 from app.services.market import (
+    card_analytics_service,
     grade_summary_service,
     listings_service,
     market_service,
@@ -223,6 +225,22 @@ async def get_market(card_id: str) -> dict[str, Any]:
     refreshes — see :func:`app.services.market.market_service.build_market_for_card`.
     """
     result = await market_service.get_card_market(card_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return result
+
+
+@router.get(
+    "/{card_id}/analytics",
+    response_model=CardAnalytics,
+    summary="Card derived analytics (public)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def get_analytics(card_id: str) -> CardAnalytics:
+    """Derived market metrics for a card — market cap, momentum, volatility,
+    grade premium, all-time high/low, and liquidity — composed from the market
+    snapshot + recent comps so every client shows the same numbers."""
+    result = await card_analytics_service.get_card_analytics(card_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Card not found")
     return result
