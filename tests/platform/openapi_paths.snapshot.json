@@ -252,6 +252,9 @@
   "/v1/cards/{card_id}": [
     "GET"
   ],
+  "/v1/cards/{card_id}/analytics": [
+    "GET"
+  ],
   "/v1/cards/{card_id}/canonical": [
     "GET"
   ],
