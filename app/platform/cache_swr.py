@@ -77,6 +77,20 @@ async def _release_lock(r: Any, lock_key: str) -> None:
         pass
 
 
+async def _lock_held(r: Any, lock_key: str) -> bool:
+    """True while another caller is actively refreshing (its lock is live)."""
+    try:
+        return bool(await r.get(lock_key))
+    except Exception:  # pragma: no cover
+        return False
+
+
+#: Hard ceiling on how long a cold-miss waiter blocks for the lock-holder's
+#: result before refreshing itself — long enough for a slow catalog sync
+#: (~5s), short enough to never hang a user request.
+_COLD_WAIT_CAP_SECONDS = 15.0
+
+
 async def _do_refresh(
     key: str,
     *,
@@ -208,9 +222,15 @@ async def swr_get_or_refresh(
     if value is not None:
         return value
 
-    deadline = time.time() + miss_wait_seconds
-    while time.time() < deadline:
-        await asyncio.sleep(0.15)
+    # Another caller holds the lock and is refreshing. Wait for its result while
+    # the lock stays live (it's still working) — NOT just a fixed window — so a
+    # slow sync (e.g. a cold catalog sync) is run ONCE and every concurrent cold
+    # request gets the same result instead of each starting its own. Bounded by a
+    # hard cap so a request never hangs.
+    lock_key = f"{key}:lock"
+    hard_deadline = time.time() + max(miss_wait_seconds, _COLD_WAIT_CAP_SECONDS)
+    while time.time() < hard_deadline:
+        await asyncio.sleep(0.2)
         raw = await _safe_get(r, key)
         if raw is not None:
             try:
@@ -219,8 +239,10 @@ async def swr_get_or_refresh(
                     return env["data"]
             except (ValueError, TypeError, AttributeError):
                 break
+        if not await _lock_held(r, lock_key):
+            break  # holder finished without producing a value (it failed)
 
-    # Still nothing (lock holder failed, or no peers) — refresh ourselves.
+    # Lock holder failed or none existed — refresh ourselves as a last resort.
     return await _do_refresh(
         key,
         fresh_ttl=fresh_ttl,

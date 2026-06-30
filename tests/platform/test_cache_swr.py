@@ -87,6 +87,26 @@ async def test_budget_gate_vetoes_background_refresh() -> None:
 
 
 @pytest.mark.asyncio
+async def test_concurrent_cold_miss_runs_refresh_once() -> None:
+    # Two concurrent cold misses on the same key: the lock holder runs the (slow)
+    # refresh once and the other waits for that result instead of duplicating it.
+    calls = {"n": 0}
+
+    async def slow_refresh() -> dict:
+        calls["n"] += 1
+        await asyncio.sleep(0.3)  # simulate a slow catalog sync
+        return {"v": calls["n"]}
+
+    key = "test:swr:concurrent"
+    a, b = await asyncio.gather(
+        swr_get_or_refresh(key, fresh_ttl=60, stale_ttl=600, refresh=slow_refresh),
+        swr_get_or_refresh(key, fresh_ttl=60, stale_ttl=600, refresh=slow_refresh),
+    )
+    assert a == b == {"v": 1}
+    assert calls["n"] == 1  # single-flight: only one sync ran
+
+
+@pytest.mark.asyncio
 async def test_single_flight_lock_blocks_concurrent_refresh() -> None:
     # With the lock already held, a background (require_lock) refresh no-ops.
     from app.platform.redis_client import get_redis
