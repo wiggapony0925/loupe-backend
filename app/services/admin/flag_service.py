@@ -16,10 +16,25 @@ from app.schemas.flag import FeatureFlagCreate, FeatureFlagUpdate, FeatureFlagUp
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,79}$")
 
 
+#: Flags whose keys are withheld from the public, unauthenticated map. The
+#: developer-portal page flags (``admin_*``) gate admin-only UI, so leaking
+#: their names on ``/v1/flags`` would reveal the portal's surface to anyone.
+#: Admins read them from the admin-only ``/v1/admin/flags`` endpoint instead.
+_PRIVATE_FLAG_PREFIX = "admin_"
+
+
 async def public_map(db: AsyncSession) -> dict[str, bool]:
-    """`{key: enabled}` for every flag — what web/mobile clients read."""
+    """`{key: enabled}` for every PUBLIC flag — what web/mobile clients read.
+
+    Excludes ``admin_*`` portal flags so the portal stays invisible to
+    non-admins; those are served only by the admin flags endpoint.
+    """
     rows = (await db.execute(select(FeatureFlag.key, FeatureFlag.enabled))).all()
-    return {key: bool(enabled) for (key, enabled) in rows}
+    return {
+        key: bool(enabled)
+        for (key, enabled) in rows
+        if not key.startswith(_PRIVATE_FLAG_PREFIX)
+    }
 
 
 async def list_all(db: AsyncSession) -> list[FeatureFlag]:
