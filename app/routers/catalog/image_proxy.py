@@ -62,6 +62,15 @@ _ALLOWED_HOSTS: frozenset[str] = frozenset(
         # TCGplayer product imagery (used by sealed catalog)
         "tcgplayer-cdn.tcgplayer.com",
         "product-images.tcgplayer.com",
+        # One Piece (apitcg) — the official CDN sends
+        # `Cross-Origin-Resource-Policy: same-site`, so browsers refuse to embed
+        # it cross-origin. The web routes these through this proxy (same-origin)
+        # so the <img> paints; see loupe-web `lib/cardImage.ts`.
+        "en.onepiece-cardgame.com",
+        "asia-en.onepiece-cardgame.com",
+        # Digimon (digimoncard.io) — no CORP restriction, but the mobile client
+        # proxies every card image, so its host must be allowlisted too.
+        "images.digimoncard.io",
     }
 )
 
