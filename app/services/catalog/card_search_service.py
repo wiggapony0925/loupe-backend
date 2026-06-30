@@ -613,9 +613,11 @@ def _from_apitcg_onepiece(card: dict[str, Any]) -> dict[str, Any]:
     """
     cid = str(card.get("id") or "")
     name = card.get("name") or ""
-    set_obj = card.get("set") or {}
-    set_name = set_obj.get("name")
     set_code = cid.rsplit("-", 1)[0] if "-" in cid else cid
+    # apitcg's per-card set.name is unreliable (it points at reprint/starter
+    # sets); use the canonical name keyed by the id prefix, consistent with the
+    # "Shop One Piece sets" rail.
+    set_name = _OP_SET_NAMES.get(set_code, set_code)
     images = card.get("images") or {}
     img = images.get("small") or images.get("large")
 
@@ -1153,7 +1155,11 @@ async def _pricing_from_market_chain(
         return None
     from app.integrations.registry import get_registry
 
-    query = f"{name} {set_name}".strip() if set_name else name
+    # Price aggregators fuzzy-match on name; the catalog set label rarely matches
+    # their set naming, so a name-led query maximizes the hit rate ("always show
+    # a price"). set_name is kept for callers/precision but not forced into q.
+    _ = set_name
+    query = name.strip()
     try:
         mp = await get_registry().resolve_best_price(query)
     except Exception as exc:  # pragma: no cover - defensive; never block detail
