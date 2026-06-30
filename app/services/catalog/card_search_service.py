@@ -1929,14 +1929,15 @@ def _onepiece_sets_from_catalog(
         }
         for code, n in counts.items()
     ]
+
     # Booster sets (OP*) first by recency, then everything else by size.
-    out.sort(
-        key=lambda s: (
-            0 if s["code"].startswith("OP") else 1,
-            -(int(s["code"][2:]) if s["code"][2:].isdigit() else 0),
-            -(s["total_cards"] or 0),
-        )
-    )
+    def _op_set_sort(s: dict[str, Any]) -> tuple[int, int, int]:
+        code = str(s.get("code") or "")
+        num = int(code[2:]) if code[2:].isdigit() else 0
+        total = int(s.get("total_cards") or 0)
+        return (0 if code.startswith("OP") else 1, -num, -total)
+
+    out.sort(key=_op_set_sort)
     return out
 
 
