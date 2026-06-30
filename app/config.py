@@ -6,14 +6,19 @@ from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 
 class Settings(BaseSettings):
     """Strongly-typed runtime configuration for loupe-backend.
 
     Values are sourced from environment variables (and optionally a ``.env``
-    file in the project root). Access the singleton via :func:`get_settings`.
+    file in the project root), with Google Cloud Secret Manager filling any
+    unset secrets in production. Access the singleton via :func:`get_settings`.
     """
 
     model_config = SettingsConfigDict(
@@ -22,6 +27,28 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Add Secret Manager *below* env so explicit env vars still win, and it
+        only fills the gaps. The source is a hard-gated no-op outside production
+        (see app.platform.secret_manager)."""
+        from app.platform.secret_manager import GoogleSecretManagerSource
+
+        return (
+            init_settings,
+            env_settings,
+            GoogleSecretManagerSource(settings_cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
 
     # --- App ---
     app_env: Literal["development", "staging", "production", "test"] = "development"

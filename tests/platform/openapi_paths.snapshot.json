@@ -29,6 +29,9 @@
     "GET",
     "PATCH"
   ],
+  "/v1/admin/card-tree": [
+    "GET"
+  ],
   "/v1/admin/cards": [
     "GET"
   ],
@@ -68,6 +71,9 @@
   "/v1/admin/engagement": [
     "GET"
   ],
+  "/v1/admin/env": [
+    "GET"
+  ],
   "/v1/admin/flags": [
     "GET",
     "POST"
@@ -89,6 +95,9 @@
     "POST"
   ],
   "/v1/admin/insights/status": [
+    "GET"
+  ],
+  "/v1/admin/integrations": [
     "GET"
   ],
   "/v1/admin/jobs": [

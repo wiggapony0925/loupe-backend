@@ -31,6 +31,10 @@ google-cloud-storage>=2.18.0,<4.0.0
 # "not configured" status rather than breaking boot, so they stay optional.
 google-cloud-run>=0.10.0,<1.0.0
 google-cloud-logging>=3.11.0,<4.0.0
+# Hydrates unset secrets from Secret Manager in production (app/platform/
+# secret_manager.py). Lazy-imported + hard-gated to APP_ENV=production, so its
+# absence locally is a silent no-op — env vars / .env keep working unchanged.
+google-cloud-secret-manager>=2.20.0,<3.0.0
 tenacity>=9.0.0,<10.0.0
 
 # --- HTML parsing (130point scraper) ---

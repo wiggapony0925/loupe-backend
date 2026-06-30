@@ -14,15 +14,18 @@ from app.routers.admin import (
     applications,
     audit,
     blog,
+    card_tree,
     cards,
     catalog,
     cloud,
     database,
     engagement,
+    env,
     flags,
     grades,
     health,
     insights,
+    integrations,
     jobs,
     metrics,
     pulse,
@@ -40,12 +43,15 @@ admin_router.include_router(health.router)
 admin_router.include_router(database.router)
 admin_router.include_router(cloud.router)
 admin_router.include_router(audit.router)
+admin_router.include_router(env.router)
+admin_router.include_router(integrations.router)
 # Monetization.
 admin_router.include_router(revenue.router)
 # Catalog & product.
 admin_router.include_router(catalog.router)
 admin_router.include_router(scanner.router)
 admin_router.include_router(cards.router)
+admin_router.include_router(card_tree.router)
 admin_router.include_router(grades.router)
 # Growth.
 admin_router.include_router(pulse.router)

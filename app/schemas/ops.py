@@ -37,6 +37,75 @@ class HealthReport(BaseModel):
     checks: list[HealthCheck]
 
 
+# ── Environment manager (presence + non-secret values only) ─────────────────
+class EnvVar(BaseModel):
+    """One environment variable descriptor for the admin env manager.
+
+    Carries *what it's for* and *whether it's set* — and the value only when it
+    is safe to expose. Secrets are NEVER echoed: ``value`` stays ``None`` and we
+    surface ``length`` (character count) instead, so an admin can confirm a key
+    is present without the bytes ever crossing the wire.
+    """
+
+    key: str  # the ENV var name, e.g. "STRIPE_SECRET_KEY"
+    label: str
+    group: str
+    # True for keys/tokens/secrets/credentials — value is withheld.
+    secret: bool
+    # Whether the variable is configured (non-empty / non-default-empty).
+    is_set: bool
+    # The actual value — populated ONLY for non-secret config. None otherwise.
+    value: str | None = None
+    # For secrets: the length of the configured value (0 when unset). Lets the
+    # UI show "set · 32 chars" without revealing any characters.
+    length: int = 0
+    description: str
+    # Link to the provider's API docs / console, when relevant.
+    docs_url: str | None = None
+
+
+class EnvReport(BaseModel):
+    """The server-side environment, grouped and safe to render."""
+
+    app_env: str
+    generated_at: datetime
+    variables: list[EnvVar]
+
+
+# ── Integrations (second-party / external services) ─────────────────────────
+IntegrationStatus = Literal["live", "down", "ready", "unconfigured"]
+
+
+class Integration(BaseModel):
+    """One external service the backend depends on (a provider/API/platform)."""
+
+    id: str
+    name: str
+    # "Catalog" | "Pricing & market" | "Payments" | "Email" | "AI" | …
+    category: str
+    purpose: str
+    # Configured = the env credentials it needs are present (or it's keyless).
+    configured: bool
+    # Capabilities it serves in the app (listings, comps, market_price, …).
+    capabilities: list[str] = []
+    docs_url: str | None = None
+    # live = reachable just now; down = probe failed; ready = configured but not
+    # probed; unconfigured = missing credentials.
+    status: IntegrationStatus
+    # Populated only when a live probe ran.
+    http_status: int | None = None
+    latency_ms: int | None = None
+    detail: str = ""
+
+
+class IntegrationsReport(BaseModel):
+    """Every external dependency, grouped and (optionally) live-probed."""
+
+    generated_at: datetime
+    probed: bool
+    integrations: list[Integration]
+
+
 # ── Database explorer (metadata only — no row data) ─────────────────────────
 class ColumnInfo(BaseModel):
     name: str
@@ -172,10 +241,14 @@ __all__ = [
     "CloudStatus",
     "ColumnInfo",
     "DatabaseOverview",
+    "EnvReport",
+    "EnvVar",
     "ForeignKeyInfo",
     "HealthCheck",
     "HealthReport",
     "IndexInfo",
+    "Integration",
+    "IntegrationsReport",
     "SchemaGraph",
     "SchemaGraphEdge",
     "SchemaGraphNode",
