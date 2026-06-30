@@ -64,6 +64,11 @@ DEFAULT_LIMIT = 24
 # / Venusaur ex every single day) while staying within "genuinely popular".
 _POOL_PER_PROVIDER = 50
 
+# Retries for the Pokémon "most valuable" upstream — its price-sort orderBy is
+# correct but flaky/slow on pokemontcg.io and times out under load. A handful of
+# attempts reliably lands one good response to seed the last-good cache.
+_VALUABLE_POKEMON_ATTEMPTS = 4
+
 # Hard cap per upstream provider when building the trending feed. The
 # default `http_timeout_seconds` (15s) can occasionally hang under load,
 # and the public `/cards/trending` endpoint must stay snappy because the
@@ -428,13 +433,31 @@ SCRYFALL_VALUABLE_QUERY = "game:paper -is:digital"
 
 
 async def _valuable_pokemon(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
-    raw = await pokemon_tcg.search_cards(
-        POKEMON_VALUABLE_QUERY,
-        page=1,
-        page_size=min(MAX_LIMIT, pool * 2),
-        order_by="-cardmarket.prices.averageSellPrice",
-    )
-    return _priced_arted([_from_pokemon(c) for c in (raw.get("data") or [])])[:pool]
+    # pokemontcg.io's ``-cardmarket.prices.*`` sort is correct (it returns the
+    # genuine top cards) but slow and intermittently times out under prod load —
+    # collapsing the rail to empty. A few quick retries reliably catch a good
+    # response, which then seeds the _valuable_pool last-good cache so every
+    # later call stays stable. The final attempt's exception propagates to
+    # _valuable_pool, which serves the last-good list instead of an empty one.
+    last_exc: Exception | None = None
+    for _ in range(_VALUABLE_POKEMON_ATTEMPTS):
+        try:
+            raw = await pokemon_tcg.search_cards(
+                POKEMON_VALUABLE_QUERY,
+                page=1,
+                page_size=min(MAX_LIMIT, pool * 2),
+                order_by="-cardmarket.prices.averageSellPrice",
+            )
+            cards = _priced_arted([_from_pokemon(c) for c in (raw.get("data") or [])])[
+                :pool
+            ]
+            if cards:
+                return cards
+        except (TimeoutError, CircuitOpenError) as exc:
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+    return []
 
 
 async def _valuable_magic(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]]:
