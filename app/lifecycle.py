@@ -94,6 +94,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         _log.warning("reports scheduler not spawned: %s", exc)
 
+    # Ensure every developer-portal page has a (DB-backed) feature flag so it's
+    # togglable from the Feature flags page. Idempotent + non-destructive; skip
+    # in tests, and never let it block startup.
+    try:
+        from app.config import get_settings
+        from app.db.session import get_sessionmaker
+        from app.services.admin.flag_seed import seed_admin_flags
+
+        if not get_settings().is_test:
+            async with get_sessionmaker()() as db:
+                await seed_admin_flags(db)
+    except Exception as exc:
+        _log.warning("admin flag seed skipped: %s", exc)
+
     _app_state.warmup_complete = True
     _log.info("loupe-backend ready")
 
