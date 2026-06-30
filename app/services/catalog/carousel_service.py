@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import date
 
 from pydantic import ValidationError
@@ -186,14 +187,23 @@ async def _generate_ai(game: str, label: str) -> list[CarouselRecipe]:
 #: in-flight guard so concurrent misses don't each spawn a model call.
 _bg_tasks: set[asyncio.Task[None]] = set()
 _inflight: set[str] = set()
+#: Last generation-attempt time per game (monotonic). After an attempt we back
+#: off for a cooldown so a broken/quota-less key isn't retried on every request.
+_last_attempt: dict[str, float] = {}
+_RETRY_COOLDOWN_SECONDS = 600.0  # 10 min
 
 
 def _spawn_generation(game: str, label: str) -> None:
     """Generate AI shelves in the BACKGROUND and cache them, so the request path
-    never blocks on the model. Deduped per game per instance."""
+    never blocks on the model. Deduped per game, and rate-limited per game so a
+    failing key (bad / no quota) is retried at most once per cooldown instead of
+    on every marketplace load."""
     if game in _inflight:
         return
+    if time.monotonic() - _last_attempt.get(game, 0.0) < _RETRY_COOLDOWN_SECONDS:
+        return
     _inflight.add(game)
+    _last_attempt[game] = time.monotonic()
 
     async def _run() -> None:
         try:

@@ -12,8 +12,21 @@ from app.services.catalog.carousel_service import _coerce
 @pytest.fixture(autouse=True)
 async def _fresh_redis():
     await close_redis()
+    carousel_service._inflight.clear()
+    carousel_service._last_attempt.clear()
     yield
     await close_redis()
+
+
+async def _drain() -> None:
+    import asyncio
+
+    for _ in range(5):
+        await asyncio.sleep(0)
+        if carousel_service._bg_tasks:
+            await asyncio.gather(
+                *list(carousel_service._bg_tasks), return_exceptions=True
+            )
 
 
 @pytest.mark.asyncio
@@ -107,3 +120,27 @@ async def test_get_carousels_ai_path_is_non_blocking(monkeypatch) -> None:
     second = await carousel_service.get_carousels("pokemon")
     assert second.source == "ai"
     assert [c.id for c in second.carousels] == ["grails"]
+
+
+@pytest.mark.asyncio
+async def test_failing_model_backs_off(monkeypatch) -> None:
+    # A failing key (e.g. 429 no-quota) is retried at most once per cooldown,
+    # not on every marketplace load — so we don't spam the model.
+    monkeypatch.setattr(carousel_service, "configured", lambda: True)
+
+    calls = {"n": 0}
+
+    async def failing_gen(game: str, label: str):
+        calls["n"] += 1
+        raise RuntimeError("429 insufficient_quota")
+
+    monkeypatch.setattr(carousel_service, "_generate_ai", failing_gen)
+
+    await carousel_service.get_carousels("pokemon")  # first miss → spawns (fails)
+    await _drain()
+    # Repeated loads within the cooldown must NOT spawn more model calls.
+    for _ in range(3):
+        resp = await carousel_service.get_carousels("pokemon")
+        await _drain()
+        assert resp.source == "curated"  # always serves fast, never errors
+    assert calls["n"] == 1  # backed off after the first failure
