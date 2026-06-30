@@ -34,6 +34,22 @@ logger = get_logger("integrations.registry")
 # every endpoint that depends on it.
 _FANOUT_TIMEOUT_S = 2.5
 
+# Headline-price fallback order. When several providers return a price for the
+# same card, the one earliest in this list wins — so a card always shows a
+# price as long as ANY source has one, preferring the most authoritative.
+# tcgplayer/tcgcsv (TCGplayer market) → pricecharting → game-specific trackers →
+# justtcg (broad aggregator, covers One Piece/Digimon/Lorcana) → catalog/other.
+_PRICE_SOURCE_PRIORITY: tuple[str, ...] = (
+    "tcgplayer",
+    "tcgcsv",
+    "pricecharting",
+    "pokemonpricetracker",
+    "justtcg",
+    "pokemon_tcg",
+    "tcgdex",
+    "gocollect",
+)
+
 
 class ProviderRegistry:
     """Holds singleton provider instances and dispatches capability calls."""
@@ -159,6 +175,29 @@ class ProviderRegistry:
             if isinstance(r, MarketPrice):
                 out.append(r)
         return out
+
+    async def resolve_best_price(self, query: str) -> MarketPrice | None:
+        """Single headline price via an ordered fallback across every configured
+        market-price provider. Fans out in parallel, then returns the quote from
+        the highest-priority source (``_PRICE_SOURCE_PRIORITY``) that actually
+        carries a number — so a card always shows a price if ANY source has one.
+        """
+        quotes = await self.fan_out_market_price(query)
+        priced = [
+            q
+            for q in quotes
+            if any(v is not None for v in (q.market, q.mid, q.high, q.low))
+        ]
+        if not priced:
+            return None
+
+        def _rank(mp: MarketPrice) -> int:
+            try:
+                return _PRICE_SOURCE_PRIORITY.index(mp.source)
+            except ValueError:
+                return len(_PRICE_SOURCE_PRIORITY)
+
+        return min(priced, key=_rank)
 
     @staticmethod
     async def _gather(

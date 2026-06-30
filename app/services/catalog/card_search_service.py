@@ -1140,6 +1140,40 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
 # --------------------------------------------------------------------- single
 
 
+async def _pricing_from_market_chain(
+    name: str | None,
+    set_name: str | None,
+    card_id: str | None,
+) -> dict[str, Any] | None:
+    """Resolve a headline price from the cross-provider market chain (ordered
+    fallback) for a card whose catalog upstream carried none. Consolidates every
+    price API into the unified ``pricing_summary`` shape. Returns ``None`` (card
+    stays unpriced) when nothing is configured or no source has a price."""
+    if not name:
+        return None
+    from app.integrations.registry import get_registry
+
+    query = f"{name} {set_name}".strip() if set_name else name
+    try:
+        mp = await get_registry().resolve_best_price(query)
+    except Exception as exc:  # pragma: no cover - defensive; never block detail
+        logger.debug("market-chain pricing failed for %s: %s", name, exc)
+        return None
+    if mp is None:
+        return None
+    return UnifiedPricingSummary(
+        card_id=card_id,
+        currency=mp.currency or "USD",
+        market=_money(mp.market),
+        low=_money(mp.low),
+        mid=_money(mp.mid),
+        high=_money(mp.high),
+        as_of=None,
+        sample_size=None,
+        sources=[mp.source],
+    ).model_dump()
+
+
 async def resolve_pricing_for_local(
     *,
     tcg: str,
@@ -1462,6 +1496,17 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
         # linked by CardExternalRef. Better to show a card with no
         # pricing than to 404 the detail page on a network blip.
         return await _local_card_from_external_ref(source, upstream_id)
+
+    # Catalog-priceless games (Digimon, One Piece) carry no embedded price.
+    # Fill the headline price from the cross-provider market chain so a card
+    # always shows a number when ANY source has one. Only runs when the catalog
+    # gave nothing, so priced games (Pokémon/Magic/Yu-Gi-Oh) pay no extra cost.
+    if result is not None and not result.get("pricing_summary"):
+        chain_price = await _pricing_from_market_chain(
+            result.get("name"), result.get("set_name"), result.get("id")
+        )
+        if chain_price is not None:
+            result["pricing_summary"] = chain_price
 
     if result is not None:
         await _cache_set(cache_key, result, CARD_DETAIL_TTL)

@@ -100,3 +100,42 @@ async def test_fan_out_market_price_filters_nones():
     reg = ProviderRegistry([_AlwaysOn()])
     out = await reg.fan_out_market_price("x")
     assert len(out) == 1 and out[0].market == 33.0
+
+
+class _Priced(BaseProvider):
+    """A configured market-price provider with a settable id + price."""
+
+    def __init__(self, provider_id: str, market: float | None):
+        self.id = provider_id
+        self.name = provider_id
+        self._market = market
+
+    def is_configured(self) -> bool:
+        return True
+
+    async def get_market_price(self, query):
+        if self._market is None:
+            return None
+        return MarketPrice(source=self.id, market=self._market)
+
+
+@pytest.mark.asyncio
+async def test_resolve_best_price_respects_source_priority():
+    # tcgplayer outranks justtcg, so its price wins even though both are present.
+    reg = ProviderRegistry([_Priced("justtcg", 5.0), _Priced("tcgplayer", 9.0)])
+    best = await reg.resolve_best_price("charizard")
+    assert best is not None and best.source == "tcgplayer" and best.market == 9.0
+
+
+@pytest.mark.asyncio
+async def test_resolve_best_price_falls_back_when_higher_source_empty():
+    # Top source has no number → fall back to the next that does (always show data).
+    reg = ProviderRegistry([_Priced("tcgplayer", None), _Priced("justtcg", 5.0)])
+    best = await reg.resolve_best_price("x")
+    assert best is not None and best.source == "justtcg"
+
+
+@pytest.mark.asyncio
+async def test_resolve_best_price_none_when_no_source_has_a_price():
+    reg = ProviderRegistry([_Priced("tcgplayer", None), _Priced("justtcg", None)])
+    assert await reg.resolve_best_price("x") is None
