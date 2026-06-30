@@ -474,10 +474,53 @@ async def _valuable_yugioh(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any
     return _priced_arted([_from_yugioh(c) for c in (body.get("data") or [])])[:pool]
 
 
+async def _valuable_pool(
+    key: str,
+    fetch: Callable[[], Awaitable[list[dict[str, Any]]]],
+) -> list[dict[str, Any]]:
+    """A game's "most valuable" list, with a long last-good fallback.
+
+    Order: live valuable fetch → last-good cached list. The valuable upstream
+    queries are heavier than the trending ones (Pokémon ordered by Cardmarket
+    price over a 100-card page, Scryfall ``order=usd``, YGO staples), and the
+    Pokémon one in particular times out under load. Without this fallback that
+    timeout collapses to ``[]`` — and because empties are never cached, every
+    subsequent request re-races the same flaky upstream, so the public rail
+    flaps between a full list and an empty one on otherwise-identical calls.
+    Serving the last successful list keeps the rail stable once it has warmed
+    even once. Never raises; only ever caches a *non-empty* result.
+
+    Mirrors :func:`_provider_pool` (the trending path's resilience) so both
+    feeds degrade the same way.
+    """
+    pool_key = f"loupe:cards:valuablepool:{key}"
+    try:
+        fresh = await asyncio.wait_for(fetch(), _VALUABLE_TIMEOUT_S)
+        if fresh:
+            await _cache_set(pool_key, {"items": fresh}, _POOL_TTL)
+            return fresh
+    except (TimeoutError, CircuitOpenError) as exc:
+        logger.info("valuable %s slow/open (%s); serving last-good", key, exc)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("valuable %s failed (%s); serving last-good", key, exc)
+
+    stale = await _cache_get(pool_key)
+    items = stale.get("items") if isinstance(stale, dict) else None
+    if isinstance(items, list) and items:
+        return items
+    return []
+
+
 async def get_most_valuable(
     tcg: str = "all", limit: int = DEFAULT_LIMIT
 ) -> dict[str, Any]:
-    """Return the priciest cards (with prices + art), interleaved across games."""
+    """Return the priciest cards (with prices + art), interleaved across games.
+
+    Each game's list is resolved through :func:`_valuable_pool`, so a slow or
+    rate-limited upstream serves the last-good list instead of an empty one.
+    Empty/error results are never cached, so a transient failure can't poison
+    the feed for the TTL window.
+    """
     tcg = (tcg or "all").lower()
     limit = max(1, min(MAX_LIMIT, int(limit)))
 
@@ -491,25 +534,20 @@ async def get_most_valuable(
     cards: list[dict[str, Any]] = []
     try:
         if tcg == "pokemon":
-            cards = (await asyncio.wait_for(_valuable_pokemon(), _VALUABLE_TIMEOUT_S))[
-                :limit
-            ]
+            cards = (await _valuable_pool("pokemon", _valuable_pokemon))[:limit]
         elif tcg == "magic":
-            cards = (await asyncio.wait_for(_valuable_magic(), _VALUABLE_TIMEOUT_S))[
-                :limit
-            ]
+            cards = (await _valuable_pool("magic", _valuable_magic))[:limit]
         elif tcg == "yugioh":
-            cards = (await asyncio.wait_for(_valuable_yugioh(), _VALUABLE_TIMEOUT_S))[
-                :limit
-            ]
+            cards = (await _valuable_pool("yugioh", _valuable_yugioh))[:limit]
         else:
-            results = await asyncio.gather(
-                asyncio.wait_for(_valuable_pokemon(), _VALUABLE_TIMEOUT_S),
-                asyncio.wait_for(_valuable_magic(), _VALUABLE_TIMEOUT_S),
-                asyncio.wait_for(_valuable_yugioh(), _VALUABLE_TIMEOUT_S),
-                return_exceptions=True,
+            # _valuable_pool never raises, so a single dead game just drops out
+            # of the interleave instead of taking the whole "all" feed with it.
+            pools = await asyncio.gather(
+                _valuable_pool("pokemon", _valuable_pokemon),
+                _valuable_pool("magic", _valuable_magic),
+                _valuable_pool("yugioh", _valuable_yugioh),
             )
-            lists = [r for r in results if isinstance(r, list) and r]
+            lists = [p for p in pools if p]
             cards = _interleave(lists, limit)
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("most-valuable unexpected error: %s", exc)
@@ -520,6 +558,8 @@ async def get_most_valuable(
         "updated_at": _now_iso(),
         "source": "live" if cards else "empty",
     }
+    # Never cache an empty/error result — that's exactly what made the rail
+    # flap. Only a real list earns the TTL.
     if cards:
         await _cache_set(cache_key, envelope, TRENDING_TTL)
     return envelope
