@@ -77,8 +77,11 @@ def test_parse_recipes_tolerates_fenced_bare_array() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_carousels_ai_path(monkeypatch) -> None:
-    # With a model configured and generation succeeding, the response is "ai".
+async def test_get_carousels_ai_path_is_non_blocking(monkeypatch) -> None:
+    # The request never blocks on the model: the first call returns curated
+    # instantly and generates AI in the background; the next call serves AI.
+    import asyncio
+
     from app.schemas.carousel import CarouselRecipe
 
     monkeypatch.setattr(carousel_service, "configured", lambda: True)
@@ -89,6 +92,18 @@ async def test_get_carousels_ai_path(monkeypatch) -> None:
         ]
 
     monkeypatch.setattr(carousel_service, "_generate_ai", fake_gen)
-    resp = await carousel_service.get_carousels("pokemon")
-    assert resp.source == "ai"
-    assert [c.id for c in resp.carousels] == ["grails"]
+
+    first = await carousel_service.get_carousels("pokemon")
+    assert first.source == "curated"  # instant, never blocks on the model
+
+    # Let the background generation finish, then the cached version is AI.
+    for _ in range(5):
+        await asyncio.sleep(0)
+        if carousel_service._bg_tasks:
+            await asyncio.gather(
+                *list(carousel_service._bg_tasks), return_exceptions=True
+            )
+
+    second = await carousel_service.get_carousels("pokemon")
+    assert second.source == "ai"
+    assert [c.id for c in second.carousels] == ["grails"]

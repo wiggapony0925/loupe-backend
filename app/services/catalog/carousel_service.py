@@ -13,6 +13,7 @@ empty "curated" set and the web falls back to its built-in strategy pool.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import date
 
@@ -181,24 +182,58 @@ async def _generate_ai(game: str, label: str) -> list[CarouselRecipe]:
     return _parse_recipes(text)
 
 
-async def get_carousels(game: str) -> CarouselResponse:
-    """Return a game's AI-designed shelves (cached daily; curated-empty when the
-    model isn't configured, so the web uses its built-in strategy pool)."""
-    cached = await _cache_get(game)
-    if cached is not None:
-        return cached
+#: Background generation tasks (held so they aren't GC'd) + a per-instance
+#: in-flight guard so concurrent misses don't each spawn a model call.
+_bg_tasks: set[asyncio.Task[None]] = set()
+_inflight: set[str] = set()
 
-    label = GAME_LABELS.get(game, game.title())
-    if configured():
+
+def _spawn_generation(game: str, label: str) -> None:
+    """Generate AI shelves in the BACKGROUND and cache them, so the request path
+    never blocks on the model. Deduped per game per instance."""
+    if game in _inflight:
+        return
+    _inflight.add(game)
+
+    async def _run() -> None:
         try:
             recipes = await _generate_ai(game, label)
             if recipes:
-                resp = CarouselResponse(game=game, source="ai", carousels=recipes)
-                await _cache_set(resp, _AI_TTL)
-                return resp
+                await _cache_set(
+                    CarouselResponse(game=game, source="ai", carousels=recipes),
+                    _AI_TTL,
+                )
         except Exception as exc:  # pragma: no cover - model/network best effort
             logger.warning("carousel AI generation failed for %s: %s", game, exc)
+        finally:
+            _inflight.discard(game)
 
-    resp = CarouselResponse(game=game, source="curated", carousels=[])
-    await _cache_set(resp, _FALLBACK_TTL)
-    return resp
+    task = asyncio.create_task(_run())
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+
+
+async def get_carousels(game: str) -> CarouselResponse:
+    """Return a game's shelves WITHOUT ever blocking the request on the model.
+
+    A cache miss returns the curated set instantly and kicks AI generation in the
+    background, so the *next* load serves the AI version. The web's own curated
+    strategy pool fills in when ``carousels`` is empty, so the storefront is never
+    bare — and a slow/at-fault model can never spike request latency.
+    """
+    label = GAME_LABELS.get(game, game.title())
+    cached = await _cache_get(game)
+    if cached is not None:
+        # Upgrade a curated placeholder to AI in the background once a model is
+        # configured (e.g. the key was just set) — still never blocking.
+        if cached.source == "curated" and configured():
+            _spawn_generation(game, label)
+        return cached
+
+    # Cold miss: cache a curated placeholder so concurrent requests don't all
+    # spawn, return it immediately, and generate AI off the request path.
+    placeholder = CarouselResponse(game=game, source="curated", carousels=[])
+    await _cache_set(placeholder, _FALLBACK_TTL)
+    if configured():
+        _spawn_generation(game, label)
+    return placeholder
