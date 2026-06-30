@@ -26,7 +26,13 @@ from typing import Any
 
 import httpx
 
-from app.integrations._http import digimoncard, pokemon_tcg, scryfall, ygoprodeck
+from app.integrations._http import (
+    apitcg,
+    digimoncard,
+    pokemon_tcg,
+    scryfall,
+    ygoprodeck,
+)
 from app.platform.cache_config import (
     CARD_DETAIL_TTL,
     CARD_SEARCH_TTL,
@@ -84,7 +90,7 @@ PARTIAL_RESULT_TTL = 20
 LASTGOOD_RESULT_TTL = 6 * 60 * 60
 
 #: Providers we *don't* have an upstream for yet — returned gracefully.
-UNSUPPORTED_TCGS = {"onepiece", "lorcana", "sports"}
+UNSUPPORTED_TCGS = {"lorcana", "sports"}
 
 
 # --------------------------------------------------------------------- shape
@@ -104,7 +110,7 @@ def _source_for(tcg: str) -> str:
         "yugioh": "ygoprodeck",
         "digimon": "digimoncard",
         "all": "mixed",
-        "onepiece": "onepiece",
+        "onepiece": "apitcg-onepiece",
         "lorcana": "lorcana",
         "sports": "sports",
     }.get(tcg, tcg)
@@ -599,6 +605,77 @@ def _from_digimon(card: dict[str, Any]) -> dict[str, Any]:
     ).model_dump()
 
 
+def _from_apitcg_onepiece(card: dict[str, Any]) -> dict[str, Any]:
+    """Map an apitcg One Piece card to the unified rich shape.
+
+    The id encodes the set (``OP03-070`` → ``OP03``, ``ST14-001`` → ``ST14``).
+    apitcg carries no prices, so One Piece is catalog-only (price rails hide).
+    """
+    cid = str(card.get("id") or "")
+    name = card.get("name") or ""
+    set_obj = card.get("set") or {}
+    set_name = set_obj.get("name")
+    set_code = cid.rsplit("-", 1)[0] if "-" in cid else cid
+    images = card.get("images") or {}
+    img = images.get("small") or images.get("large")
+
+    attributes: dict[str, Any] = {}
+    for key in (
+        "type",
+        "color",
+        "cost",
+        "power",
+        "counter",
+        "family",
+        "ability",
+        "trigger",
+    ):
+        val = card.get(key)
+        if val not in (None, "", [], {}):
+            attributes[key] = val
+    attr = card.get("attribute")
+    if isinstance(attr, dict) and attr.get("name"):
+        attributes["attribute"] = attr["name"]
+
+    image_set = UnifiedImageSet(
+        small=_img(img, alt=name),
+        normal=_img(images.get("large") or img, alt=name),
+        large=_img(images.get("large") or img, alt=name),
+        art_crop=None,
+    )
+
+    set_data = UnifiedSet(
+        id=f"apitcg-onepiece:{set_code}" if set_code else None,
+        code=set_code or None,
+        name=set_name,
+        series=None,
+        release_date=None,
+        printed_total=None,
+        total_cards=None,
+        logo=None,
+        symbol=None,
+    )
+
+    return UnifiedCard(
+        id=f"apitcg-onepiece:{cid}",
+        name=name,
+        tcg="onepiece",
+        set_name=set_name,
+        set_code=set_code or None,
+        number=card.get("code") or cid,
+        rarity=card.get("rarity"),
+        image_url=img,
+        images=image_set,
+        year=None,
+        source="apitcg-onepiece",
+        attributes=attributes,
+        pricing_summary=None,
+        set=set_data,
+        tags=[],
+        metadata=_meta("apitcg-onepiece"),
+    ).model_dump()
+
+
 # ------------------------------------------------------------------- caching
 
 
@@ -886,6 +963,12 @@ async def _search_digimon(q: str, limit: int) -> list[dict[str, Any]]:
     return _rank(items, q, limit)
 
 
+async def _search_onepiece(q: str, limit: int) -> list[dict[str, Any]]:
+    raw = await apitcg.search_cards(apitcg.GAME_SLUGS["onepiece"], q)
+    items = [_from_apitcg_onepiece(c) for c in raw]
+    return _rank(items, q, limit)
+
+
 def _interleave(lists: list[list[dict[str, Any]]], cap: int) -> list[dict[str, Any]]:
     """Round-robin merge with a cap. Preserves provider variety."""
     out: list[dict[str, Any]] = []
@@ -944,6 +1027,13 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
         elif tcg == "digimon":
             items = await _search_digimon(q, limit)
             body = {"results": items, "total": len(items), "source": "digimoncard"}
+        elif tcg == "onepiece":
+            items = await _search_onepiece(q, limit)
+            body = {
+                "results": items,
+                "total": len(items),
+                "source": "apitcg-onepiece",
+            }
         else:  # "all" → parallel fan-out with early-settle
             per = max(3, min(limit, MAX_LIMIT))
 
@@ -1357,6 +1447,9 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
         elif source == "digimoncard":
             raw = await digimoncard.get_card(upstream_id)
             result = _from_digimon(raw) if raw else None
+        elif source == "apitcg-onepiece":
+            raw = await apitcg.get_card(apitcg.GAME_SLUGS["onepiece"], upstream_id)
+            result = _from_apitcg_onepiece(raw) if raw else None
         else:
             return None
     except (httpx.HTTPError, CircuitOpenError) as exc:
@@ -1788,6 +1881,65 @@ def _digimon_sets_from_catalog(
     return out
 
 
+# One Piece booster-set names. apitcg's per-card set.name is unreliable (it
+# points at reprint/starter sets) and its /sets list only has 2, so we key off
+# the canonical id prefix (OP03-070 → OP03). These English names are stable;
+# any unknown code (future sets, ST decks, promos) falls back to the code, which
+# collectors recognize.
+_OP_SET_NAMES: dict[str, str] = {
+    "OP01": "Romance Dawn",
+    "OP02": "Paramount War",
+    "OP03": "Pillars of Strength",
+    "OP04": "Kingdoms of Intrigue",
+    "OP05": "Awakening of the New Era",
+    "OP06": "Wings of the Captain",
+    "OP07": "500 Years in the Future",
+    "OP08": "Two Legends",
+    "OP09": "Emperors in the New World",
+    "OP10": "Royal Blood",
+    "OP11": "A Fist of Divine Speed",
+    "EB01": "Memorial Collection",
+    "EB02": "Anime 25th Collection",
+    "PRB01": "ONE PIECE THE BEST",
+    "P": "Promotional Cards",
+}
+
+
+def _onepiece_sets_from_catalog(
+    cards: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Derive One Piece sets from the flat catalog, grouped by id prefix."""
+    counts: dict[str, int] = {}
+    for c in cards:
+        cid = str(c.get("id") or "")
+        if not cid:
+            continue
+        code = cid.rsplit("-", 1)[0] if "-" in cid else cid
+        counts[code] = counts.get(code, 0) + 1
+    out = [
+        {
+            "id": f"apitcg-onepiece:{code}",
+            "code": code,
+            "name": _OP_SET_NAMES.get(code, code),
+            "tcg": "onepiece",
+            "release_date": None,
+            "total_cards": n,
+            "image_url": None,
+            "source": "apitcg-onepiece",
+        }
+        for code, n in counts.items()
+    ]
+    # Booster sets (OP*) first by recency, then everything else by size.
+    out.sort(
+        key=lambda s: (
+            0 if s["code"].startswith("OP") else 1,
+            -(int(s["code"][2:]) if s["code"][2:].isdigit() else 0),
+            -(s["total_cards"] or 0),
+        )
+    )
+    return out
+
+
 async def list_sets(tcg: str) -> dict[str, Any]:
     """Live proxy of the upstream set lists."""
     tcg = (tcg or "all").lower()
@@ -1809,6 +1961,14 @@ async def list_sets(tcg: str) -> dict[str, Any]:
             cards = await digimoncard.list_all()
             items = _digimon_sets_from_catalog(cards)
             body = {"results": items, "total": len(items), "source": "digimoncard"}
+        elif tcg == "onepiece":
+            cards = await apitcg.list_all_cards(apitcg.GAME_SLUGS["onepiece"])
+            items = _onepiece_sets_from_catalog(cards)
+            body = {
+                "results": items,
+                "total": len(items),
+                "source": "apitcg-onepiece",
+            }
         else:
             sets = await scryfall.list_sets()
             items = [_scryfall_set(s) for s in sets]

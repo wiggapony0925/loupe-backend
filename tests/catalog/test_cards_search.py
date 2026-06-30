@@ -262,8 +262,9 @@ async def test_live_search_all_ranks_by_relevance(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_provider_not_configured(client):
-    """One Piece / Lorcana / Sports return an empty success envelope."""
-    for tcg in ("onepiece", "lorcana", "sports"):
+    """Games with no catalog provider (Lorcana / Sports) return an empty
+    success envelope. (One Piece / Digimon are now data-backed.)"""
+    for tcg in ("lorcana", "sports"):
         resp = await client.get("/v1/cards/search", params={"q": "x", "tcg": tcg})
         body = assert_envelope_ok(resp)
         assert body["results"] == []

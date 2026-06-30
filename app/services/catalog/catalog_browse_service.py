@@ -19,11 +19,12 @@ import logging
 from typing import Any
 
 from app.config import get_settings
-from app.integrations._http import digimoncard, pokemon_tcg
+from app.integrations._http import apitcg, digimoncard, pokemon_tcg
 from app.integrations._http._resilient import request_json
 from app.services.catalog.card_search_service import (
     _cache_get,
     _cache_set,
+    _from_apitcg_onepiece,
     _from_digimon,
     _from_pokemon,
     _from_scryfall,
@@ -263,8 +264,56 @@ async def _fetch_catalog(
             "source": "digimoncard",
         }
 
-    # Unsupported game (lorcana / onepiece) — graceful empty.
+    if game == "onepiece":
+        slug = apitcg.GAME_SLUGS["onepiece"]
+        if prov_set:
+            # apitcg has no set filter — slice the cached full catalog by the
+            # set code derived from each card's id (OP03-070 → OP03).
+            scoped = [
+                c
+                for c in await _onepiece_catalog()
+                if (c.get("set_code") or "").upper() == prov_set.upper()
+            ]
+            start = (page - 1) * page_size
+            return {
+                "cards": scoped[start : start + page_size],
+                "total": len(scoped),
+                "page": page,
+                "page_size": page_size,
+                "source": "apitcg-onepiece",
+            }
+        # Whole-catalog browse uses apitcg's native paging (real total, one call).
+        body = await apitcg.list_cards(slug, page=page, limit=page_size)
+        cards = [_from_apitcg_onepiece(c) for c in (body.get("data") or [])]
+        return {
+            "cards": cards,
+            "total": int(body.get("total") or len(cards)),
+            "page": page,
+            "page_size": page_size,
+            "source": "apitcg-onepiece",
+        }
+
+    # Unsupported game (lorcana) — graceful empty.
     return _empty(game, page, page_size)
+
+
+_ONEPIECE_CATALOG_KEY = "loupe:public:browse:onepiece:_full"
+_ONEPIECE_CATALOG_TTL = 86_400  # 24h — One Piece catalog is effectively static.
+
+
+async def _onepiece_catalog() -> list[dict[str, Any]]:
+    """Full One Piece catalog, normalized + name-sorted, cached a day. Only used
+    for set-drilldown (apitcg has no set filter); whole-catalog browse uses
+    native paging."""
+    cached = await _cache_get(_ONEPIECE_CATALOG_KEY)
+    if isinstance(cached, dict) and isinstance(cached.get("cards"), list):
+        return cached["cards"]
+    raw = await apitcg.list_all_cards(apitcg.GAME_SLUGS["onepiece"])
+    cards = [_from_apitcg_onepiece(c) for c in raw]
+    cards.sort(key=lambda c: (c.get("name") or "").lower())
+    if cards:
+        await _cache_set(_ONEPIECE_CATALOG_KEY, {"cards": cards}, _ONEPIECE_CATALOG_TTL)
+    return cards
 
 
 _DIGIMON_CATALOG_KEY = "loupe:public:browse:digimon:_full"

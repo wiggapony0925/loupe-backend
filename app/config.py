@@ -177,6 +177,10 @@ class Settings(BaseSettings):
     gocollect_api_key: str | None = None
     # JustTCG — https://justtcg.com/api (aggregated TCG prices, free tier)
     justtcg_api_key: str | None = None
+    # apitcg — https://www.apitcg.com (catalog for One Piece / Digimon / Dragon
+    # Ball / Union Arena / Gundam / Star Wars / Riftbound). One key, many games.
+    # Blank disables every apitcg-backed game gracefully (they stay coming-soon).
+    apitcg_api_key: str | None = None
     # PokemonPriceTracker — https://www.pokemonpricetracker.com/api-reference
     # Fills the gap left by the (approval-gated) eBay API: real eBay *sold*
     # data for graded slabs (PSA/CGC/BGS/SGC) plus TCGplayer market price.

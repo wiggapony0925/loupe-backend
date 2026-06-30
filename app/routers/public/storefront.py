@@ -204,7 +204,7 @@ async def public_browse(
 )
 async def public_trending(
     response: Response,
-    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|digimon|all)$"),
+    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|digimon|onepiece|all)$"),
     sort: str = Query("trending", pattern="^(trending|value)$"),
     max_price: float | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=100),
@@ -217,12 +217,13 @@ async def public_trending(
     renders a "—" priceless tile or a bare image.
     """
     _cache(response)
-    # Catalog-only games (Digimon) have no price feed yet, so there is no
-    # trending / most-valuable rail. Return empty rather than letting the
+    # Catalog-only games (Digimon, One Piece) have no price feed yet, so there is
+    # no trending / most-valuable rail. Return empty rather than letting the
     # trending source fall back to the global (Magic-dominated) leaderboard,
-    # which would surface non-Digimon cards under a "Trending in Digimon" rail.
-    if tcg == "digimon":
-        return {"cards": [], "total": 0, "source": "digimoncard"}
+    # which would surface non-matching cards under a "Trending in …" rail.
+    if tcg in ("digimon", "onepiece"):
+        src = {"digimon": "digimoncard", "onepiece": "apitcg-onepiece"}[tcg]
+        return {"cards": [], "total": 0, "source": src}
     if sort == "value":
         body = await trending_service.get_most_valuable(tcg=tcg, limit=100)
     else:
