@@ -25,9 +25,21 @@ from typing import Any
 
 from app.config import get_settings
 from app.integrations._http._resilient import request_json
+from app.platform.api_budget import ApiBudget
 
 BASE_URL = "https://www.apitcg.com/api"
 INTEGRATION = "apitcg"
+
+#: Hard monthly request ceiling (free tier = 1000/mo). Every upstream call is
+#: metered against this; once the soft ceiling is hit the catalog layer serves
+#: cached/stale data instead of calling apitcg, so we never exceed the plan.
+budget = ApiBudget(INTEGRATION, get_settings().apitcg_monthly_budget)
+
+
+async def remaining_budget() -> int:
+    """Requests still available this month (for admin/observability)."""
+    return await budget.remaining()
+
 
 #: Map our internal tcg key → apitcg's game slug. Extend to light up more games.
 GAME_SLUGS: dict[str, str] = {
@@ -64,6 +76,10 @@ async def list_cards(
     with none it pages the full catalog. Returns the raw apitcg envelope."""
     if not is_configured():
         return {"data": [], "total": 0, "page": page, "totalPages": 0}
+    # Free-tier guard: once the monthly ceiling is hit, refuse the call so the
+    # caller falls back to cached/stale data instead of exceeding the plan.
+    if not await budget.can_spend():
+        return {"data": [], "total": 0, "page": page, "totalPages": 0}
     params: dict[str, Any] = {"page": page, "limit": min(limit, _MAX_LIMIT)}
     params.update({k: v for k, v in filters.items() if v is not None})
     body = await request_json(
@@ -75,6 +91,7 @@ async def list_cards(
         timeout_s=get_settings().http_timeout_seconds,
         not_found_ok=True,
     )
+    await budget.spend()  # a real upstream response came back — count it
     if not isinstance(body, dict):
         return {"data": [], "total": 0, "page": page, "totalPages": 0}
     return body
@@ -125,6 +142,8 @@ async def get_card(slug: str, card_id: str) -> dict[str, Any] | None:
 async def list_sets(slug: str) -> list[dict[str, Any]]:
     if not is_configured():
         return []
+    if not await budget.can_spend():
+        return []
     body = await request_json(
         integration=INTEGRATION,
         method="GET",
@@ -133,6 +152,7 @@ async def list_sets(slug: str) -> list[dict[str, Any]]:
         timeout_s=get_settings().http_timeout_seconds,
         not_found_ok=True,
     )
+    await budget.spend()
     if isinstance(body, dict):
         return body.get("data") or []
     return body if isinstance(body, list) else []

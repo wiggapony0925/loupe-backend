@@ -42,14 +42,67 @@ class _InMemoryRedis:
                 return None
             return value
 
-    async def set(self, key: str, value: str, ex: int | None = None) -> bool:
+    async def set(
+        self,
+        key: str,
+        value: str,
+        ex: int | None = None,
+        nx: bool = False,
+    ) -> bool | None:
         async with self._lock:
+            if nx:
+                row = self._store.get(key)
+                if row is not None:
+                    _, expires_at = row
+                    if expires_at is None or time.time() <= expires_at:
+                        return None  # key live — NX fails, mirrors real Redis
             expires_at = time.time() + ex if ex else None
             self._store[key] = (value, expires_at)
             return True
 
     async def setex(self, key: str, ex: int, value: str) -> bool:
-        return await self.set(key, value, ex=ex)
+        await self.set(key, value, ex=ex)
+        return True
+
+    async def incrby(self, key: str, amount: int = 1) -> int:
+        async with self._lock:
+            row = self._store.get(key)
+            current = 0
+            if row is not None:
+                value, expires_at = row
+                if expires_at is None or time.time() <= expires_at:
+                    try:
+                        current = int(value)
+                    except (TypeError, ValueError):
+                        current = 0
+                expires = expires_at
+            else:
+                expires = None
+            current += amount
+            self._store[key] = (str(current), expires)
+            return current
+
+    async def incr(self, key: str) -> int:
+        return await self.incrby(key, 1)
+
+    async def expire(self, key: str, seconds: int) -> bool:
+        async with self._lock:
+            row = self._store.get(key)
+            if row is None:
+                return False
+            value, _ = row
+            self._store[key] = (value, time.time() + seconds)
+            return True
+
+    async def ttl(self, key: str) -> int:
+        async with self._lock:
+            row = self._store.get(key)
+            if row is None:
+                return -2
+            _, expires_at = row
+            if expires_at is None:
+                return -1
+            return max(0, int(expires_at - time.time()))
 
     async def delete(self, *keys: str) -> int:
         async with self._lock:

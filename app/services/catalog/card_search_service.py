@@ -39,6 +39,7 @@ from app.platform.cache_config import (
     PRICE_HISTORY_TTL,
     SET_LIST_TTL,
 )
+from app.platform.cache_swr import swr_get_or_refresh
 from app.platform.circuit_breaker import CircuitOpenError
 from app.platform.redis_client import get_redis
 from app.schemas.unified_card import (
@@ -678,6 +679,102 @@ def _from_apitcg_onepiece(card: dict[str, Any]) -> dict[str, Any]:
     ).model_dump()
 
 
+# ------------------------------------------------- whole-catalog Redis cache
+# apitcg (One Piece) and digimoncard.io (Digimon) have small, effectively
+# static catalogs and no per-card price feed, so instead of calling the
+# upstream per page/search/detail we sync the WHOLE catalog into Redis a few
+# times a month and serve every read — browse, search, card detail — from that
+# one cached copy. apitcg's free tier is 1000 req/mo; a full One Piece sync is
+# ~32 upstream pages, so a handful of syncs a month leaves the budget almost
+# untouched no matter how many users we serve. Stale-while-revalidate keeps a
+# read instant even when the fresh window has lapsed, single-flight stops a
+# TTL expiry from stampeding the upstream, and the budget gate blocks a
+# background refresh that would breach the monthly ceiling (the long stale copy
+# keeps serving until the budget resets).
+
+_ONEPIECE_CATALOG_KEY = "loupe:public:browse:onepiece:_full"
+_DIGIMON_CATALOG_KEY = "loupe:public:browse:digimon:_full"
+#: Fresh a week (new sets drop ~monthly), retained two months to serve stale.
+_CATALOG_FRESH_TTL = 7 * 86_400
+_CATALOG_STALE_TTL = 60 * 86_400
+#: A full One Piece sync is ~32 pages; only refresh if that fits the budget.
+_ONEPIECE_SYNC_COST = 40
+
+
+async def _onepiece_fetch() -> dict[str, Any]:
+    raw = await apitcg.list_all_cards(apitcg.GAME_SLUGS["onepiece"])
+    cards = [_from_apitcg_onepiece(c) for c in raw]
+    cards.sort(key=lambda c: (c.get("name") or "").lower())
+    return {"cards": cards}
+
+
+async def _onepiece_budget_ok() -> bool:
+    return await apitcg.budget.can_spend(_ONEPIECE_SYNC_COST)
+
+
+async def onepiece_catalog() -> list[dict[str, Any]]:
+    """Full One Piece catalog (normalized, name-sorted), served from Redis via
+    stale-while-revalidate so unlimited reads cost almost no apitcg calls."""
+    result = await swr_get_or_refresh(
+        _ONEPIECE_CATALOG_KEY,
+        fresh_ttl=_CATALOG_FRESH_TTL,
+        stale_ttl=_CATALOG_STALE_TTL,
+        refresh=_onepiece_fetch,
+        should_refresh=_onepiece_budget_ok,
+    )
+    cards = result.get("cards") if isinstance(result, dict) else None
+    return cards if isinstance(cards, list) else []
+
+
+async def _digimon_fetch() -> dict[str, Any]:
+    raw = await digimoncard.list_all()
+    cards = [_from_digimon(c) for c in raw]
+    cards.sort(key=lambda c: (c.get("name") or "").lower())
+    return {"cards": cards}
+
+
+async def digimon_catalog() -> list[dict[str, Any]]:
+    """Full Digimon catalog (normalized, name-sorted), served from Redis via
+    stale-while-revalidate. digimoncard.io is key-less/free, so no budget gate."""
+    result = await swr_get_or_refresh(
+        _DIGIMON_CATALOG_KEY,
+        fresh_ttl=_CATALOG_FRESH_TTL,
+        stale_ttl=_CATALOG_STALE_TTL,
+        refresh=_digimon_fetch,
+    )
+    cards = result.get("cards") if isinstance(result, dict) else None
+    return cards if isinstance(cards, list) else []
+
+
+def _filter_catalog(
+    cards: list[dict[str, Any]], q: str, limit: int
+) -> list[dict[str, Any]]:
+    """Substring-match a cached catalog by name / number / set — instant and
+    free (no upstream call), and always available even if the upstream is down
+    or the monthly budget is spent."""
+    needle = q.strip().lower()
+    if not needle:
+        return cards[:limit]
+    hits = [
+        c
+        for c in cards
+        if needle in (c.get("name") or "").lower()
+        or needle in str(c.get("number") or "").lower()
+        or needle in (c.get("set_name") or "").lower()
+    ]
+    return hits[:limit]
+
+
+def _find_in_catalog(
+    cards: list[dict[str, Any]], card_id: str
+) -> dict[str, Any] | None:
+    """Locate a normalized card in a cached catalog by its unified id."""
+    for c in cards:
+        if c.get("id") == card_id:
+            return c
+    return None
+
+
 # ------------------------------------------------------------------- caching
 
 
@@ -960,14 +1057,15 @@ async def _search_ygoprodeck(q: str, limit: int) -> list[dict[str, Any]]:
 
 
 async def _search_digimon(q: str, limit: int) -> list[dict[str, Any]]:
-    raw = await digimoncard.search_cards(q)
-    items = [_from_digimon(c) for c in raw]
+    # Served from the cached full catalog — no upstream call per search.
+    items = _filter_catalog(await digimon_catalog(), q, limit * 5)
     return _rank(items, q, limit)
 
 
 async def _search_onepiece(q: str, limit: int) -> list[dict[str, Any]]:
-    raw = await apitcg.search_cards(apitcg.GAME_SLUGS["onepiece"], q)
-    items = [_from_apitcg_onepiece(c) for c in raw]
+    # Served from the cached full catalog — no apitcg call per search, so it
+    # stays free and works even when the monthly budget is spent.
+    items = _filter_catalog(await onepiece_catalog(), q, limit * 5)
     return _rank(items, q, limit)
 
 
@@ -1485,11 +1583,17 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
                 return None
             result = _from_yugioh(raw) if raw else None
         elif source == "digimoncard":
-            raw = await digimoncard.get_card(upstream_id)
-            result = _from_digimon(raw) if raw else None
+            # Prefer the cached full catalog (free); fall back to a live lookup
+            # only for a card not yet in the last sync.
+            result = _find_in_catalog(await digimon_catalog(), card_id)
+            if result is None:
+                raw = await digimoncard.get_card(upstream_id)
+                result = _from_digimon(raw) if raw else None
         elif source == "apitcg-onepiece":
-            raw = await apitcg.get_card(apitcg.GAME_SLUGS["onepiece"], upstream_id)
-            result = _from_apitcg_onepiece(raw) if raw else None
+            result = _find_in_catalog(await onepiece_catalog(), card_id)
+            if result is None:
+                raw = await apitcg.get_card(apitcg.GAME_SLUGS["onepiece"], upstream_id)
+                result = _from_apitcg_onepiece(raw) if raw else None
         else:
             return None
     except (httpx.HTTPError, CircuitOpenError) as exc:

@@ -208,6 +208,11 @@ class Settings(BaseSettings):
     # Ball / Union Arena / Gundam / Star Wars / Riftbound). One key, many games.
     # Blank disables every apitcg-backed game gracefully (they stay coming-soon).
     apitcg_api_key: str | None = None
+    # Hard monthly request ceiling for apitcg (free tier = 1000 req/mo). The
+    # catalog layer meters every upstream call against this and serves cached/
+    # stale data once the soft ceiling is hit, so we never exceed the plan.
+    # Bump this when upgrading the apitcg plan in production.
+    apitcg_monthly_budget: int = 1000
     # PokemonPriceTracker — https://www.pokemonpricetracker.com/api-reference
     # Fills the gap left by the (approval-gated) eBay API: real eBay *sold*
     # data for graded slabs (PSA/CGC/BGS/SGC) plus TCGplayer market price.
