@@ -40,6 +40,7 @@ _SECRET_FIELDS: tuple[str, ...] = (
     "stripe_webhook_secret",
     "resend_api_key",
     "anthropic_api_key",
+    "openai_api_key",
     "pokemon_tcg_api_key",
     "apitcg_api_key",
     "pricecharting_token",
