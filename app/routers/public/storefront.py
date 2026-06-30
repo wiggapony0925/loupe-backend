@@ -76,7 +76,7 @@ async def public_search(
     response: Response,
     q: str = Query("", max_length=120),
     tcg: str = Query(
-        "all", pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$"
+        "all", pattern="^(pokemon|magic|yugioh|digimon|onepiece|lorcana|sports|all)$"
     ),
     rarity: str | None = Query(None, max_length=80),
     set_name: str | None = Query(None, alias="set", max_length=120),
@@ -204,7 +204,7 @@ async def public_browse(
 )
 async def public_trending(
     response: Response,
-    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
+    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|digimon|all)$"),
     sort: str = Query("trending", pattern="^(trending|value)$"),
     max_price: float | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=100),
@@ -217,6 +217,12 @@ async def public_trending(
     renders a "—" priceless tile or a bare image.
     """
     _cache(response)
+    # Catalog-only games (Digimon) have no price feed yet, so there is no
+    # trending / most-valuable rail. Return empty rather than letting the
+    # trending source fall back to the global (Magic-dominated) leaderboard,
+    # which would surface non-Digimon cards under a "Trending in Digimon" rail.
+    if tcg == "digimon":
+        return {"cards": [], "total": 0, "source": "digimoncard"}
     if sort == "value":
         body = await trending_service.get_most_valuable(tcg=tcg, limit=100)
     else:

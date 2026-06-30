@@ -19,11 +19,12 @@ import logging
 from typing import Any
 
 from app.config import get_settings
-from app.integrations._http import pokemon_tcg
+from app.integrations._http import digimoncard, pokemon_tcg
 from app.integrations._http._resilient import request_json
 from app.services.catalog.card_search_service import (
     _cache_get,
     _cache_set,
+    _from_digimon,
     _from_pokemon,
     _from_scryfall,
     _from_yugioh,
@@ -38,6 +39,13 @@ _BROWSE_TTL = (
 
 _SCRYFALL_PAGE = 175  # Scryfall fixes its page size.
 _MAGIC_ALL = "game:paper"  # every paper Magic printing
+
+#: One retry on a degraded fetch. These full-catalog ``orderBy`` queries are
+#: slow and flaky upstream (notably pokemontcg.io on ``-set.releaseDate`` /
+#: ``cardmarket.prices.*``): they intermittently time out *or* answer a 200 with
+#: a real ``totalCount`` but an empty ``data`` array. A single retry recovers the
+#: common transient case without hammering a struggling upstream.
+_MAX_FETCH_ATTEMPTS = 2
 
 # Unified sort → per-upstream native ordering.
 _POKEMON_ORDER = {
@@ -65,6 +73,21 @@ def _empty(game: str, page: int, page_size: int) -> dict[str, Any]:
     }
 
 
+def _is_degraded(result: dict[str, Any], page: int, page_size: int) -> bool:
+    """True when a page came back empty but the total says it shouldn't have.
+
+    A page is *legitimately* empty when its offset is past the end of the
+    catalog (``page`` beyond the last page) or the total is zero — that's a real
+    "no more rows", not a failure. But an empty page whose offset falls *within*
+    the reported total is a degraded upstream response (a 200 with ``totalCount``
+    populated but ``data: []``) — the ``total=20359, cards=[]`` "newest is broken"
+    bug. Those are worth a retry."""
+    if result.get("cards"):
+        return False
+    total = int(result.get("total") or 0)
+    return total > 0 and (page - 1) * page_size < total
+
+
 async def browse_catalog(
     game: str, page: int, page_size: int, sort: str = "name", set_id: str | None = None
 ) -> dict[str, Any]:
@@ -73,6 +96,13 @@ async def browse_catalog(
     Serves from Redis when warm; on a cold miss fetches upstream. If the upstream
     is slow / down / circuit-open, returns an empty page (never a 500) so the
     client degrades cleanly instead of hanging or erroring.
+
+    The full-catalog ``orderBy`` queries (especially ``newest`` →
+    ``-set.releaseDate`` and the price sorts) are slow and flaky upstream: they
+    intermittently time out or answer a 200 with a real ``totalCount`` but an
+    empty ``data`` array. We retry such a degraded page once (see
+    :data:`_MAX_FETCH_ATTEMPTS`) so a transient blip doesn't surface as an empty
+    page that contradicts the row count.
 
     When ``set_id`` is given (e.g. ``pokemontcg:base1``) the page is scoped to
     that single set — powering the "browse a set" surface. Supported for Pokémon
@@ -87,18 +117,39 @@ async def browse_catalog(
     if cached is not None:
         return cached
 
-    try:
-        result = await _fetch_catalog(game, page, page_size, sort, set_id)
-    except Exception as exc:
+    result = _empty(game, page, page_size)
+    for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
+        try:
+            result = await _fetch_catalog(game, page, page_size, sort, set_id)
+        except Exception as exc:
+            logger.warning(
+                "browse_catalog upstream failed game=%s set=%s page=%s sort=%s "
+                "attempt=%s/%s: %s",
+                game,
+                set_key,
+                page,
+                sort,
+                attempt,
+                _MAX_FETCH_ATTEMPTS,
+                exc,
+            )
+            result = _empty(game, page, page_size)
+            continue
+
+        if not _is_degraded(result, page, page_size):
+            break  # got rows, or a legitimately empty (out-of-range) page
+
         logger.warning(
-            "browse_catalog upstream failed game=%s set=%s page=%s sort=%s: %s",
+            "browse_catalog empty-but-counted game=%s set=%s page=%s sort=%s "
+            "total=%s attempt=%s/%s",
             game,
             set_key,
             page,
             sort,
-            exc,
+            result.get("total"),
+            attempt,
+            _MAX_FETCH_ATTEMPTS,
         )
-        return _empty(game, page, page_size)
 
     if result.get("cards"):
         await _cache_set(cache_key, result, _BROWSE_TTL)
@@ -192,8 +243,45 @@ async def _fetch_catalog(
             "source": "ygoprodeck",
         }
 
-    # Unsupported game (lorcana / onepiece / digimon) — graceful empty.
+    if game == "digimon":
+        # digimoncard.io has no native paging — fetch the full (immutable)
+        # catalog once, cache it normalized, then slice in-process.
+        cards = await _digimon_catalog()
+        if prov_set:
+            cards = [
+                c
+                for c in cards
+                if (c.get("set_code") or "").lower() == prov_set.lower()
+            ]
+        total = len(cards)
+        start = (page - 1) * page_size
+        return {
+            "cards": cards[start : start + page_size],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "source": "digimoncard",
+        }
+
+    # Unsupported game (lorcana / onepiece) — graceful empty.
     return _empty(game, page, page_size)
+
+
+_DIGIMON_CATALOG_KEY = "loupe:public:browse:digimon:_full"
+_DIGIMON_CATALOG_TTL = 86_400  # 24h — the Digimon catalog is effectively static.
+
+
+async def _digimon_catalog() -> list[dict[str, Any]]:
+    """Full Digimon catalog, normalized + name-sorted, cached for a day."""
+    cached = await _cache_get(_DIGIMON_CATALOG_KEY)
+    if isinstance(cached, dict) and isinstance(cached.get("cards"), list):
+        return cached["cards"]
+    raw = await digimoncard.list_all()
+    cards = [_from_digimon(c) for c in raw]
+    cards.sort(key=lambda c: (c.get("name") or "").lower())
+    if cards:
+        await _cache_set(_DIGIMON_CATALOG_KEY, {"cards": cards}, _DIGIMON_CATALOG_TTL)
+    return cards
 
 
 __all__ = ["browse_catalog"]

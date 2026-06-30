@@ -25,7 +25,7 @@ router = APIRouter(prefix="/sets", tags=["sets"])
 
 @router.get("", summary="List card sets (public)")
 async def list_sets(
-    tcg: str = Query("magic", pattern="^(pokemon|magic|yugioh|all)$"),
+    tcg: str = Query("magic", pattern="^(pokemon|magic|yugioh|digimon|all)$"),
 ) -> dict[str, Any]:
     return await card_search_service.list_sets(tcg)
 

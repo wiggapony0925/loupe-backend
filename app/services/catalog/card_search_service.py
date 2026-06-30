@@ -26,7 +26,7 @@ from typing import Any
 
 import httpx
 
-from app.integrations._http import pokemon_tcg, scryfall, ygoprodeck
+from app.integrations._http import digimoncard, pokemon_tcg, scryfall, ygoprodeck
 from app.platform.cache_config import (
     CARD_DETAIL_TTL,
     CARD_SEARCH_TTL,
@@ -102,6 +102,7 @@ def _source_for(tcg: str) -> str:
         "pokemon": "pokemontcg",
         "magic": "scryfall",
         "yugioh": "ygoprodeck",
+        "digimon": "digimoncard",
         "all": "mixed",
         "onepiece": "onepiece",
         "lorcana": "lorcana",
@@ -515,6 +516,89 @@ def _from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
     ).model_dump()
 
 
+def _from_digimon(card: dict[str, Any]) -> dict[str, Any]:
+    """Map a digimoncard.io card to the unified rich shape.
+
+    The printed id encodes the set: ``BT17-017`` → set ``BT17``; promo/starter
+    ids without a dash (``P-009`` keeps ``P``) use the leading token. Art is not
+    in the payload — it lives at a deterministic URL keyed by the id.
+    """
+    cid = str(card.get("id") or "")
+    name = card.get("name") or ""
+    # A card reprinted across sets can carry a list of set names — take the first.
+    raw_set = card.get("set_name")
+    set_name = (
+        (raw_set[0] if raw_set else None) if isinstance(raw_set, list) else raw_set
+    )
+    set_code = cid.rsplit("-", 1)[0] if "-" in cid else cid
+    img = digimoncard.image_url(cid)
+
+    attributes: dict[str, Any] = {}
+    for key in (
+        "type",
+        "color",
+        "color2",
+        "dp",
+        "play_cost",
+        "evolution_cost",
+        "stage",
+        "form",
+        "attribute",
+        "digi_type",
+        "level",
+        "main_effect",
+        "source_effect",
+        "series",
+        "artist",
+    ):
+        val = card.get(key)
+        if val not in (None, "", [], {}):
+            attributes[key] = val
+
+    image_set = UnifiedImageSet(
+        small=_img(img, alt=name),
+        normal=_img(img, alt=name),
+        large=_img(img, alt=name),
+        art_crop=None,
+    )
+
+    set_data = UnifiedSet(
+        id=f"digimoncard:{set_code}" if set_code else None,
+        code=set_code or None,
+        name=set_name,
+        series=card.get("series"),
+        release_date=None,
+        printed_total=None,
+        total_cards=None,
+        logo=None,
+        symbol=None,
+    )
+
+    rarity = card.get("rarity")
+    tags: list[str] = []
+    if isinstance(rarity, str) and rarity.lower() in ("sr", "sec", "ssr"):
+        tags.append("rare")
+
+    return UnifiedCard(
+        id=f"digimoncard:{cid}",
+        name=name,
+        tcg="digimon",
+        set_name=set_name,
+        set_code=set_code or None,
+        number=cid,
+        rarity=rarity,
+        image_url=img,
+        images=image_set,
+        year=None,
+        source="digimoncard",
+        attributes=attributes,
+        pricing_summary=None,
+        set=set_data,
+        tags=tags,
+        metadata=_meta("digimoncard"),
+    ).model_dump()
+
+
 # ------------------------------------------------------------------- caching
 
 
@@ -796,6 +880,12 @@ async def _search_ygoprodeck(q: str, limit: int) -> list[dict[str, Any]]:
     return _rank(items, q, limit)
 
 
+async def _search_digimon(q: str, limit: int) -> list[dict[str, Any]]:
+    raw = await digimoncard.search_cards(q)
+    items = [_from_digimon(c) for c in raw]
+    return _rank(items, q, limit)
+
+
 def _interleave(lists: list[list[dict[str, Any]]], cap: int) -> list[dict[str, Any]]:
     """Round-robin merge with a cap. Preserves provider variety."""
     out: list[dict[str, Any]] = []
@@ -851,6 +941,9 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
         elif tcg == "magic":
             items = await _search_scryfall(q, limit)
             body = {"results": items, "total": len(items), "source": "scryfall"}
+        elif tcg == "digimon":
+            items = await _search_digimon(q, limit)
+            body = {"results": items, "total": len(items), "source": "digimoncard"}
         else:  # "all" → parallel fan-out with early-settle
             per = max(3, min(limit, MAX_LIMIT))
 
@@ -1261,6 +1354,9 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             except ValueError:
                 return None
             result = _from_yugioh(raw) if raw else None
+        elif source == "digimoncard":
+            raw = await digimoncard.get_card(upstream_id)
+            result = _from_digimon(raw) if raw else None
         else:
             return None
     except (httpx.HTTPError, CircuitOpenError) as exc:
@@ -1653,6 +1749,45 @@ def _ygo_set(s: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _digimon_sets_from_catalog(
+    cards: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Derive a set list from the flat Digimon catalog (no sets endpoint).
+
+    Groups by the printed-id set prefix (``BT17-017`` → ``BT17``), counting
+    cards and keeping the human set name. Ordered biggest-set-first so the main
+    booster sets lead the "Shop sets" rail.
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for c in cards:
+        cid = str(c.get("id") or "")
+        if not cid:
+            continue
+        code = cid.rsplit("-", 1)[0] if "-" in cid else cid
+        sn = c.get("set_name")
+        if isinstance(sn, list):
+            sn = sn[0] if sn else None
+        g = groups.setdefault(code, {"name": sn, "count": 0})
+        g["count"] += 1
+        if not g["name"] and sn:
+            g["name"] = sn
+    out = [
+        {
+            "id": f"digimoncard:{code}",
+            "code": code,
+            "name": g["name"] or code,
+            "tcg": "digimon",
+            "release_date": None,
+            "total_cards": g["count"],
+            "image_url": None,
+            "source": "digimoncard",
+        }
+        for code, g in groups.items()
+    ]
+    out.sort(key=lambda s: (-(s["total_cards"] or 0), s["name"] or ""))
+    return out
+
+
 async def list_sets(tcg: str) -> dict[str, Any]:
     """Live proxy of the upstream set lists."""
     tcg = (tcg or "all").lower()
@@ -1670,6 +1805,10 @@ async def list_sets(tcg: str) -> dict[str, Any]:
             sets = await ygoprodeck.list_sets()
             items = [_ygo_set(s) for s in sets]
             body = {"results": items, "total": len(items), "source": "ygoprodeck"}
+        elif tcg == "digimon":
+            cards = await digimoncard.list_all()
+            items = _digimon_sets_from_catalog(cards)
+            body = {"results": items, "total": len(items), "source": "digimoncard"}
         else:
             sets = await scryfall.list_sets()
             items = [_scryfall_set(s) for s in sets]
