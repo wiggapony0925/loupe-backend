@@ -69,6 +69,8 @@ stripe>=11.0,<13
 # --- AI: natural-language data queries (admin "Ask your data"; optional) ---
 # No-ops without ANTHROPIC_API_KEY — the endpoint reports "not configured".
 anthropic>=0.40,<1
+# Marketplace carousel generation (optional). No-ops without OPENAI_API_KEY.
+openai>=1.40,<2
 
 # --- Observability (optional; no-ops without SENTRY_DSN) ---
 sentry-sdk[fastapi]>=2.18,<3

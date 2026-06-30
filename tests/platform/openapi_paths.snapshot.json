@@ -390,6 +390,9 @@
   "/v1/public/browse": [
     "GET"
   ],
+  "/v1/public/carousels": [
+    "GET"
+  ],
   "/v1/public/search": [
     "GET"
   ],

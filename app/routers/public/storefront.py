@@ -19,7 +19,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Response
 
 from app.platform.rate_limit import catalog_read_limit, search_live_limit
-from app.services.catalog import card_search_service, catalog_browse_service
+from app.services.catalog import (
+    card_search_service,
+    carousel_service,
+    catalog_browse_service,
+)
 from app.services.market import trending_service
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -195,6 +199,24 @@ async def public_browse(
     return await catalog_browse_service.browse_catalog(
         game, page, page_size, sort=sort, set_id=set_id
     )
+
+
+@router.get(
+    "/carousels",
+    summary="AI-designed marketplace carousels (recipes) for a game",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def public_carousels(
+    response: Response,
+    game: str = Query("pokemon", pattern="^(pokemon|magic|yugioh|onepiece|digimon)$"),
+) -> dict[str, Any]:
+    """A game's discovery shelves as serializable recipes (theme + filter), AI-
+    designed and cached daily. The web compiles each into a real rail and mixes
+    them into the rotating storefront; ``source`` says whether the model
+    produced them (``ai``) or it fell back to the web's curated pool
+    (``curated``)."""
+    _cache(response)
+    return (await carousel_service.get_carousels(game)).model_dump()
 
 
 @router.get(

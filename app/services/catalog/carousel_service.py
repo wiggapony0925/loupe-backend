@@ -1,0 +1,204 @@
+"""AI-generated marketplace carousels.
+
+Asks a model (OpenAI by default — `OPENAI_API_KEY`/`carousel_model`; falls back
+to Anthropic if only that's configured) to *design* a fresh set of themed
+shelves for a game — the theme, the copy, and a constrained filter recipe —
+which the web then renders through the normal rail engine. Crucially the model
+never sees or returns card data: it only emits carousel *definitions* over a
+fixed vocabulary, so one cheap call a day produces creative merchandising while
+the actual cards keep coming from our cached catalog. Results are cached per
+game per day; when no model is configured (or it errors) the endpoint returns an
+empty "curated" set and the web falls back to its built-in strategy pool.
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date
+
+from pydantic import ValidationError
+
+from app.config import get_settings
+from app.platform.redis_client import get_redis
+from app.schemas.carousel import CarouselRecipe, CarouselResponse
+from app.utils.logger import get_logger
+
+logger = get_logger("services.carousel")
+
+GAME_LABELS: dict[str, str] = {
+    "pokemon": "Pokémon",
+    "magic": "Magic: The Gathering",
+    "yugioh": "Yu-Gi-Oh!",
+    "onepiece": "One Piece",
+    "digimon": "Digimon",
+}
+
+_AI_TTL = 24 * 60 * 60  # AI result is good for a day
+_FALLBACK_TTL = 60 * 60  # retry the model within the hour once a key is set
+_COUNT = 6  # shelves to generate
+
+_SYSTEM = """You are a trading-card marketplace merchandiser designing the \
+discovery carousels ("shelves") for a {label} singles storefront.
+
+Return ONLY a JSON object of the form {{"shelves": [ ...exactly {count} shelf \
+objects... ]}} — no prose, no code fences. Each shelf object has this exact shape:
+{{
+  "id": "kebab-case-slug",
+  "title": "punchy, <= 48 chars",
+  "subtitle": "one line, <= 110 chars",
+  "source": "value" | "catalog",
+  "priceMin": number (USD, optional),
+  "priceMax": number (USD, optional),
+  "rarityPattern": "lowercase regex alternation, optional, e.g. secret|rainbow|illustration",
+  "sort": "price_desc" | "price_asc" | "name",
+  "limit": 20
+}}
+
+Rules:
+- "source":"value" for price/rarity-themed shelves (the priced market pool);
+  "source":"catalog" for a general "explore" shelf with no price filter.
+- Theme each shelf with a price band (priceMin/priceMax) AND/OR a rarityPattern.
+- Make the {count} shelves DIVERSE: mix value tiers (grails, premium, mid, \
+budget), rarity themes, and chase pulls. Titles should feel specific to \
+{label} collecting culture.
+- Keep it tasteful and accurate; do not invent prices or card names."""
+
+
+def configured() -> bool:
+    s = get_settings()
+    return bool(s.openai_api_key or s.anthropic_api_key)
+
+
+def _cache_key(game: str) -> str:
+    return f"loupe:carousels:{game}:{date.today().isoformat()}"
+
+
+async def _cache_get(game: str) -> CarouselResponse | None:
+    try:
+        raw = await (await get_redis()).get(_cache_key(game))
+        if raw:
+            return CarouselResponse.model_validate_json(raw)
+    except Exception as exc:  # pragma: no cover - cache best effort
+        logger.debug("carousel cache_get failed: %s", exc)
+    return None
+
+
+async def _cache_set(resp: CarouselResponse, ttl: int) -> None:
+    try:
+        await (await get_redis()).setex(
+            _cache_key(resp.game), ttl, resp.model_dump_json()
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.debug("carousel cache_set failed: %s", exc)
+
+
+def _coerce(raw: list[dict[str, object]]) -> list[CarouselRecipe]:
+    """Validate model output into recipes, dropping anything malformed."""
+    out: list[CarouselRecipe] = []
+    seen: set[str] = set()
+    for item in raw:
+        try:
+            recipe = CarouselRecipe.model_validate(item)
+        except ValidationError:
+            continue
+        if recipe.id in seen:
+            continue
+        seen.add(recipe.id)
+        out.append(recipe)
+    return out
+
+
+def _parse_recipes(text: str) -> list[CarouselRecipe]:
+    """Pull the shelf array out of a model response (object-wrapped or bare),
+    tolerant of stray prose/code fences, then validate each recipe."""
+    text = text.strip()
+    data: object = None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Tolerate code fences / prose: grab the array first (a bare list or the
+        # inner "shelves" array), else fall back to an object wrapper.
+        for open_c, close_c in (("[", "]"), ("{", "}")):
+            i, j = text.find(open_c), text.rfind(close_c)
+            if i != -1 and j != -1:
+                try:
+                    data = json.loads(text[i : j + 1])
+                    break
+                except json.JSONDecodeError:
+                    continue
+    if isinstance(data, dict):
+        for key in ("shelves", "carousels", "data", "items"):
+            inner = data.get(key)
+            if isinstance(inner, list):
+                data = inner
+                break
+    if not isinstance(data, list):
+        return []
+    return _coerce(data)
+
+
+async def _ask_openai(label: str) -> str:
+    from openai import AsyncOpenAI
+
+    settings = get_settings()
+    client = AsyncOpenAI(api_key=settings.openai_api_key)
+    resp = await client.chat.completions.create(
+        model=settings.carousel_model,
+        messages=[
+            {"role": "system", "content": _SYSTEM.format(label=label, count=_COUNT)},
+            {"role": "user", "content": f"Design the shelves for {label}."},
+        ],
+        response_format={"type": "json_object"},
+        temperature=0.85,  # creative variety between days
+        max_tokens=1500,
+    )
+    return resp.choices[0].message.content or ""
+
+
+async def _ask_anthropic(label: str) -> str:
+    from anthropic import AsyncAnthropic
+
+    settings = get_settings()
+    client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    resp = await client.messages.create(
+        model=settings.nl_query_model,
+        max_tokens=1500,
+        system=_SYSTEM.format(label=label, count=_COUNT),
+        messages=[{"role": "user", "content": f"Design the shelves for {label}."}],
+    )
+    return "".join(b.text for b in resp.content if b.type == "text")
+
+
+async def _generate_ai(game: str, label: str) -> list[CarouselRecipe]:
+    """Generate shelves via whichever model is configured (OpenAI preferred)."""
+    settings = get_settings()
+    if settings.openai_api_key:
+        text = await _ask_openai(label)
+    elif settings.anthropic_api_key:
+        text = await _ask_anthropic(label)
+    else:
+        return []
+    return _parse_recipes(text)
+
+
+async def get_carousels(game: str) -> CarouselResponse:
+    """Return a game's AI-designed shelves (cached daily; curated-empty when the
+    model isn't configured, so the web uses its built-in strategy pool)."""
+    cached = await _cache_get(game)
+    if cached is not None:
+        return cached
+
+    label = GAME_LABELS.get(game, game.title())
+    if configured():
+        try:
+            recipes = await _generate_ai(game, label)
+            if recipes:
+                resp = CarouselResponse(game=game, source="ai", carousels=recipes)
+                await _cache_set(resp, _AI_TTL)
+                return resp
+        except Exception as exc:  # pragma: no cover - model/network best effort
+            logger.warning("carousel AI generation failed for %s: %s", game, exc)
+
+    resp = CarouselResponse(game=game, source="curated", carousels=[])
+    await _cache_set(resp, _FALLBACK_TTL)
+    return resp

@@ -326,6 +326,14 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     nl_query_model: str = "claude-opus-4-8"
 
+    # --- AI: marketplace carousel generation ---
+    # Optional. When set, the storefront's discovery shelves are designed by
+    # OpenAI (theme + copy + a constrained filter recipe — never the card data),
+    # cached one call per game per day. Blank => the web falls back to its
+    # curated rotating pool. Set via Secret Manager (`openai-api-key`) in prod.
+    openai_api_key: str = ""
+    carousel_model: str = "gpt-4o-mini"
+
     # --- Authorization ---
     # Comma-separated list of email addresses with admin privileges.
     # Pragmatic stand-in until a proper RBAC model lands on `User`.
