@@ -228,7 +228,11 @@ async def _trending_yugioh(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any
     if not body:
         return []
     mapped = [_from_yugioh(c) for c in (body.get("data") or [])]
-    return _distinct_by_name([c for c in mapped if _has_art(c)])
+    # Brand-new YGO cards often have no `card_sets` yet → no set_name/rarity,
+    # which renders as a sparse "name + price" tile. Keep only cards with full
+    # metadata so the trending rail matches the Pokémon/Magic tile quality.
+    complete = [c for c in mapped if _has_art(c) and c.get("set_name")]
+    return _distinct_by_name(complete)
 
 
 async def _fallback_cards(limit: int) -> list[dict[str, Any]]:
