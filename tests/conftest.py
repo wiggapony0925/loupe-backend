@@ -71,6 +71,27 @@ def _reset_process_singletons():
     _reset()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _flush_redis_between_tests():
+    """Flush the Redis DB around every async test so cache keys never leak
+    across tests. Matters in CI, which runs against a REAL Redis service (keys
+    persist within a run); the in-memory stub also implements flushdb."""
+
+    async def _flush() -> None:
+        from app.platform.redis_client import get_redis
+
+        try:
+            client = await get_redis()
+            if hasattr(client, "flushdb"):
+                await client.flushdb()
+        except Exception:
+            pass
+
+    await _flush()
+    yield
+    await _flush()
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
     loop = asyncio.new_event_loop()

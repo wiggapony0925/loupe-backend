@@ -127,6 +127,10 @@ class _InMemoryRedis:
                     n += 1
             return n
 
+    async def flushdb(self) -> bool:
+        self._store.clear()
+        return True
+
     async def publish(self, channel: str, message: str) -> int:
         return 0
 
@@ -168,7 +172,7 @@ async def get_redis() -> Any:
         logger.warning("Redis unavailable (%s); using in-process cache", exc)
         if _client is None:
             _client = _InMemoryRedis()
-        return _client
+    return _client
 
 
 async def close_redis() -> None:
