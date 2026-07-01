@@ -213,6 +213,11 @@ class Settings(BaseSettings):
     # stale data once the soft ceiling is hit, so we never exceed the plan.
     # Bump this when upgrading the apitcg plan in production.
     apitcg_monthly_budget: int = 1000
+    # Monthly ceiling for catalog price-enrichment lookups (the cross-provider
+    # market chain, mostly PriceCharting) used to put a $ on catalog-only games
+    # (One Piece / Digimon) whose APIs ship no prices. Resolved prices are cached
+    # per card for a day, so this is a soft guard against runaway lookups.
+    pricechain_monthly_budget: int = 8000
     # PokemonPriceTracker — https://www.pokemonpricetracker.com/api-reference
     # Fills the gap left by the (approval-gated) eBay API: real eBay *sold*
     # data for graded slabs (PSA/CGC/BGS/SGC) plus TCGplayer market price.

@@ -28,6 +28,7 @@ from app.services.catalog.card_search_service import (
     _from_scryfall,
     _from_yugioh,
     digimon_catalog,
+    enrich_catalog_prices,
     onepiece_catalog,
 )
 
@@ -259,8 +260,11 @@ async def _fetch_catalog(
             ]
         total = len(cards)
         start = (page - 1) * page_size
+        # Their catalog carries no price; put a $ on the tiles by resolving from
+        # the market chain (cached per card, budget-gated, non-blocking).
+        page_cards = await enrich_catalog_prices(cards[start : start + page_size])
         return {
-            "cards": cards[start : start + page_size],
+            "cards": page_cards,
             "total": total,
             "page": page,
             "page_size": page_size,

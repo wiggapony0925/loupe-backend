@@ -26,6 +26,7 @@ from typing import Any
 
 import httpx
 
+from app.config import get_settings
 from app.integrations._http import (
     apitcg,
     digimoncard,
@@ -33,6 +34,7 @@ from app.integrations._http import (
     scryfall,
     ygoprodeck,
 )
+from app.platform.api_budget import ApiBudget
 from app.platform.cache_config import (
     CARD_DETAIL_TTL,
     CARD_SEARCH_TTL,
@@ -1276,6 +1278,66 @@ async def _pricing_from_market_chain(
         sample_size=None,
         sources=[mp.source],
     ).model_dump()
+
+
+# ---- catalog price enrichment (One Piece / Digimon browse tiles) -----------
+# Their catalog APIs ship no prices, so we resolve a headline price from the
+# cross-provider market chain, cache it per card (a day), and put it on the
+# tile. Cached prices attach instantly; uncached ones resolve within a short
+# wait and otherwise keep resolving in the background so the NEXT view is fully
+# priced — the browse request is never blocked on a slow price provider.
+
+price_budget = ApiBudget("pricechain", get_settings().pricechain_monthly_budget)
+
+_PRICE_CACHE_TTL = 24 * 60 * 60  # a resolved catalog price is good for a day
+_PRICE_NEG_TTL = 6 * 60 * 60  # remember "no price found" so we don't re-hammer
+_ENRICH_WAIT = 1.5  # max seconds the browse request waits for fresh prices
+_ENRICH_MAX_LIVE = 24  # live lookups kicked per request (≈ one page)
+_price_bg_tasks: set[asyncio.Task[None]] = set()
+
+
+def _price_key(card_id: str) -> str:
+    return f"loupe:cardprice:{card_id}"
+
+
+async def enrich_catalog_prices(cards: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach market-chain prices to catalog-only cards, cached per card.
+
+    Mutates and returns ``cards``. Cached prices are applied immediately; a
+    bounded, budget-gated batch resolves the rest, waiting only briefly before
+    returning (the stragglers keep resolving + caching for the next view)."""
+    todo: list[tuple[dict[str, Any], str]] = []
+    for c in cards:
+        if c.get("pricing_summary"):
+            continue
+        key = _price_key(str(c.get("id") or ""))
+        cached = await _cache_get(key)
+        if isinstance(cached, dict):
+            if cached:  # non-empty envelope = a real price
+                c["pricing_summary"] = cached
+        else:
+            todo.append((c, key))
+
+    if not todo or not await price_budget.can_spend(len(todo)):
+        return cards
+
+    async def _one(card: dict[str, Any], key: str) -> None:
+        ps = await _pricing_from_market_chain(
+            card.get("name"), card.get("set_name"), str(card.get("id") or "")
+        )
+        await price_budget.spend()
+        await _cache_set(key, ps or {}, _PRICE_CACHE_TTL if ps else _PRICE_NEG_TTL)
+        if ps:
+            card["pricing_summary"] = ps  # mutate in place (attaches if in time)
+
+    tasks = [asyncio.create_task(_one(c, k)) for c, k in todo[:_ENRICH_MAX_LIVE]]
+    # Wait briefly for the fast ones (they attach to this response); the rest run
+    # on to cache their result for the next view — never blocking the request.
+    _, pending = await asyncio.wait(tasks, timeout=_ENRICH_WAIT)
+    for t in pending:
+        _price_bg_tasks.add(t)
+        t.add_done_callback(_price_bg_tasks.discard)
+    return cards
 
 
 async def resolve_pricing_for_local(
