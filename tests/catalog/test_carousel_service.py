@@ -141,6 +141,14 @@ def test_spawn_generation_respects_cooldown(monkeypatch) -> None:
     carousel_service._inflight.clear()
     carousel_service._last_attempt.clear()
 
+    # Drive the monotonic clock ourselves, pinned BELOW the cooldown window,
+    # to reproduce a freshly booted host (monotonic counts from boot). The old
+    # `_last_attempt.get(game, 0.0)` default made `monotonic() - 0.0 < cooldown`
+    # true here and wrongly suppressed the FIRST attempt (the CI flake); the
+    # None-sentinel guard fixes it.
+    now = {"t": 120.0}  # 120s uptime, well below the 600s cooldown window
+    monkeypatch.setattr(carousel_service.time, "monotonic", lambda: now["t"])
+
     created = {"n": 0}
 
     class _DummyTask:

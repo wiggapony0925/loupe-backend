@@ -200,7 +200,13 @@ def _spawn_generation(game: str, label: str) -> None:
     on every marketplace load."""
     if game in _inflight:
         return
-    if time.monotonic() - _last_attempt.get(game, 0.0) < _RETRY_COOLDOWN_SECONDS:
+    # Use a None sentinel for "never attempted" — NOT 0.0. On a freshly booted
+    # host ``time.monotonic()`` can be small (it counts from boot), so
+    # ``monotonic() - 0.0 < cooldown`` would wrongly suppress the very first
+    # attempt for the first ~10 min of an instance's life. Only cool down a
+    # game that has an actual recorded prior attempt.
+    last = _last_attempt.get(game)
+    if last is not None and time.monotonic() - last < _RETRY_COOLDOWN_SECONDS:
         return
     _inflight.add(game)
     _last_attempt[game] = time.monotonic()
