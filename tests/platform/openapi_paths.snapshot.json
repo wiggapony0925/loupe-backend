@@ -124,6 +124,9 @@
   "/v1/admin/scanner": [
     "GET"
   ],
+  "/v1/admin/scanner/trend": [
+    "GET"
+  ],
   "/v1/admin/users": [
     "GET"
   ],
