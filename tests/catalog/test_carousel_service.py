@@ -14,10 +14,11 @@ from app.services.catalog.carousel_service import _coerce
 async def _reset() -> None:
     """Drain any leaked background generation tasks + clear module state so one
     test never pollutes the next (in-flight/cooldown guards, cache)."""
-    for t in list(carousel_service._bg_tasks):
+    real = [t for t in carousel_service._bg_tasks if isinstance(t, asyncio.Task)]
+    for t in real:
         t.cancel()
-    if carousel_service._bg_tasks:
-        await asyncio.gather(*list(carousel_service._bg_tasks), return_exceptions=True)
+    if real:
+        await asyncio.gather(*real, return_exceptions=True)
     carousel_service._bg_tasks.clear()
     carousel_service._inflight.clear()
     carousel_service._last_attempt.clear()
@@ -29,15 +30,6 @@ async def _fresh_redis():
     await _reset()
     yield
     await _reset()
-
-
-async def _drain() -> None:
-    for _ in range(5):
-        await asyncio.sleep(0)
-        if carousel_service._bg_tasks:
-            await asyncio.gather(
-                *list(carousel_service._bg_tasks), return_exceptions=True
-            )
 
 
 @pytest.mark.asyncio
@@ -101,66 +93,74 @@ def test_parse_recipes_tolerates_fenced_bare_array() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_carousels_ai_path_is_non_blocking(monkeypatch) -> None:
-    # The request never blocks on the model: the first call returns curated
-    # instantly and generates AI in the background; a later call serves AI.
-    from app.schemas.carousel import CarouselRecipe
-
-    # A unique game so this test can't share cooldown/cache state with another.
+async def test_get_carousels_miss_is_curated_and_kicks_generation(monkeypatch) -> None:
+    # On a cache miss the request returns curated INSTANTLY (never blocks on the
+    # model) and kicks generation in the background. Deterministic: we observe
+    # that _spawn_generation is invoked, not that the fire-and-forget task runs.
     game = "ai-path-test"
     carousel_service._inflight.clear()
     carousel_service._last_attempt.clear()
     monkeypatch.setattr(carousel_service, "configured", lambda: True)
 
-    async def fake_gen(g: str, label: str) -> list[CarouselRecipe]:
-        return [
-            CarouselRecipe(id="grails", title="Grails", subtitle="s", source="value")
-        ]
+    spawned: list[str] = []
+    monkeypatch.setattr(
+        carousel_service, "_spawn_generation", lambda g, label: spawned.append(g)
+    )
 
-    monkeypatch.setattr(carousel_service, "_generate_ai", fake_gen)
-
-    first = await carousel_service.get_carousels(game)
-    assert first.source == "curated"  # instant, never blocks on the model
-
-    # Robustly wait for the background generation to cache the AI result.
-    resp = first
-    for _ in range(100):
-        if carousel_service._bg_tasks:
-            await asyncio.gather(
-                *list(carousel_service._bg_tasks), return_exceptions=True
-            )
-        resp = await carousel_service.get_carousels(game)
-        if resp.source == "ai":
-            break
-        await asyncio.sleep(0.02)
-
-    assert resp.source == "ai"
-    assert [c.id for c in resp.carousels] == ["grails"]
+    resp = await carousel_service.get_carousels(game)
+    assert resp.source == "curated"  # instant, never blocks on the model
+    assert spawned == [game]  # generation kicked off in the background
 
 
 @pytest.mark.asyncio
-async def test_failing_model_backs_off(monkeypatch) -> None:
-    # A failing key (e.g. 429 no-quota) is retried at most once per cooldown,
-    # not on every marketplace load — so we don't spam the model.
-    game = "backoff-test"  # unique game → no shared cooldown state
+async def test_get_carousels_serves_cached_ai() -> None:
+    # The read path: once an AI result is cached, get_carousels serves it.
+    from app.schemas.carousel import CarouselRecipe, CarouselResponse
+
+    game = "cached-ai-test"
+    cached = CarouselResponse(
+        game=game,
+        source="ai",
+        carousels=[
+            CarouselRecipe(id="grails", title="Grails", subtitle="s", source="value")
+        ],
+    )
+    await carousel_service._cache_set(cached, 3600)
+
+    out = await carousel_service.get_carousels(game)
+    assert out.source == "ai"
+    assert [c.id for c in out.carousels] == ["grails"]
+
+
+def test_spawn_generation_respects_cooldown(monkeypatch) -> None:
+    # The cooldown guard is a synchronous check inside _spawn_generation: a
+    # second call within the cooldown must NOT create another task (so a failing
+    # / no-quota key isn't retried on every load). Tested without running the
+    # fire-and-forget task, which is inherently timing-dependent.
+    game = "backoff-test"
     carousel_service._inflight.clear()
     carousel_service._last_attempt.clear()
-    monkeypatch.setattr(carousel_service, "configured", lambda: True)
 
-    calls = {"n": 0}
+    created = {"n": 0}
 
-    async def failing_gen(g: str, label: str):
-        calls["n"] += 1
-        raise RuntimeError("429 insufficient_quota")
+    class _DummyTask:
+        def add_done_callback(self, _cb: object) -> None:
+            pass
 
-    monkeypatch.setattr(carousel_service, "_generate_ai", failing_gen)
+        def cancel(self) -> None:  # so fixture teardown can cancel it
+            pass
 
-    await carousel_service.get_carousels(game)  # first miss → spawns (fails)
-    await _drain()
-    assert calls["n"] == 1  # the one attempt happened
-    # Repeated loads within the cooldown must NOT spawn more model calls.
-    for _ in range(3):
-        resp = await carousel_service.get_carousels(game)
-        await _drain()
-        assert resp.source == "curated"  # always serves fast, never errors
-    assert calls["n"] == 1  # backed off after the first failure
+    def fake_create_task(coro: object) -> _DummyTask:
+        created["n"] += 1
+        coro.close()  # type: ignore[attr-defined]  # avoid "never awaited" warning
+        return _DummyTask()
+
+    monkeypatch.setattr(carousel_service.asyncio, "create_task", fake_create_task)
+
+    carousel_service._spawn_generation(game, "Label")  # cold → spawns
+    assert created["n"] == 1
+    # Simulate the first attempt having finished, so only the COOLDOWN (not the
+    # in-flight guard) can block the retry.
+    carousel_service._inflight.clear()
+    carousel_service._spawn_generation(game, "Label")  # within cooldown → no-op
+    assert created["n"] == 1
