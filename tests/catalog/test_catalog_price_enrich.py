@@ -2,17 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.platform.redis_client import close_redis
 from app.services.catalog import card_search_service as css
 
 
+async def _reset() -> None:
+    for t in list(css._price_bg_tasks):
+        t.cancel()
+    if css._price_bg_tasks:
+        await asyncio.gather(*list(css._price_bg_tasks), return_exceptions=True)
+    css._price_bg_tasks.clear()
+    await close_redis()
+
+
 @pytest.fixture(autouse=True)
 async def _fresh_redis():
-    await close_redis()
+    await _reset()
     yield
-    await close_redis()
+    await _reset()
 
 
 @pytest.mark.asyncio

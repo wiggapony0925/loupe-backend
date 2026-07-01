@@ -24,12 +24,26 @@ except Exception:  # pragma: no cover
     aioredis = None  # type: ignore[assignment]
 
 
+class _NullAsyncLock:
+    """No-op async lock. The in-process stub's critical sections never ``await``
+    (pure dict ops), so single-threaded asyncio can't interleave them — a real
+    ``asyncio.Lock`` is unnecessary AND harmful here: it binds to the loop it's
+    created on and a process-wide singleton then breaks across event loops
+    (e.g. pytest-asyncio's per-test loops)."""
+
+    async def __aenter__(self) -> _NullAsyncLock:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
 class _InMemoryRedis:
     """Tiny in-process stand-in used when Redis isn't available."""
 
     def __init__(self) -> None:
         self._store: dict[str, tuple[str, float | None]] = {}
-        self._lock = asyncio.Lock()
+        self._lock = _NullAsyncLock()
 
     async def get(self, key: str) -> str | None:
         async with self._lock:
@@ -124,29 +138,35 @@ class _InMemoryRedis:
 
 
 _client: Any | None = None
-_init_lock = asyncio.Lock()
 
 
 async def get_redis() -> Any:
-    """Return a process-wide async Redis client (real or in-memory)."""
+    """Return a process-wide async Redis client (real or in-memory).
+
+    No init lock (a real ``asyncio.Lock`` breaks across event loops, e.g. under
+    pytest-asyncio). Instead, every assignment after an ``await`` is guarded by
+    ``if _client is None`` — so two concurrent cold callers converge on ONE
+    client (the first to finish wins; the loser's probe just leaks harmlessly)
+    rather than each creating a separate in-memory store.
+    """
     global _client
     if _client is not None:
         return _client
-    async with _init_lock:
-        if _client is not None:
-            return _client
-        s = get_settings()
-        if aioredis is None:
-            logger.warning("redis package unavailable; using in-process cache")
+    s = get_settings()
+    if aioredis is None:
+        logger.warning("redis package unavailable; using in-process cache")
+        if _client is None:
             _client = _InMemoryRedis()
-            return _client
-        try:
-            candidate = aioredis.from_url(s.redis_url, decode_responses=True)
-            await asyncio.wait_for(candidate.ping(), timeout=2.0)
+        return _client
+    try:
+        candidate = aioredis.from_url(s.redis_url, decode_responses=True)
+        await asyncio.wait_for(candidate.ping(), timeout=2.0)
+        if _client is None:  # nobody else won the race during our probe
             _client = candidate
             logger.info("Connected to Redis at %s", s.redis_url)
-        except Exception as exc:  # pragma: no cover - depends on env
-            logger.warning("Redis unavailable (%s); using in-process cache", exc)
+    except Exception as exc:  # pragma: no cover - depends on env
+        logger.warning("Redis unavailable (%s); using in-process cache", exc)
+        if _client is None:
             _client = _InMemoryRedis()
         return _client
 

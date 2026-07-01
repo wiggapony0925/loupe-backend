@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.platform.redis_client import close_redis
@@ -9,18 +11,27 @@ from app.services.catalog import carousel_service
 from app.services.catalog.carousel_service import _coerce
 
 
-@pytest.fixture(autouse=True)
-async def _fresh_redis():
-    await close_redis()
+async def _reset() -> None:
+    """Drain any leaked background generation tasks + clear module state so one
+    test never pollutes the next (in-flight/cooldown guards, cache)."""
+    for t in list(carousel_service._bg_tasks):
+        t.cancel()
+    if carousel_service._bg_tasks:
+        await asyncio.gather(*list(carousel_service._bg_tasks), return_exceptions=True)
+    carousel_service._bg_tasks.clear()
     carousel_service._inflight.clear()
     carousel_service._last_attempt.clear()
-    yield
     await close_redis()
+
+
+@pytest.fixture(autouse=True)
+async def _fresh_redis():
+    await _reset()
+    yield
+    await _reset()
 
 
 async def _drain() -> None:
-    import asyncio
-
     for _ in range(5):
         await asyncio.sleep(0)
         if carousel_service._bg_tasks:

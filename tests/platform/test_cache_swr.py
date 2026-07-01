@@ -11,11 +11,20 @@ from app.platform.cache_swr import swr_get_or_refresh
 from app.platform.redis_client import close_redis
 
 
+async def _reset() -> None:
+    for t in list(cache_swr._bg_tasks):
+        t.cancel()
+    if cache_swr._bg_tasks:
+        await asyncio.gather(*list(cache_swr._bg_tasks), return_exceptions=True)
+    cache_swr._bg_tasks.clear()
+    await close_redis()
+
+
 @pytest.fixture(autouse=True)
 async def _fresh_redis():
-    await close_redis()
+    await _reset()
     yield
-    await close_redis()
+    await _reset()
 
 
 async def _drain_background() -> None:
