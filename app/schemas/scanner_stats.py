@@ -37,4 +37,20 @@ class ScannerStats(BaseModel):
     scans_by_status: dict[str, int]
 
 
-__all__ = ["ScannerStats"]
+class ScannerTrendPoint(BaseModel):
+    """One day of identify activity for the speed + accuracy trend charts."""
+
+    date: str  # YYYY-MM-DD (UTC)
+    count: int
+    mean_confidence: float  # 0-1, avg top-1 confidence that day
+    latency_p50_ms: int
+    latency_p95_ms: int
+    fast_path_rate: float  # share resolved by pHash (free, instant) that day
+
+
+class ScannerTrend(BaseModel):
+    window_days: int
+    points: list[ScannerTrendPoint]
+
+
+__all__ = ["ScannerStats", "ScannerTrend", "ScannerTrendPoint"]
