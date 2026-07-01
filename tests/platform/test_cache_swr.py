@@ -106,6 +106,12 @@ async def test_concurrent_cold_miss_runs_refresh_once() -> None:
         await asyncio.sleep(0.3)  # simulate a slow catalog sync
         return {"v": calls["n"]}
 
+    # Warm the client so both concurrent callers share ONE store — we're testing
+    # the single-flight lock, not the client-init race.
+    from app.platform.redis_client import get_redis
+
+    await get_redis()
+
     key = "test:swr:concurrent"
     a, b = await asyncio.gather(
         swr_get_or_refresh(key, fresh_ttl=60, stale_ttl=600, refresh=slow_refresh),

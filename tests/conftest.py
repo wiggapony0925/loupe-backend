@@ -41,6 +41,36 @@ except Exception:
     pass
 
 
+@pytest.fixture(autouse=True)
+def _reset_process_singletons():
+    """Reset process-wide singletons around every test so state never leaks
+    across tests. Critical under CI's per-test event loops (the session
+    ``event_loop`` fixture is ignored by newer pytest-asyncio): the in-memory
+    Redis client and the fire-and-forget background-task sets would otherwise
+    carry a prior test's data/tasks into the next. Sync + direct assignment, so
+    it's event-loop-agnostic."""
+
+    def _reset() -> None:
+        from app.platform import cache_swr, redis_client
+        from app.services.catalog import card_search_service, carousel_service
+
+        redis_client._client = None
+        for taskset in (
+            cache_swr._bg_tasks,
+            carousel_service._bg_tasks,
+            card_search_service._price_bg_tasks,
+        ):
+            for task in list(taskset):
+                task.cancel()
+            taskset.clear()
+        carousel_service._inflight.clear()
+        carousel_service._last_attempt.clear()
+
+    _reset()
+    yield
+    _reset()
+
+
 @pytest.fixture(scope="session")
 def event_loop() -> Iterator[asyncio.AbstractEventLoop]:
     loop = asyncio.new_event_loop()
