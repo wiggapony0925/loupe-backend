@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.catalog import card_search_service as css
 from app.platform.redis_client import close_redis
+from app.services.catalog import card_search_service as css
 
 
 @pytest.fixture(autouse=True)
@@ -57,7 +57,7 @@ async def test_enrich_caches_negative_result(monkeypatch) -> None:
 
     async def no_price(name, set_name, card_id):
         calls["n"] += 1
-        return None
+        return
 
     monkeypatch.setattr(css, "_pricing_from_market_chain", no_price)
     cards = [{"id": "op:1", "name": "Weird Effect Name"}]
