@@ -103,55 +103,64 @@ def test_parse_recipes_tolerates_fenced_bare_array() -> None:
 @pytest.mark.asyncio
 async def test_get_carousels_ai_path_is_non_blocking(monkeypatch) -> None:
     # The request never blocks on the model: the first call returns curated
-    # instantly and generates AI in the background; the next call serves AI.
-    import asyncio
-
+    # instantly and generates AI in the background; a later call serves AI.
     from app.schemas.carousel import CarouselRecipe
 
+    # A unique game so this test can't share cooldown/cache state with another.
+    game = "ai-path-test"
+    carousel_service._inflight.clear()
+    carousel_service._last_attempt.clear()
     monkeypatch.setattr(carousel_service, "configured", lambda: True)
 
-    async def fake_gen(game: str, label: str) -> list[CarouselRecipe]:
+    async def fake_gen(g: str, label: str) -> list[CarouselRecipe]:
         return [
             CarouselRecipe(id="grails", title="Grails", subtitle="s", source="value")
         ]
 
     monkeypatch.setattr(carousel_service, "_generate_ai", fake_gen)
 
-    first = await carousel_service.get_carousels("pokemon")
+    first = await carousel_service.get_carousels(game)
     assert first.source == "curated"  # instant, never blocks on the model
 
-    # Let the background generation finish, then the cached version is AI.
-    for _ in range(5):
-        await asyncio.sleep(0)
+    # Robustly wait for the background generation to cache the AI result.
+    resp = first
+    for _ in range(100):
         if carousel_service._bg_tasks:
             await asyncio.gather(
                 *list(carousel_service._bg_tasks), return_exceptions=True
             )
+        resp = await carousel_service.get_carousels(game)
+        if resp.source == "ai":
+            break
+        await asyncio.sleep(0.02)
 
-    second = await carousel_service.get_carousels("pokemon")
-    assert second.source == "ai"
-    assert [c.id for c in second.carousels] == ["grails"]
+    assert resp.source == "ai"
+    assert [c.id for c in resp.carousels] == ["grails"]
 
 
 @pytest.mark.asyncio
 async def test_failing_model_backs_off(monkeypatch) -> None:
     # A failing key (e.g. 429 no-quota) is retried at most once per cooldown,
     # not on every marketplace load — so we don't spam the model.
+    game = "backoff-test"  # unique game → no shared cooldown state
+    carousel_service._inflight.clear()
+    carousel_service._last_attempt.clear()
     monkeypatch.setattr(carousel_service, "configured", lambda: True)
 
     calls = {"n": 0}
 
-    async def failing_gen(game: str, label: str):
+    async def failing_gen(g: str, label: str):
         calls["n"] += 1
         raise RuntimeError("429 insufficient_quota")
 
     monkeypatch.setattr(carousel_service, "_generate_ai", failing_gen)
 
-    await carousel_service.get_carousels("pokemon")  # first miss → spawns (fails)
+    await carousel_service.get_carousels(game)  # first miss → spawns (fails)
     await _drain()
+    assert calls["n"] == 1  # the one attempt happened
     # Repeated loads within the cooldown must NOT spawn more model calls.
     for _ in range(3):
-        resp = await carousel_service.get_carousels("pokemon")
+        resp = await carousel_service.get_carousels(game)
         await _drain()
         assert resp.source == "curated"  # always serves fast, never errors
     assert calls["n"] == 1  # backed off after the first failure
