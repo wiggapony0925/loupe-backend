@@ -18,9 +18,11 @@ from async code (Pillow itself releases the GIL during decode/encode).
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 from dataclasses import dataclass
+from typing import Any
 
 from app.config import get_settings
 from app.services.catalog.card_fingerprint_service import (
@@ -47,6 +49,11 @@ class PreparedImage:
     fingerprint: FingerprintResult | None
     # Final (width, height) sent to OCR; logged for cost auditing.
     size: tuple[int, int]
+    # Small orientation-normalized JPEG thumbnail (base64, no data-url
+    # prefix) of the *actual photo the user scanned* — persisted so the
+    # admin scan-history log can show what was in front of the camera.
+    # ``None`` when Pillow is unavailable or thumbnailing failed.
+    thumb_b64: str | None = None
 
 
 def prepare_image_for_ocr(image_bytes: bytes) -> PreparedImage:
@@ -76,6 +83,7 @@ def prepare_image_for_ocr(image_bytes: bytes) -> PreparedImage:
     ocr_bytes = image_bytes
     final_size = (0, 0)
     fp = None
+    thumb_b64: str | None = None
     try:
         with Image.open(io.BytesIO(image_bytes)) as im:
             im.load()
@@ -96,7 +104,16 @@ def prepare_image_for_ocr(image_bytes: bytes) -> PreparedImage:
         except Exception:
             fp = None
 
-        # 3) OCR copy: normalize exposure so under/over-lit photos read. Vision
+        # 3) Review thumbnail: a small, true-to-life JPEG of the *actual*
+        #    frame (from the oriented `base`, NOT the autocontrasted OCR copy)
+        #    for the admin scan-history log. Best-effort — never fail the scan
+        #    over a thumbnail.
+        try:
+            thumb_b64 = _encode_thumbnail(base, Image, ImageOps)
+        except Exception:
+            thumb_b64 = None
+
+        # 4) OCR copy: normalize exposure so under/over-lit photos read. Vision
         #    OCR is much more reliable on an auto-contrasted frame; a small
         #    cutoff clips sensor noise + glare without crushing the midtones.
         ocr_img = ImageOps.autocontrast(base, cutoff=1)
@@ -120,8 +137,27 @@ def prepare_image_for_ocr(image_bytes: bytes) -> PreparedImage:
                 fp = None
 
     return PreparedImage(
-        ocr_bytes=ocr_bytes, sha256=sha, fingerprint=fp, size=final_size
+        ocr_bytes=ocr_bytes,
+        sha256=sha,
+        fingerprint=fp,
+        size=final_size,
+        thumb_b64=thumb_b64,
     )
+
+
+# Long edge of the stored review thumbnail. Small enough that a base64 copy
+# TOASTs cheaply in Postgres yet stays legible in the admin history grid.
+_THUMB_MAX_EDGE = 320
+
+
+def _encode_thumbnail(base: Any, image_mod: Any, image_ops: Any) -> str | None:
+    """Return a base64 JPEG thumbnail (no data-url prefix) of ``base``."""
+    thumb = image_ops.contain(
+        base, (_THUMB_MAX_EDGE, _THUMB_MAX_EDGE), image_mod.Resampling.LANCZOS
+    )
+    out = io.BytesIO()
+    thumb.save(out, format="JPEG", quality=60, optimize=True)
+    return base64.b64encode(out.getvalue()).decode("ascii")
 
 
 __all__ = ["PreparedImage", "prepare_image_for_ocr"]

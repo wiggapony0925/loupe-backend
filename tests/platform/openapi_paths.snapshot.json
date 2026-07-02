@@ -124,6 +124,12 @@
   "/v1/admin/scanner": [
     "GET"
   ],
+  "/v1/admin/scanner/history": [
+    "GET"
+  ],
+  "/v1/admin/scanner/history/{scan_id}": [
+    "GET"
+  ],
   "/v1/admin/scanner/trend": [
     "GET"
   ],

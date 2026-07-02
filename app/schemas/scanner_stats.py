@@ -53,4 +53,80 @@ class ScannerTrend(BaseModel):
     points: list[ScannerTrendPoint]
 
 
-__all__ = ["ScannerStats", "ScannerTrend", "ScannerTrendPoint"]
+# ── Scan history log ────────────────────────────────────────────────────
+# One row per identify call, with the scanned frame + who/when/what-we-said.
+
+
+class ScanHistoryCandidate(BaseModel):
+    """One ranked candidate the scanner returned for a scan."""
+
+    upstream_id: str | None = None
+    card_id: str | None = None
+    name: str
+    confidence: float
+    source: str  # "text" | "phash" | "feedback"
+
+
+class ScanHistoryItem(BaseModel):
+    """A single scan for the admin history grid."""
+
+    id: str
+    created_at: str  # ISO-8601 UTC
+
+    # Who scanned. Null = anonymous (pre-login camera-first flow).
+    user_id: str | None = None
+    user_email: str | None = None
+
+    # The frame the user scanned, as a ready-to-render data URL (or null when
+    # no thumbnail was captured — e.g. the on-device text fallback path or a
+    # pre-migration row).
+    image_url: str | None = None
+
+    # What the scanner said.
+    top_name: str | None = None
+    top_upstream_id: str | None = None
+    top_confidence: float
+    primary_source: str  # "phash" | "text" | "none" | ...
+    candidate_count: int
+
+    # How it got there.
+    tcg_inferred: str
+    ocr_provider: str
+    parsed_title: str | None = None
+    parsed_number: str | None = None
+    latency_ms: int
+    cost_usd: float
+
+    # Whether the user later confirmed / corrected this scan (if any).
+    feedback_correct: bool | None = None
+
+
+class ScanHistoryPage(BaseModel):
+    """A cursor page of scan-history rows (newest first)."""
+
+    items: list[ScanHistoryItem]
+    # Opaque cursor for the next (older) page; null when there are no more.
+    next_cursor: str | None = None
+    total: int
+
+
+class ScanHistoryDetail(ScanHistoryItem):
+    """Full drill-down for one scan: every candidate + the raw OCR text."""
+
+    ocr_full_text: str | None = None
+    ocr_confidence: float
+    parsed_set_code: str | None = None
+    phash: str | None = None
+    image_sha256: str | None = None
+    candidates: list[ScanHistoryCandidate]
+
+
+__all__ = [
+    "ScanHistoryCandidate",
+    "ScanHistoryDetail",
+    "ScanHistoryItem",
+    "ScanHistoryPage",
+    "ScannerStats",
+    "ScannerTrend",
+    "ScannerTrendPoint",
+]

@@ -839,6 +839,7 @@ class CardIdentifier:
                 }
                 for c in candidates
             ],
+            image_thumb_b64=prepared.thumb_b64,
             latency_ms=latency_ms,
             cost_usd=cost_usd,
         )

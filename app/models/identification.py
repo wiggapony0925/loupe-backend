@@ -20,7 +20,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -70,6 +70,11 @@ class CardIdentification(Base):
     top_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     # JSON array of {card_id, upstream_id, name, confidence, source, breakdown}.
     candidates_json: Mapped[list | None] = mapped_column(JsonCol, nullable=True)
+    # Small base64 JPEG thumbnail (no data-url prefix) of the scanned frame,
+    # for the admin scan-history log. Postgres TOASTs it out-of-line so it
+    # never slows the analytics queries that don't select it. Null on the
+    # text-only fallback path (no image) and for pre-migration rows.
+    image_thumb_b64: Mapped[str | None] = mapped_column(Text, nullable=True)
     latency_ms: Mapped[int] = mapped_column(nullable=False, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(
