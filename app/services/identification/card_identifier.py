@@ -239,7 +239,7 @@ class CardIdentifier:
                 feedback_priors = {}
 
         # Step 9 — score every candidate.
-        scored: list[tuple[CandidateOut, ScoreBreakdown]] = []
+        scored: list[tuple[CandidateOut, ScoreBreakdown, tuple[int, int, str]]] = []
         for cand, source in merged:
             cand_id = cand.get("id") or ""
             prior = feedback_priors.get(cand_id, 0.0)
@@ -250,9 +250,14 @@ class CardIdentifier:
                 phash_hit=(source == "phash"),
                 feedback_prior=prior,
             )
-            scored.append((self._to_candidate(cand, source, breakdown), breakdown))
-        scored.sort(key=lambda pair: pair[0].confidence, reverse=True)
-        top_candidates = [pair[0] for pair in scored[: settings.ocr_max_candidates]]
+            scored.append(
+                (
+                    self._to_candidate(cand, source, breakdown),
+                    breakdown,
+                    self._canonical_rank_key(cand),
+                )
+            )
+        top_candidates = self._rank(scored, settings.ocr_max_candidates)
 
         # Step 10 — persist.
         accuracy = top_candidates[0].confidence if top_candidates else 0.0
@@ -351,7 +356,7 @@ class CardIdentifier:
             except Exception:
                 logger.exception("feedback prior lookup failed (text path)")
 
-        scored: list[tuple[CandidateOut, ScoreBreakdown]] = []
+        scored: list[tuple[CandidateOut, ScoreBreakdown, tuple[int, int, str]]] = []
         for cand, source in merged:
             cand_id = cand.get("id") or ""
             prior = feedback_priors.get(cand_id, 0.0)
@@ -362,9 +367,14 @@ class CardIdentifier:
                 phash_hit=False,
                 feedback_prior=prior,
             )
-            scored.append((self._to_candidate(cand, source, breakdown), breakdown))
-        scored.sort(key=lambda pair: pair[0].confidence, reverse=True)
-        top_candidates = [pair[0] for pair in scored[: settings.ocr_max_candidates]]
+            scored.append(
+                (
+                    self._to_candidate(cand, source, breakdown),
+                    breakdown,
+                    self._canonical_rank_key(cand),
+                )
+            )
+        top_candidates = self._rank(scored, settings.ocr_max_candidates)
 
         accuracy = top_candidates[0].confidence if top_candidates else 0.0
         primary_source = top_candidates[0].source if top_candidates else "none"
@@ -510,15 +520,26 @@ class CardIdentifier:
         # Pass 2 — name-only fuzzy search for carousel breadth. Try the top
         # title; only fall through to runner-ups if nothing has matched yet.
         for title in titles:
-            body = await self._catalog_lookup(
-                "text",
-                card_search_service.search_cards(q=title, tcg=tcg, limit=10),
-                {"results": []},
-            )
+            body = await self._search_name_once(title, tcg)
+            if not body.get("results"):
+                # The upstream catalog intermittently returns an
+                # empty-but-successful page for a valid name (a documented
+                # flake — see the public-browse retry-on-empty). One cheap
+                # retry recovers it before we give up on this title and show
+                # the user a spurious "no match".
+                body = await self._search_name_once(title, tcg)
             _merge(body.get("results", []))
             if seen:
                 break  # don't blow upstream budget on backups when we found hits
         return list(seen.values())
+
+    async def _search_name_once(self, title: str, tcg: str) -> dict[str, Any]:
+        """One name-only catalog search, timeout-guarded → ``{"results": [...]}``."""
+        return await self._catalog_lookup(
+            "text",
+            card_search_service.search_cards(q=title, tcg=tcg, limit=10),
+            {"results": []},
+        )
 
     async def _catalog_lookup(
         self, label: str, awaitable: Awaitable[_T], default: _T
@@ -707,6 +728,40 @@ class CardIdentifier:
             value = min(1.0, 0.4 + (int(hits) - 1) * 0.3)
             priors[chosen_card_id] = value
         return priors
+
+    @staticmethod
+    def _canonical_rank_key(cand: dict[str, Any]) -> tuple[int, int, str]:
+        """Deterministic tie-break for equal-confidence candidates.
+
+        Several printings can share a name AND collector number — Charizard
+        ``4/102`` exists in Base Set (1999), Base Set 2 (2000), and Legendary
+        Collection (2002). The weighted score ties them, so returning an
+        arbitrary one (whatever order the upstream API happened to give) made
+        the scanner feel like it "picked a random cheap reprint". We instead
+        prefer the ORIGINAL printing: earliest release year, then the smaller
+        set, then a stable id. A clean-image pHash hit still outranks this via
+        its confidence bonus, so this only ever decides genuine ties.
+        """
+        set_obj = cand.get("set") or {}
+        year = cand.get("year")
+        year_key = year if isinstance(year, int) and 1900 < year < 2100 else 9999
+        total_raw = (
+            set_obj.get("printed_total") or set_obj.get("total_cards") or 1_000_000
+        )
+        try:
+            total_key = int(total_raw)
+        except (TypeError, ValueError):
+            total_key = 1_000_000
+        return (year_key, total_key, str(cand.get("id") or ""))
+
+    @staticmethod
+    def _rank(
+        scored: list[tuple[CandidateOut, ScoreBreakdown, tuple[int, int, str]]],
+        limit: int,
+    ) -> list[CandidateOut]:
+        """Confidence desc, ties broken by the canonical printing key."""
+        scored.sort(key=lambda t: (-t[0].confidence, t[2]))
+        return [t[0] for t in scored[:limit]]
 
     @staticmethod
     def _to_candidate(

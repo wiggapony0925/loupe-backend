@@ -331,7 +331,14 @@ def generate(n: int, *, seed: int = 20260630) -> list[Scenario]:
 
 
 def rank(scenario: Scenario) -> list[tuple[dict[str, Any], float]]:
-    """Score + sort a scenario's pool exactly as the pipeline does."""
+    """Score + sort a scenario's pool exactly as the pipeline does.
+
+    Mirrors ``CardIdentifier``: confidence desc, ties broken by the canonical
+    printing key so equal-score reprints order deterministically instead of by
+    pool insertion order.
+    """
+    from app.services.identification.card_identifier import CardIdentifier
+
     scored = [
         (
             cand,
@@ -341,11 +348,12 @@ def rank(scenario: Scenario) -> list[tuple[dict[str, Any], float]]:
                 ocr_confidence=scenario.ocr_confidence,
                 phash_hit=False,
             ).final,
+            CardIdentifier._canonical_rank_key(cand),
         )
         for cand in scenario.pool
     ]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return scored
+    scored.sort(key=lambda t: (-t[1], t[2]))
+    return [(cand, final) for cand, final, _ in scored]
 
 
 __all__ = ["Scenario", "generate", "make_scenario", "rank"]
