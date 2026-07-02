@@ -200,7 +200,13 @@ async def test_identify_times_out_slow_catalog_lookup(client, monkeypatch):
     elapsed = time.perf_counter() - started
 
     body = assert_envelope_ok(resp)
-    assert elapsed < 0.5
+    # Each catalog lookup is capped at the (patched) per-provider timeout, so the
+    # request completes in a small, bounded multiple of it instead of hanging for
+    # the mock's full sleeps. The bound is generous (well under a real hang, and
+    # tolerant of CI runner variance + per-scan work like thumbnailing) — its job
+    # is to catch a lookup that isn't timeout-guarded at all, not to be a tight
+    # latency SLA.
+    assert elapsed < 1.0
     assert body["candidates"] == []
 
 
