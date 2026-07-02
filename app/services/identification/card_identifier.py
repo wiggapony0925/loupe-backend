@@ -519,14 +519,16 @@ class CardIdentifier:
 
         # Pass 2 — name-only fuzzy search for carousel breadth. Try the top
         # title; only fall through to runner-ups if nothing has matched yet.
+        # Retry an empty response ONCE, but only for pure name searches
+        # (no collector number): the upstream intermittently returns an
+        # empty-but-successful page for a valid name (a documented flake —
+        # see the public-browse retry-on-empty). When we have a number we've
+        # already run a precise lookup, so a second name search would just
+        # double latency on a genuine miss.
+        retry_empty = not parsed.card_number
         for title in titles:
             body = await self._search_name_once(title, tcg)
-            if not body.get("results"):
-                # The upstream catalog intermittently returns an
-                # empty-but-successful page for a valid name (a documented
-                # flake — see the public-browse retry-on-empty). One cheap
-                # retry recovers it before we give up on this title and show
-                # the user a spurious "no match".
+            if retry_empty and not body.get("results"):
                 body = await self._search_name_once(title, tcg)
             _merge(body.get("results", []))
             if seen:
