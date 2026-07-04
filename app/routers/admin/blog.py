@@ -13,7 +13,7 @@ from app.models.enums import BlogStatusEnum
 from app.models.user import User
 from app.schemas.portal import BlogPostCreate, BlogPostRead, BlogPostUpdate
 from app.services import audit_service, email_service
-from app.services.auth import user_service
+from app.services.auth import unsubscribe_service, user_service
 from app.services.portal import blog_service
 
 router = APIRouter(prefix="/blog", tags=["admin-blog"])
@@ -22,15 +22,26 @@ _PUBLISHED = BlogStatusEnum.published.value
 
 
 async def _announce(db: AsyncSession, background: BackgroundTasks, post) -> None:
-    """Queue a 'new post' email to active users (best-effort, after response)."""
-    emails = await user_service.active_emails(db)
-    if emails:
+    """Queue a 'new post' email to subscribed users (best-effort, after response).
+
+    Announcement-class mail: recipients honor the per-user opt-out and each
+    message gets that user's signed one-click unsubscribe link.
+    """
+    recipients = [
+        (email, unsubscribe_service.unsubscribe_url(uid))
+        for uid, email in await user_service.announcement_recipients(db)
+    ]
+    if recipients:
         background.add_task(
             email_service.send_blog_announcement,
-            emails,
+            recipients,
             title=post.title,
             excerpt=post.excerpt,
             slug=post.slug,
+            cover_image_url=post.cover_image_url,
+            tag=post.tag,
+            author=post.author,
+            read_minutes=post.read_minutes,
         )
 
 

@@ -157,9 +157,18 @@ async def admin_update_status(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Waitlist entry not found"
         )
+    previous_status = entry.status
     entry.status = payload.status.value
     await db.commit()
     await db.refresh(entry)
+    # The confirmation email promises "we'll email you when your spot opens
+    # up" — advancing to `invited` is that moment. Transition-only (re-saving
+    # `invited` stays silent) and best-effort, after the commit.
+    if (
+        entry.status == WaitlistStatusEnum.invited.value
+        and previous_status != WaitlistStatusEnum.invited.value
+    ):
+        await email_service.send_waitlist_invite(entry.email, name=entry.name)
     return WaitlistEntryRead.model_validate(entry)
 
 

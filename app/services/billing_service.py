@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.user import User
+from app.services import email_service
 
 # Subscription statuses that grant Pro. `past_due` stays Pro through Stripe's
 # retry window; only a hard cancel/expiry drops access.
@@ -330,6 +331,7 @@ async def _apply_subscription(db: AsyncSession, sub: Any) -> None:
         return
     status_str = sub.get("status")
     is_active = status_str in _ACTIVE_STATUSES
+    was_pro = user.plan == "pro"
     user.stripe_subscription_id = sub.get("id")
     user.pro_trialing = status_str == "trialing"
     if is_active:
@@ -342,6 +344,17 @@ async def _apply_subscription(db: AsyncSession, sub: Any) -> None:
         user.pro_trialing = False
         user.pro_expires_at = _period_end(sub) or datetime.now(UTC)
     await db.commit()
+    # Email only on the plan *transition* — subscription.updated fires on
+    # every renewal and must stay silent. Best-effort, after commit. The
+    # idempotency key makes Stripe's webhook redelivery safe from doubles.
+    if is_active and not was_pro:
+        await email_service.send_pro_activated(
+            user, idempotency_key=f"pro-activated-{sub.get('id')}"
+        )
+    elif was_pro and not is_active:
+        await email_service.send_pro_canceled(
+            user, idempotency_key=f"pro-canceled-{sub.get('id')}"
+        )
 
 
 async def _handle_checkout_completed(db: AsyncSession, session: Any) -> None:
@@ -362,9 +375,14 @@ async def _handle_checkout_completed(db: AsyncSession, session: Any) -> None:
         sub = stripe.Subscription.retrieve(sub_id)
         await _apply_subscription(db, sub)
     else:
+        was_pro = user.plan == "pro"
         user.plan = "pro"
         user.pro_since = user.pro_since or datetime.now(UTC)
         await db.commit()
+        if not was_pro:
+            await email_service.send_pro_activated(
+                user, idempotency_key=f"pro-activated-{session.get('id')}"
+            )
 
 
 def _as_uuid(value: str) -> Any:

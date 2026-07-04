@@ -183,6 +183,26 @@ async def generate_report(
         row.error_message = f"{stage}: {exc}"[:500]
     await db.commit()
     await db.refresh(row)
+    # "Your statement is ready" — the scheduler generates these while the
+    # user is away, so email is how they learn the period closed (Amex
+    # mails theirs too). After commit, best-effort; the idempotency key
+    # stops a same-day regeneration from double-mailing.
+    if row.status is ReportStatusEnum.ready:
+        from app.services import email_service
+
+        # Real numbers from the snapshot power the chart + stat tiles in the
+        # email. getattr-guarded: tests stub the snapshot with a bare dict.
+        series_points = getattr(snap, "series", None) or []
+        series = [float(p.value_usd) for p in series_points][-24:]
+        await email_service.send_statement_ready(
+            user,
+            title=title,
+            idempotency_key=f"statement-ready-{row.id}",
+            total_value_usd=getattr(snap, "closing_value_usd", None),
+            delta_pct=getattr(snap, "delta_pct", None),
+            card_count=getattr(snap, "card_count", None),
+            series=series if len(series) >= 2 else None,
+        )
     return row
 
 

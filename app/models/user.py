@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -40,6 +40,13 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(default=False, nullable=False)
     # Set when an admin bans the account. Banned users are rejected at auth
     # (like soft-deleted users) but the row + reason are retained.
+    # When the user proved they own their email (clicked the signed link, or
+    # arrived via Apple/Google which verify addresses upstream). NULL =
+    # unverified; nothing is gated on it yet — it's trust signal + a nudge.
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     banned_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -113,6 +120,11 @@ class User(Base):
         cascade="all, delete-orphan",
     )
 
+    @property
+    def email_verified(self) -> bool:
+        """Read by ``UserRead`` (pydantic ``from_attributes``)."""
+        return self.email_verified_at is not None
+
 
 class UserSettings(Base):
     """Per-user app preferences (theme, currency, sync flags)."""
@@ -127,6 +139,12 @@ class UserSettings(Base):
     live_sync_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
     push_notifications_enabled: Mapped[bool] = mapped_column(
         default=True, nullable=False
+    )
+    # Announcement-class email (blog posts, product updates). Transactional
+    # mail (security notices, receipts, alerts they created) is NOT gated on
+    # this — only the marketing-ish blasts, per CAN-SPAM.
+    email_announcements_enabled: Mapped[bool] = mapped_column(
+        default=True, server_default=true(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

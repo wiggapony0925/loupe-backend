@@ -29,6 +29,19 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=128)
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Body for ``POST /v1/auth/forgot-password`` (public, always 204)."""
+
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    """Body for ``POST /v1/auth/reset-password`` (public, token from email)."""
+
+    token: str = Field(..., min_length=10, max_length=300)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
 class DevLoginRequest(BaseModel):
     """Body for ``POST /v1/auth/dev-login`` (dev/test only, no password)."""
 
@@ -138,6 +151,7 @@ __all__ = [
     "DevLoginRequest",
     "EmailSignInRequest",
     "EmailSignUpRequest",
+    "ForgotPasswordRequest",
     "GoogleSignInRequest",
     "LoginResult",
     "MfaCodeRequest",
@@ -146,5 +160,6 @@ __all__ = [
     "MfaStatusResponse",
     "MfaVerifyRequest",
     "RefreshRequest",
+    "ResetPasswordRequest",
     "TokenPair",
 ]

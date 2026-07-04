@@ -115,6 +115,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         _log.info("loupe-backend shutting down")
+        # Flush queued transactional email before tearing anything down —
+        # a welcome/security notice queued moments ago should still go out.
+        with contextlib.suppress(Exception):
+            from app.services import email_service
+
+            await email_service.drain(timeout=10.0)
         for task in _app_state.background_tasks:
             task.cancel()
         for task in _app_state.background_tasks:

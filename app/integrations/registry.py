@@ -220,7 +220,7 @@ class ProviderRegistry:
 
 
 @lru_cache(maxsize=1)
-def get_registry() -> ProviderRegistry:
+def _default_registry() -> ProviderRegistry:
     return ProviderRegistry(
         providers=[
             EbayProvider(),
@@ -243,9 +243,37 @@ def get_registry() -> ProviderRegistry:
     )
 
 
+#: When set, ``get_registry`` returns this instead of the real provider set.
+#: The test suite installs an EMPTY registry here so unit tests never fan out
+#: to live market-data APIs (see ``tests/conftest.py``).
+_override: ProviderRegistry | None = None
+
+
+def get_registry() -> ProviderRegistry:
+    if _override is not None:
+        return _override
+    return _default_registry()
+
+
+def set_registry_override(registry: ProviderRegistry | None) -> None:
+    """Test helper: force ``get_registry()`` to return ``registry``.
+
+    Pass ``None`` to go back to the real provider set.
+    """
+    global _override
+    _override = registry
+
+
 def reset_registry() -> None:
-    """Test helper: clear the cached singleton."""
-    get_registry.cache_clear()
+    """Test helper: clear any override and the cached real singleton."""
+    global _override
+    _override = None
+    _default_registry.cache_clear()
 
 
-__all__ = ["ProviderRegistry", "get_registry", "reset_registry"]
+__all__ = [
+    "ProviderRegistry",
+    "get_registry",
+    "reset_registry",
+    "set_registry_override",
+]

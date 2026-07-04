@@ -7,6 +7,7 @@ from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
 from app.models.career import ApplicationEvent, JobApplication, JobPosting
 from app.models.collection import Collection, CollectionItem
+from app.models.email_log import EmailLog
 from app.models.enums import (
     ApplicationStatusEnum,
     BlogStatusEnum,
@@ -31,6 +32,7 @@ from app.models.grade import GradedCard
 from app.models.identification import CardIdentification, IdentificationFeedback
 from app.models.price import PriceSnapshot
 from app.models.price_alert import PriceAlert
+from app.models.push_token import PushToken
 from app.models.scan import ScanJob
 from app.models.scanner import Scanner
 from app.models.sealed import SealedHolding, SealedProduct
@@ -54,6 +56,7 @@ __all__ = [
     "CardSet",
     "Collection",
     "CollectionItem",
+    "EmailLog",
     "EmploymentTypeEnum",
     "FeatureFlag",
     "Fingerprint",
@@ -67,6 +70,7 @@ __all__ = [
     "PriceAlertCondition",
     "PriceSnapshot",
     "PriceSourceEnum",
+    "PushToken",
     "RawConditionEnum",
     "ReportPeriodEnum",
     "ReportStatusEnum",

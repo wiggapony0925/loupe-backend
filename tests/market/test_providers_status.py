@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import pytest
 
+from app.integrations.registry import reset_registry
 from tests.conftest import assert_envelope_ok
+
+
+@pytest.fixture(autouse=True)
+def _real_registry():
+    """This test asserts the REAL provider catalog — clear the empty-registry
+    override installed by conftest. ``status()`` is config-only, no network."""
+    reset_registry()
+    yield
+    reset_registry()
 
 
 @pytest.mark.asyncio

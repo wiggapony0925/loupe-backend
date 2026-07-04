@@ -18,6 +18,9 @@ class UserRead(BaseModel):
     display_name: str | None = None
     avatar_url: str | None = None
     created_at: datetime
+    # Whether they've proven ownership of the address (verify link clicked,
+    # or a social provider vouched for it). Informational — nothing gated.
+    email_verified: bool = False
     # Whether this user is in the admin allowlist — drives access to the
     # developer portal in the clients. Computed server-side; never trusted
     # from the client. Set by the `/me` handler from the email allowlist.
@@ -40,6 +43,7 @@ class UserSettingsRead(BaseModel):
     theme: str = "system"
     live_sync_enabled: bool = True
     push_notifications_enabled: bool = True
+    email_announcements_enabled: bool = True
     updated_at: datetime | None = None
 
 
@@ -50,6 +54,7 @@ class UserSettingsUpdate(BaseModel):
     theme: str | None = Field(default=None, pattern="^(system|light|dark)$")
     live_sync_enabled: bool | None = None
     push_notifications_enabled: bool | None = None
+    email_announcements_enabled: bool | None = None
 
 
 __all__ = ["UserRead", "UserSettingsRead", "UserSettingsUpdate", "UserUpdate"]

@@ -15,7 +15,7 @@ from app.http.response_envelope import register_envelope_middleware
 from app.lifecycle import lifespan
 from app.platform.observability import init_otel, init_sentry
 from app.platform.startup_checks import validate_production_config
-from app.routers import billing
+from app.routers import billing, email_webhook
 from app.routers.admin import admin_router
 from app.routers.analytics import home_feed as home
 from app.routers.analytics import portfolio_overview as analytics
@@ -35,6 +35,8 @@ from app.routers.portal import careers as portal_careers
 from app.routers.portal import waitlist as portal_waitlist
 from app.routers.public import share as public_share
 from app.routers.public import storefront as public
+from app.routers.public import unsubscribe as public_unsubscribe
+from app.routers.public import verify_email as public_verify_email
 
 
 def create_app() -> FastAPI:
@@ -108,6 +110,8 @@ def create_app() -> FastAPI:
     app.include_router(cards.router, prefix=api_prefix)
     app.include_router(public.router, prefix=api_prefix)
     app.include_router(public_share.router, prefix=api_prefix)
+    app.include_router(public_unsubscribe.router, prefix=api_prefix)
+    app.include_router(public_verify_email.router, prefix=api_prefix)
     app.include_router(identify.router, prefix=api_prefix)
     app.include_router(image_proxy.router, prefix=api_prefix)
     app.include_router(sets.router, prefix=api_prefix)
@@ -131,6 +135,7 @@ def create_app() -> FastAPI:
     app.include_router(flags.router, prefix=api_prefix)
     app.include_router(announcement.router, prefix=api_prefix)
     app.include_router(billing.router, prefix=api_prefix)
+    app.include_router(email_webhook.router, prefix=api_prefix)
     app.include_router(admin_router, prefix=api_prefix)
 
     # WebSockets mount at root.

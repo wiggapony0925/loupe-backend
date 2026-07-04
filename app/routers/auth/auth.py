@@ -17,8 +17,10 @@ from app.db import get_db
 from app.models.user import User
 from app.platform.rate_limit import (
     change_password_limit,
+    forgot_password_limit,
     login_limit,
     mfa_verify_limit,
+    reset_password_limit,
 )
 from app.schemas.auth import (
     AppleSignInRequest,
@@ -26,6 +28,7 @@ from app.schemas.auth import (
     DevLoginRequest,
     EmailSignInRequest,
     EmailSignUpRequest,
+    ForgotPasswordRequest,
     GoogleSignInRequest,
     LoginResult,
     MfaCodeRequest,
@@ -34,11 +37,17 @@ from app.schemas.auth import (
     MfaStatusResponse,
     MfaVerifyRequest,
     RefreshRequest,
+    ResetPasswordRequest,
     TokenPair,
 )
 from app.schemas.user import UserRead
 from app.services import email_service
-from app.services.auth import mfa_service, user_service
+from app.services.auth import (
+    email_verify_service,
+    mfa_service,
+    password_reset_service,
+    user_service,
+)
 from app.services.auth.mfa_service import MfaError
 from app.services.auth.user_service import AccountLockedError, EmailAlreadyExistsError
 from app.utils.logger import get_logger
@@ -115,7 +124,11 @@ async def register(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with that email already exists.",
         ) from exc
-    await email_service.send_welcome(user)  # best-effort; no-op without a provider
+    # Best-effort; no-op without a provider. Password signups haven't proven
+    # the address, so the welcome carries the confirm-email CTA.
+    await email_service.send_welcome(
+        user, verify_url=email_verify_service.verify_url(str(user.id))
+    )
     return _issue(
         response,
         user.id,
@@ -343,11 +356,62 @@ async def change_password(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Current password is incorrect.",
         ) from exc
+    # Security notice — if an attacker changed it, this is how the real
+    # owner finds out. Best-effort; no-op without a provider.
+    await email_service.send_password_changed(updated)
     return _issue(
         response,
         updated.id,
         UserRead.model_validate(updated),
         token_version=updated.token_version,
+    )
+
+
+# ── Forgot / reset password ───────────────────────────────────────────────
+
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Email a password-reset link (always 204)",
+)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+    _throttle: None = Depends(forgot_password_limit),
+) -> None:
+    """Request a reset link. Responds 204 whether or not the account exists,
+    so the endpoint can't be used to enumerate emails."""
+    await password_reset_service.request_reset(db, payload.email)
+
+
+@router.post(
+    "/reset-password",
+    response_model=TokenPair,
+    summary="Set a new password from an emailed reset token",
+)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _throttle: None = Depends(reset_password_limit),
+) -> TokenPair:
+    """Complete the reset. The token is single-use and revokes every other
+    session; a fresh token pair signs this device straight in."""
+    try:
+        user = await password_reset_service.perform_reset(
+            db, payload.token, payload.new_password
+        )
+    except password_reset_service.ResetTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That reset link is invalid or has expired. Request a new one.",
+        ) from exc
+    return _issue(
+        response,
+        user.id,
+        UserRead.model_validate(user),
+        token_version=user.token_version,
     )
 
 
@@ -433,6 +497,7 @@ async def mfa_enable(
         codes = await mfa_service.confirm_enrollment(db, user, payload.code)
     except MfaError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await email_service.send_mfa_enabled(user)  # best-effort security notice
     return MfaEnableResponse(backup_codes=codes)
 
 
@@ -450,6 +515,7 @@ async def mfa_disable(
         await mfa_service.disable(db, user, payload.code)
     except MfaError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    await email_service.send_mfa_disabled(user)  # best-effort security notice
 
 
 __all__ = ["router"]

@@ -69,6 +69,19 @@ def _public_key() -> bytes:
     return _ensure_ephemeral_keys()[1]
 
 
+def derive_hmac_key(purpose: str) -> bytes:
+    """Derive a purpose-bound symmetric key from the JWT signing material.
+
+    For compact non-JWT signatures (e.g. email unsubscribe links) where an
+    RS256 token would be overkill. Same custody rules as the private key:
+    stable across pods in prod (configured PEM), per-process in dev
+    (ephemeral key — dev links break on restart, which is fine).
+    """
+    import hashlib
+
+    return hashlib.sha256(_private_key() + b"|" + purpose.encode("utf-8")).digest()
+
+
 def issue_token(
     user_id: uuid.UUID | str,
     token_type: TokenType = "access",
@@ -146,4 +159,4 @@ def verify_token(token: str, expected_type: TokenType | None = None) -> dict[str
     return decoded
 
 
-__all__ = ["issue_mfa_token", "issue_token", "verify_token"]
+__all__ = ["derive_hmac_key", "issue_mfa_token", "issue_token", "verify_token"]

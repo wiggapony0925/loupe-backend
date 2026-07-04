@@ -7,11 +7,22 @@ catalog/config logic without any outbound calls.
 import pytest
 
 from app.config import Settings
+from app.integrations.registry import reset_registry
 from app.services.admin import integration_service
 
 
 def _settings(**over) -> Settings:
     return Settings(_env_file=None, **over)
+
+
+@pytest.fixture(autouse=True)
+def _real_registry():
+    """The report folds in the REAL provider catalog — clear the
+    empty-registry override installed by conftest (probe=False keeps these
+    tests offline)."""
+    reset_registry()
+    yield
+    reset_registry()
 
 
 @pytest.mark.asyncio

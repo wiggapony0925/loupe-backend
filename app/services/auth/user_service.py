@@ -75,6 +75,29 @@ async def active_emails(db: AsyncSession) -> list[str]:
     return [email for (email,) in rows if email]
 
 
+async def announcement_recipients(db: AsyncSession) -> list[tuple[str, str]]:
+    """``(user_id, email)`` of active users who accept announcement email.
+
+    Like :func:`active_emails` but honors the per-user opt-out
+    (``UserSettings.email_announcements_enabled``); users without a settings
+    row default to subscribed. Use this — never ``active_emails`` — for
+    blog/product-update blasts so unsubscribes stick.
+    """
+    rows = (
+        await db.execute(
+            select(User.id, User.email)
+            .outerjoin(UserSettings, UserSettings.user_id == User.id)
+            .where(
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+                (UserSettings.user_id.is_(None))
+                | (UserSettings.email_announcements_enabled.is_(True)),
+            )
+        )
+    ).all()
+    return [(str(uid), email) for uid, email in rows if email]
+
+
 async def get_by_apple_subject(db: AsyncSession, sub: str) -> User | None:
     return (
         await db.execute(select(User).where(User.apple_subject == sub))
@@ -263,12 +286,15 @@ async def find_or_create_by_apple(
         user = await get_by_email(db, email)
         if user is not None and user.apple_subject is None:
             user.apple_subject = apple_sub
+    created = user is None
     if user is None:
         effective_email = (email or f"apple+{apple_sub}@users.loupe.app").lower()
         user = User(
             email=effective_email,
             display_name=display_name,
             apple_subject=apple_sub,
+            # Apple verifies addresses before releasing them to us.
+            email_verified_at=datetime.now(UTC),
         )
         db.add(user)
         await db.flush()
@@ -276,6 +302,13 @@ async def find_or_create_by_apple(
     await _ensure_settings(db, user)
     await db.commit()
     await db.refresh(user)
+    if created:
+        # Same welcome the /register path sends; best-effort. Skip the
+        # synthetic relay address minted when Apple hides the real email.
+        from app.services import email_service
+
+        if not user.email.endswith("@users.loupe.app"):
+            await email_service.send_welcome(user)
     return user
 
 
@@ -295,6 +328,7 @@ async def find_or_create_by_google(
         user = await get_by_email(db, email)
         if user is not None and user.google_subject is None:
             user.google_subject = google_sub
+    created = user is None
     if user is None:
         effective_email = (email or f"google+{google_sub}@users.loupe.app").lower()
         user = User(
@@ -302,6 +336,8 @@ async def find_or_create_by_google(
             display_name=display_name,
             avatar_url=avatar_url,
             google_subject=google_sub,
+            # Google verifies addresses before releasing them to us.
+            email_verified_at=datetime.now(UTC),
         )
         db.add(user)
         await db.flush()
@@ -311,6 +347,11 @@ async def find_or_create_by_google(
     await _ensure_settings(db, user)
     await db.commit()
     await db.refresh(user)
+    if created:
+        from app.services import email_service
+
+        if not user.email.endswith("@users.loupe.app"):
+            await email_service.send_welcome(user)
     return user
 
 
@@ -339,6 +380,8 @@ async def update_settings(
         settings.live_sync_enabled = patch.live_sync_enabled
     if patch.push_notifications_enabled is not None:
         settings.push_notifications_enabled = patch.push_notifications_enabled
+    if patch.email_announcements_enabled is not None:
+        settings.email_announcements_enabled = patch.email_announcements_enabled
     await db.commit()
     await db.refresh(settings)
     return settings

@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_admin_user, require_user
 from app.db import get_db
+from app.models.push_token import PushToken
 from app.models.user import User
 from app.models.user_recents import UserRecents
+from app.platform.rate_limit import verify_email_limit
 from app.schemas.entitlement import EntitlementsRead
 from app.schemas.user import (
     UserRead,
@@ -19,8 +21,8 @@ from app.schemas.user import (
     UserSettingsUpdate,
     UserUpdate,
 )
-from app.services import billing_service, entitlement_service
-from app.services.auth import user_service
+from app.services import billing_service, email_service, entitlement_service
+from app.services.auth import email_verify_service, user_service
 
 router = APIRouter(prefix="/me", tags=["users"])
 
@@ -45,6 +47,82 @@ async def patch_me(
 ) -> UserRead:
     updated = await user_service.update_profile(db, user, payload)
     return _to_user_read(updated)
+
+
+class PushTokenRegister(BaseModel):
+    """Body for ``POST /v1/me/push-tokens`` (device registration)."""
+
+    token: str = Field(..., min_length=10, max_length=200)
+    platform: str = Field(default="ios", pattern="^(ios|android)$")
+
+
+class VerifyEmailResendResponse(BaseModel):
+    sent: bool
+    already_verified: bool = False
+
+
+@router.post(
+    "/push-tokens",
+    status_code=204,
+    summary="Register this device for push notifications",
+)
+async def register_push_token(
+    payload: PushTokenRegister,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Idempotent upsert by token — a device that re-registers (or switches
+    accounts) moves to the caller, never duplicates."""
+    from sqlalchemy import select
+
+    existing = (
+        await db.execute(select(PushToken).where(PushToken.token == payload.token))
+    ).scalar_one_or_none()
+    if existing is None:
+        db.add(
+            PushToken(user_id=user.id, token=payload.token, platform=payload.platform)
+        )
+    else:
+        existing.user_id = user.id
+        existing.platform = payload.platform
+    await db.commit()
+
+
+@router.delete(
+    "/push-tokens/{token}",
+    status_code=204,
+    summary="Unregister a device (sign-out)",
+)
+async def remove_push_token(
+    token: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(
+        sa_delete(PushToken).where(
+            PushToken.token == token, PushToken.user_id == user.id
+        )
+    )
+    await db.commit()
+
+
+@router.post(
+    "/verify-email/resend",
+    response_model=VerifyEmailResendResponse,
+    summary="Re-send the email-confirmation link",
+)
+async def resend_verify_email(
+    user: User = Depends(require_user),
+    _throttle: None = Depends(verify_email_limit),
+) -> VerifyEmailResendResponse:
+    if user.email_verified_at is not None:
+        return VerifyEmailResendResponse(sent=False, already_verified=True)
+    sent = await email_service.send_verify_email(
+        user, email_verify_service.verify_url(str(user.id))
+    )
+    return VerifyEmailResendResponse(sent=sent)
 
 
 @router.get("/settings", response_model=UserSettingsRead, summary="Get user settings")

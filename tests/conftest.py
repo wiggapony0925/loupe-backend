@@ -26,6 +26,12 @@ for _k in (
     os.environ.pop(_k, None)
 os.environ["S3_ACCESS_KEY_ID"] = ""
 os.environ["S3_SECRET_ACCESS_KEY"] = ""
+# Force email OFF during tests: a developer's .env may hold a real
+# RESEND_API_KEY (local sends), and tests must never hit the provider —
+# email-path tests opt back in by monkeypatching settings + the HTTP client.
+os.environ["RESEND_API_KEY"] = ""
+os.environ["NOTIFICATIONS_FROM_EMAIL"] = ""
+os.environ["RESEND_WEBHOOK_SECRET"] = ""
 
 from app.config import reload_settings  # noqa: E402
 from app.db import Base, get_db, reset_engine  # noqa: E402
@@ -69,6 +75,30 @@ def _reset_process_singletons():
     _reset()
     yield
     _reset()
+
+
+@pytest.fixture(autouse=True)
+def _offline_provider_registry():
+    """Serve an EMPTY provider registry to every test by default.
+
+    The real registry fans out to live market-data APIs (PriceCharting, eBay,
+    130point, pokemontcg.io, …) and the developer's ``.env`` carries real API
+    keys, so any unpatched path through ``get_registry()`` — e.g. ``get_card``'s
+    market-chain price enrichment for a card with no embedded pricing — hits
+    the actual network mid-test. That is slow, burns paid quota, and makes
+    tests nondeterministic: a card the test declared priceless comes back with
+    today's real market price whenever the API answers within the fan-out
+    timeout.
+
+    Tests that exercise the registry itself opt back in with
+    ``reset_registry()`` (clears this override), and service tests that need a
+    fake keep monkeypatching their module's ``get_registry`` binding as before.
+    """
+    from app.integrations.registry import ProviderRegistry, set_registry_override
+
+    set_registry_override(ProviderRegistry(providers=[]))
+    yield
+    set_registry_override(None)
 
 
 @pytest_asyncio.fixture(autouse=True)

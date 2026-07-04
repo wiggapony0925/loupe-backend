@@ -1,15 +1,17 @@
 """Applicant notifications.
 
 When an application's status changes the admin can choose to notify the
-applicant. Delivery uses Resend (a cheap, single-POST transactional-email
-API) when configured via ``RESEND_API_KEY`` + ``NOTIFICATIONS_FROM_EMAIL``;
-otherwise the intent is logged and the applicant can still see the update on
-the public tracking page. Either way this is best-effort and never raises —
-a notification failure must not roll back the status change itself.
+applicant. Delivery uses the shared branded template in
+:mod:`app.services.email_service` (Resend) when configured via
+``RESEND_API_KEY`` + ``NOTIFICATIONS_FROM_EMAIL``; otherwise the intent is
+logged and the applicant can still see the update on the public tracking
+page. Either way this is best-effort and never raises — a notification
+failure must not roll back the status change itself.
 """
 
 from __future__ import annotations
 
+import html
 from urllib.parse import quote
 
 from app.config import get_settings
@@ -38,30 +40,50 @@ def _track_url(application: JobApplication) -> str:
 
 def _build_email(
     application: JobApplication, event: ApplicationEvent
-) -> tuple[str, str]:
-    """Return (subject, html) for the status-update email."""
+) -> tuple[str, str, str]:
+    """Return (subject, html, text) for the status-update email."""
+    from app.services.email_templates.base import callout, chip, progress_steps
+
     headline = _STATUS_COPY.get(event.status, "An update on your application")
-    subject = f"{headline} — Loupe"
-    track = _track_url(application)
-    note = (
-        f'<p style="margin:16px 0;padding:12px 16px;background:#f5f5f7;'
-        f'border-radius:10px;color:#1c1c1e;">{event.message}</p>'
-        if event.message
+    status_tone = {
+        "interview": "mint",
+        "offer": "mint",
+        "hired": "mint",
+        "rejected": "neutral",
+        "withdrawn": "neutral",
+    }.get(event.status, "amber")
+    # The hiring pipeline as a progress bar; terminal states skip it.
+    pipeline_index = {
+        "submitted": 0,
+        "reviewing": 1,
+        "interview": 2,
+        "offer": 3,
+        "hired": 3,
+    }
+    pipeline = (
+        progress_steps(
+            ["Received", "Review", "Interview", "Offer"],
+            pipeline_index[event.status],
+        )
+        if event.status in pipeline_index
         else ""
     )
-    html = (
-        f'<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;'
-        f'max-width:520px;margin:0 auto;color:#1c1c1e;">'
-        f'<h2 style="color:#0b0b0d;">Hi {application.applicant_name},</h2>'
-        f"<p>{headline}.</p>"
+    note = callout(html.escape(event.message), tone="neutral") if event.message else ""
+    body = (
+        f"<p>Hi {html.escape(application.applicant_name)} — {headline[0].lower()}"
+        f"{headline[1:]}.</p>"
+        f"{pipeline}"
+        f'<p style="margin:6px 0 0;">{chip(event.status, tone=status_tone)}</p>'
         f"{note}"
-        f'<p style="margin:24px 0;">'
-        f'<a href="{track}" style="background:#00a86e;color:#fff;text-decoration:none;'
-        f'padding:12px 20px;border-radius:10px;font-weight:600;">View your application</a></p>'
-        f'<p style="color:#6e6e73;font-size:13px;">— The Loupe team</p>'
-        f"</div>"
     )
-    return subject, html
+    rendered_html, text = email_service.render_email(
+        headline + ".",
+        body,
+        ("View your application", _track_url(application)),
+        preheader=headline,
+        eyebrow="Your application",
+    )
+    return f"{headline} — Loupe", rendered_html, text
 
 
 async def notify_applicant(
@@ -69,8 +91,10 @@ async def notify_applicant(
 ) -> bool:
     """Email the applicant about a status change. Returns True if accepted by
     the provider, False if it was only logged (no provider / send failed)."""
-    subject, html = _build_email(application, event)
-    return await email_service.send_email(application.applicant_email, subject, html)
+    subject, rendered_html, text = _build_email(application, event)
+    return await email_service.send_email(
+        application.applicant_email, subject, rendered_html, text, category="careers"
+    )
 
 
 __all__ = ["notify_applicant"]

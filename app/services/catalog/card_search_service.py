@@ -1239,6 +1239,123 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
     return await _fallback_or(body)
 
 
+_SCRYFALL_PAGE_SIZE = 175  # fixed by Scryfall's API
+
+
+async def search_cards_paged(
+    q: str, tcg: str, page: int, page_size: int
+) -> dict[str, Any]:
+    """Deep search with TRUE upstream pagination — the full-results page.
+
+    :func:`search_cards` is a ranked top-N built for the typeahead; capping
+    it made popular names look incomplete (Pikachu has 177 printings,
+    Charizard 400+ — users only ever saw the first few dozen). This walks
+    the provider's own pagination instead, so **every printing is
+    reachable** and ``total`` is the provider's real count.
+
+    ``all`` keeps the pooled cross-provider behavior (three catalogs can't
+    share a page cursor); pick a game to page the entire catalog.
+    """
+    q = (q or "").strip()
+    tcg = (tcg or "all").lower()
+    page = max(1, page)
+    page_size = max(1, min(page_size, 60))
+    if not q:
+        return {**_empty(tcg), "page": page, "page_size": page_size}
+    if tcg in UNSUPPORTED_TCGS:
+        return {
+            **_empty(tcg, error="provider_not_configured"),
+            "page": page,
+            "page_size": page_size,
+        }
+
+    cache_key = f"loupe:cards:search-paged:{tcg}:{q.lower()}:{page}:{page_size}"
+    cached = await _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        if tcg == "pokemon":
+            raw = await pokemon_tcg.search_cards(
+                _build_pokemon_query(q),
+                page=page,
+                page_size=page_size,
+                order_by="-set.releaseDate",
+            )
+            items = [_from_pokemon(c) for c in (raw.get("data") or [])]
+            total = int(raw.get("totalCount") or 0)
+            # Nothing under the strict query? Fall back to the forgiving
+            # substring search so partial names still page through results.
+            if total == 0:
+                relaxed = _build_pokemon_relaxed_query(q)
+                if relaxed:
+                    raw = await pokemon_tcg.search_cards(
+                        relaxed, page=page, page_size=page_size
+                    )
+                    items = [_from_pokemon(c) for c in (raw.get("data") or [])]
+                    total = int(raw.get("totalCount") or len(items))
+            body = {"results": items, "total": total, "source": "pokemontcg"}
+        elif tcg == "magic":
+            # Scryfall pages are a fixed 175 — map our (page, page_size)
+            # window onto its pages and slice.
+            start = (page - 1) * page_size
+            sc_page = start // _SCRYFALL_PAGE_SIZE + 1
+            offset = start % _SCRYFALL_PAGE_SIZE
+            raw = await scryfall.search_cards(q, page=sc_page)
+            pool = [_from_scryfall(c) for c in (raw.get("data") or [])]
+            if offset + page_size > len(pool) and raw.get("has_more"):
+                raw2 = await scryfall.search_cards(q, page=sc_page + 1)
+                pool += [_from_scryfall(c) for c in (raw2.get("data") or [])]
+            body = {
+                "results": pool[offset : offset + page_size],
+                "total": int(raw.get("total_cards") or len(pool)),
+                "source": "scryfall",
+            }
+        elif tcg == "yugioh":
+            # YGOPRODeck returns every match in one payload — slice locally.
+            raw = await ygoprodeck.search_cards(q)
+            pool = [_from_yugioh(c) for c in (raw.get("data") or [])]
+            start = (page - 1) * page_size
+            body = {
+                "results": pool[start : start + page_size],
+                "total": len(pool),
+                "source": "ygoprodeck",
+            }
+        elif tcg in ("digimon", "onepiece"):
+            catalog = await (
+                digimon_catalog() if tcg == "digimon" else onepiece_catalog()
+            )
+            pool = _filter_catalog(catalog, q, 10_000)
+            start = (page - 1) * page_size
+            body = {
+                "results": pool[start : start + page_size],
+                "total": len(pool),
+                "source": "catalog",
+            }
+        else:  # "all" — pooled top-N (cross-provider cursors don't exist)
+            pooled = await search_cards(q=q, tcg="all", limit=MAX_LIMIT)
+            pool = list(pooled.get("results") or [])
+            start = (page - 1) * page_size
+            body = {
+                "results": pool[start : start + page_size],
+                "total": len(pool),
+                "source": pooled.get("source", "mixed"),
+            }
+    except (httpx.HTTPError, CircuitOpenError) as exc:
+        logger.warning("paged search failed (%s p%s): %s", tcg, page, exc)
+        return {
+            **_empty(tcg, error=str(exc)),
+            "page": page,
+            "page_size": page_size,
+        }
+
+    body["page"] = page
+    body["page_size"] = page_size
+    if body["results"]:
+        await _cache_set(cache_key, body, CARD_SEARCH_TTL)
+    return body
+
+
 # --------------------------------------------------------------------- single
 
 

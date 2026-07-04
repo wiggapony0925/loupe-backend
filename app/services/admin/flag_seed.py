@@ -36,6 +36,7 @@ ADMIN_PAGE_FLAGS: tuple[tuple[str, str, str], ...] = (
         "Admin · Integrations",
         "Operations: second-party service catalog.",
     ),
+    ("admin_email", "Admin · Email", "Operations: email template gallery & tests."),
     ("admin_audit", "Admin · Audit log", "Operations: admin activity trail."),
     ("admin_revenue", "Admin · Revenue", "Monetization: MRR & churn."),
     ("admin_pro", "Admin · Loupe Pro", "Monetization: plans & feature gates."),

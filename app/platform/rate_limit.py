@@ -154,6 +154,18 @@ mfa_verify_limit = rate_limit(limit=10, window_seconds=60, name="auth.mfa_verify
 change_password_limit = rate_limit(
     limit=10, window_seconds=60, name="auth.change_password"
 )
+# Forgot-password fires an email per request — a tight cap stops both mailbox
+# spam and using the endpoint as an email-existence oracle via timing.
+forgot_password_limit = rate_limit(
+    limit=5, window_seconds=300, name="auth.forgot_password"
+)
+# Reset consumes a signed token; throttle brute-force attempts on the
+# signature (128-bit HMAC makes guessing hopeless anyway).
+reset_password_limit = rate_limit(
+    limit=10, window_seconds=60, name="auth.reset_password"
+)
+# Resending the verification email is authed but still fires real mail.
+verify_email_limit = rate_limit(limit=5, window_seconds=300, name="auth.verify_email")
 
 
 __all__ = [
@@ -161,12 +173,15 @@ __all__ = [
     "application_track_limit",
     "catalog_read_limit",
     "change_password_limit",
+    "forgot_password_limit",
     "image_proxy_limit",
     "login_limit",
     "mfa_verify_limit",
     "rate_limit",
+    "reset_password_limit",
     "resolve_limit",
     "scan_create_limit",
     "search_live_limit",
+    "verify_email_limit",
     "waitlist_join_limit",
 ]

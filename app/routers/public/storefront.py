@@ -95,11 +95,34 @@ async def public_search(
     """
     _cache(response)
     if q.strip():
-        # The typeahead (small page_size) only needs a cheap top-N, so it reuses
-        # the warm limit=20 upstream cache key. The full results page fetches a
-        # deeper set so users can page through popular names (e.g. Mewtwo has
-        # 80+ printings). Kept modest: the Pokemon TCG API gets very slow with
-        # large page sizes, so 60 stays fast while ~tripling the old 20-cap.
+        # Default experience (relevance sort, no facet filters): TRUE upstream
+        # pagination, so every printing of a popular name is reachable —
+        # Pikachu has 177, Charizard 400+; the old pooled top-60 made the
+        # catalog look like it was missing most of them.
+        if rarity is None and set_name is None and sort == "best" and page_size > 12:
+            paged = await card_search_service.search_cards_paged(
+                q=q, tcg=tcg, page=page, page_size=page_size
+            )
+            items = list(paged.get("results") or [])
+            return {
+                "results": items,
+                "total": paged.get("total", len(items)),
+                "page": page,
+                "page_size": page_size,
+                # Facets come from the visible page — options accumulate as
+                # the user pages; filtering re-enters the pooled path below.
+                "facets": {
+                    "rarities": sorted(
+                        {c.get("rarity") for c in items if c.get("rarity")}
+                    ),
+                    "sets": sorted(
+                        {c.get("set_name") for c in items if c.get("set_name")}
+                    ),
+                },
+                "source": paged.get("source"),
+            }
+        # Typeahead (small page_size) and filtered/price-sorted views work on
+        # a ranked pool — filters and price sorts need the whole set in hand.
         fetch_limit = 20 if page_size <= 12 else 60
         body = await card_search_service.search_cards(q=q, tcg=tcg, limit=fetch_limit)
         cards = list(body.get("results") or [])

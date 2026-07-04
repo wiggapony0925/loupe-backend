@@ -357,10 +357,36 @@ class Settings(BaseSettings):
     # surfaced only on the public tracking page. Resend's free tier is
     # generous and the API is a single HTTPS POST — no SMTP required.
     resend_api_key: str = ""
-    notifications_from_email: str = ""  # e.g. "Loupe Careers <careers@loupe.app>"
+    notifications_from_email: str = ""  # e.g. "Loupe <hello@loupe.app>"
+    # Optional Reply-To on outgoing mail, so "just reply" support flows land
+    # in a monitored inbox instead of the (possibly no-reply) From address.
+    notifications_reply_to: str = ""  # e.g. "support@loupe.app"
+    # Optional From for one-to-one support messages sent from the admin
+    # portal (falls back to `notifications_from_email` when unset).
+    support_from_email: str = ""  # e.g. "Loupe Support <support@loupe.app>"
+    # Signing secret for Resend's delivery webhooks (Svix `whsec_…`). When
+    # set, /v1/webhooks/resend advances the email delivery log to
+    # delivered/bounced/complained and auto-suppresses bounced addresses.
+    resend_webhook_secret: str = ""
+
+    @property
+    def support_sender(self) -> str:
+        """From address for support mail (empty when email isn't configured)."""
+        return self.support_from_email or self.notifications_from_email
+
     # Public base URL of the web app, used to build links in emails
     # (e.g. the application-tracking page). No trailing slash.
     app_public_url: str = "https://loupe.app"
+    # Public base URL of THIS API, used for links that must hit the backend
+    # directly (one-click unsubscribe endpoints in email headers — mail
+    # providers POST to them with no JS involved). Falls back to
+    # `app_public_url` when unset (fine when the web tier proxies /v1).
+    api_public_url: str = ""
+
+    @property
+    def api_base_url(self) -> str:
+        """Origin for backend-served links in emails (no trailing slash)."""
+        return (self.api_public_url or self.app_public_url).rstrip("/")
 
     @property
     def email_enabled(self) -> bool:
