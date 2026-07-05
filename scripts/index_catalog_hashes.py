@@ -204,20 +204,55 @@ async def index_game(
     return {"game": game, "indexed": indexed, "skipped": skipped, "failed": failed}  # type: ignore[dict-item]
 
 
+async def _db_with_retry(sm, work, *, attempts: int = 4):
+    """Run ``work(session)`` in a fresh session, retrying transient connection
+    drops (a multi-hour job outlives the Cloud SQL proxy's idle timeout, which
+    surfaces as ``asyncpg InterfaceError: connection is closed``)."""
+    from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            async with sm() as session:
+                return await work(session)
+        except (InterfaceError, OperationalError, DBAPIError) as exc:
+            last = exc
+            logger.warning(
+                "db connection dropped (attempt %d/%d) — retrying: %s",
+                attempt + 1,
+                attempts,
+                str(exc)[:120],
+            )
+            await asyncio.sleep(2.0 * (attempt + 1))
+    raise last if last else RuntimeError("db retry exhausted")
+
+
 async def _process_cards(
     sm, sem: asyncio.Semaphore, cards: list, force: bool
 ) -> tuple[int, int, int]:
-    """Hash + upsert one page of cards. Returns (indexed, skipped, failed)."""
-    async with sm() as session:
+    """Hash one page of cards (network), then upsert with connection-drop
+    retry. Returns (indexed, skipped, failed)."""
+
+    # Hashing (image downloads) is done ONCE up front against a first session
+    # only for the de-dupe read, so a DB retry never re-downloads.
+    async def _dedupe(session):
         ids = [c for c in (_field(x, "id") for x in cards) if c]
         already = set() if force else await _existing_ids(session, ids)
-        todo = [c for c in cards if _field(c, "id") not in already]
-        skipped = len(cards) - len(todo)
-        results = await asyncio.gather(*(_hash_one(c, sem) for c in todo))
-        records = [r for r in results if r is not None]
-        failed = len(todo) - len(records)
+        return already
+
+    already = await _db_with_retry(sm, _dedupe)
+    todo = [c for c in cards if _field(c, "id") not in already]
+    skipped = len(cards) - len(todo)
+    results = await asyncio.gather(*(_hash_one(c, sem) for c in todo))
+    records = [r for r in results if r is not None]
+    failed = len(todo) - len(records)
+
+    async def _write(session):
         await _upsert(session, records)
-        return len(records), skipped, failed
+
+    if records:
+        await _db_with_retry(sm, _write)
+    return len(records), skipped, failed
 
 
 async def index_game_by_set(
