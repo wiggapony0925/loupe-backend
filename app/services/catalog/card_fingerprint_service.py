@@ -65,6 +65,15 @@ def fingerprint_from_image_bytes(data: bytes) -> FingerprintResult | None:
     return FingerprintResult(phash=phash, dhash=dhash, feature_vector=vector)
 
 
+# Some image CDNs (notably Scryfall's cards.scryfall.io) reject the default
+# ``python-httpx/x.y`` User-Agent with a 400 — their documented bot policy. A
+# real UA is required, so send one for every fingerprint download.
+_IMAGE_FETCH_HEADERS = {
+    "User-Agent": "LoupeScanner/1.0 (+https://loupe.app)",
+    "Accept": "image/*,*/*",
+}
+
+
 async def fingerprint_from_image_url(url: str) -> FingerprintResult | None:
     """Download an image and hash it. Returns ``None`` on any failure."""
     if not url:
@@ -73,7 +82,9 @@ async def fingerprint_from_image_url(url: str) -> FingerprintResult | None:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, follow_redirects=True)
+            resp = await client.get(
+                url, follow_redirects=True, headers=_IMAGE_FETCH_HEADERS
+            )
         if resp.status_code >= 400:
             return None
         return fingerprint_from_image_bytes(resp.content)

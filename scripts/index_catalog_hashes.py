@@ -149,16 +149,41 @@ async def index_game(
     sem = asyncio.Semaphore(concurrency)
     indexed = skipped = failed = 0
     page = start_page
+    empty_streak = 0
+    max_page: int | None = None  # set once we learn the catalog total
     while True:
         if max_pages and (page - start_page) >= max_pages:
             break
-        result = await catalog_browse_service.browse_catalog(
-            game, page, page_size, "name"
-        )
-        cards = result.get("cards") or []
-        total = int(result.get("total") or 0)
-        if not cards:
+        if max_page is not None and page > max_page:
             break
+
+        # A page can come back empty from an upstream flake (pokemontcg.io is
+        # intermittently slow / returns degraded empty pages) — retry the same
+        # page a few times before treating it as a real gap, so a single blip
+        # doesn't abort the whole game mid-catalog.
+        cards: list = []
+        total = 0
+        for _attempt in range(3):
+            result = await catalog_browse_service.browse_catalog(
+                game, page, page_size, "name"
+            )
+            cards = result.get("cards") or []
+            total = int(result.get("total") or 0)
+            if total and max_page is None:
+                # Walk two pages past the reported end to absorb off-by-one.
+                max_page = (total // page_size) + 2
+            if cards:
+                break
+            await asyncio.sleep(1.0)
+
+        if not cards:
+            # Stop only after a run of empty pages (the true end / a dead zone).
+            empty_streak += 1
+            if empty_streak >= 3:
+                break
+            page += 1
+            continue
+        empty_streak = 0
 
         async with sm() as session:
             ids = [c for c in (_field(x, "id") for x in cards) if c]
@@ -181,9 +206,6 @@ async def index_game(
             failed,
             total,
         )
-        # Stop once we've walked past the reported catalog size.
-        if total and page * page_size >= total:
-            break
         page += 1
         await asyncio.sleep(0.2)  # be nice to the upstream
 
