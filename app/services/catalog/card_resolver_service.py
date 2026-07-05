@@ -32,7 +32,11 @@ from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
 from app.models.enums import TcgEnum
 from app.models.fingerprint import Fingerprint
-from app.services.catalog import card_catalog_service, card_search_service
+from app.services.catalog import (
+    card_catalog_service,
+    card_search_service,
+    catalog_hash_index,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger("services.card_resolver")
@@ -221,32 +225,50 @@ async def resolve_catalog_by_phash(
         return None
     threshold = settings.phash_max_distance if max_distance is None else max_distance
 
+    bits = len(phash) * 4
+
+    # (a) Local materialized cards (the small set with a backfilled hash).
     rows = (
         await db.execute(
             select(Card.id, Card.image_phash).where(Card.image_phash.is_not(None))
         )
     ).all()
-    if not rows:
-        return None
-
-    best_id: uuid.UUID | None = None
-    best_distance = len(phash) * 4 + 1  # one worse than the theoretical max
+    local_best_id: uuid.UUID | None = None
+    local_best_distance = bits + 1  # one worse than the theoretical max
     for card_id, cand_hash in rows:
         if not cand_hash or len(cand_hash) != len(phash):
             continue
         distance = _hamming(phash, cand_hash)
-        if distance < best_distance:
-            best_distance = distance
-            best_id = card_id
+        if distance < local_best_distance:
+            local_best_distance = distance
+            local_best_id = card_id
 
-    if best_id is None or best_distance > threshold:
+    # (b) The full-catalog art-hash index (every card, not just materialized
+    # ones) — this is what makes a brand-new scan of any card matchable.
+    index_hit = await catalog_hash_index.find_nearest(db, phash, max_distance=threshold)
+
+    # Pick whichever signal is the closer match. The local table wins ties
+    # (it may carry a resolved local card_id / richer payload).
+    use_index = index_hit is not None and (
+        local_best_id is None or index_hit.distance < local_best_distance
+    )
+
+    if use_index and index_hit is not None:
+        unified = await card_search_service.get_card(index_hit.upstream_id)
+        return ResolvedCard(
+            card_id=None,
+            upstream_id=index_hit.upstream_id,
+            unified=unified,
+            source="fingerprint",
+            confidence=index_hit.confidence,
+        )
+
+    if local_best_id is None or local_best_distance > threshold:
         return None
-
-    resolved = await resolve_by_uuid(db, best_id)
+    resolved = await resolve_by_uuid(db, local_best_id)
     if resolved is None:
         return None
-    bits = len(phash) * 4
-    confidence = max(0.0, 1.0 - (best_distance / bits))
+    confidence = max(0.0, 1.0 - (local_best_distance / bits))
     return ResolvedCard(
         card_id=resolved.card_id,
         upstream_id=resolved.upstream_id,

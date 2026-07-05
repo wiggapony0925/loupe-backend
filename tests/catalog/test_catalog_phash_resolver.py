@@ -19,8 +19,9 @@ import pytest
 
 from app.config import get_settings
 from app.models.card import Card
+from app.models.catalog_hash import CatalogImageHash
 from app.models.enums import TcgEnum
-from app.services.catalog import card_resolver_service
+from app.services.catalog import card_resolver_service, catalog_hash_index
 from tests.factories import make_card_set
 
 # A real 16x16 imagehash renders to 64 hex chars (256 bits). These are
@@ -143,3 +144,81 @@ async def test_empty_catalog_returns_none(db_session) -> None:
         db_session, _BASE_HASH
     )
     assert resolved is None
+
+
+# ── Full-catalog art-hash index (catalog_image_hashes) ─────────────────────
+# The index covers EVERY catalog card (not just materialized Card rows), so a
+# brand-new scan of any card is matchable. It carries a process-level cache;
+# reset it around each test so seeded rows are seen and never leak.
+
+
+@pytest.fixture(autouse=True)
+def _reset_hash_index():
+    catalog_hash_index._reset_for_tests()
+    yield
+    catalog_hash_index._reset_for_tests()
+
+
+async def _index_row(
+    db, *, upstream_id: str, name: str, phash: str, tcg: str = "pokemon"
+):
+    row = CatalogImageHash(
+        upstream_id=upstream_id,
+        tcg=tcg,
+        name=name,
+        set_name="Test Set",
+        number="1",
+        image_url="https://example/art.png",
+        phash=phash,
+        dhash=phash,
+    )
+    db.add(row)
+    await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_catalog_index_identifies_unmaterialized_card(db_session) -> None:
+    # No local Card row — only the art-hash index. A scan must still match.
+    await _index_row(
+        db_session, upstream_id="pokemontcg:base1-4", name="Charizard", phash=_BASE_HASH
+    )
+    with patch.object(
+        card_resolver_service.card_search_service,
+        "get_card",
+        new=AsyncMock(return_value=_unified("Charizard")),
+    ):
+        resolved = await card_resolver_service.resolve_catalog_by_phash(
+            db_session, _NEAR_HASH
+        )
+    assert resolved is not None
+    assert resolved.upstream_id == "pokemontcg:base1-4"
+    assert resolved.card_id is None  # matched from the index, not a local row
+    assert resolved.source == "fingerprint"
+
+
+@pytest.mark.asyncio
+async def test_find_nearest_scopes_to_tcg(db_session) -> None:
+    # Same hash under two games — a Pokémon-scoped scan must not return the MTG row.
+    await _index_row(
+        db_session, upstream_id="pokemontcg:x-1", name="Pika", phash=_BASE_HASH
+    )
+    await _index_row(
+        db_session,
+        upstream_id="scryfall:y-1",
+        name="Bolt",
+        phash=_BASE_HASH,
+        tcg="magic",
+    )
+    hit = await catalog_hash_index.find_nearest(db_session, _BASE_HASH, tcg="pokemon")
+    assert hit is not None
+    assert hit.upstream_id == "pokemontcg:x-1"
+    assert hit.tcg == "pokemon"
+
+
+@pytest.mark.asyncio
+async def test_find_nearest_rejects_beyond_threshold(db_session) -> None:
+    await _index_row(
+        db_session, upstream_id="pokemontcg:z-1", name="Far", phash=_FAR_HASH
+    )
+    hit = await catalog_hash_index.find_nearest(db_session, _BASE_HASH, max_distance=6)
+    assert hit is None

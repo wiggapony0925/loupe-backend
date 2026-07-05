@@ -6,6 +6,7 @@ from app.models.blog import BlogPost
 from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
 from app.models.career import ApplicationEvent, JobApplication, JobPosting
+from app.models.catalog_hash import CatalogImageHash
 from app.models.collection import Collection, CollectionItem
 from app.models.email_log import EmailLog
 from app.models.enums import (
@@ -54,6 +55,7 @@ __all__ = [
     "CardExternalRef",
     "CardIdentification",
     "CardSet",
+    "CatalogImageHash",
     "Collection",
     "CollectionItem",
     "EmailLog",
