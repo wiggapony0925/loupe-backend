@@ -28,7 +28,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.db import get_sessionmaker
 from app.models.catalog_hash import CatalogImageHash
-from app.services.catalog import catalog_browse_service
+from app.services.catalog import card_search_service, catalog_browse_service
 from app.services.catalog.card_fingerprint_service import fingerprint_from_image_url
 from app.utils.logger import get_logger
 
@@ -185,18 +185,10 @@ async def index_game(
             continue
         empty_streak = 0
 
-        async with sm() as session:
-            ids = [c for c in (_field(x, "id") for x in cards) if c]
-            already = set() if force else await _existing_ids(session, ids)
-            todo = [c for c in cards if _field(c, "id") not in already]
-            skipped += len(cards) - len(todo)
-
-            results = await asyncio.gather(*(_hash_one(c, sem) for c in todo))
-            records = [r for r in results if r is not None]
-            failed += len(todo) - len(records)
-            await _upsert(session, records)
-            indexed += len(records)
-
+        i, s, f = await _process_cards(sm, sem, cards, force)
+        indexed += i
+        skipped += s
+        failed += f
         logger.info(
             "[%s] page %d — indexed=%d skipped=%d failed=%d (total≈%d)",
             game,
@@ -212,6 +204,67 @@ async def index_game(
     return {"game": game, "indexed": indexed, "skipped": skipped, "failed": failed}  # type: ignore[dict-item]
 
 
+async def _process_cards(
+    sm, sem: asyncio.Semaphore, cards: list, force: bool
+) -> tuple[int, int, int]:
+    """Hash + upsert one page of cards. Returns (indexed, skipped, failed)."""
+    async with sm() as session:
+        ids = [c for c in (_field(x, "id") for x in cards) if c]
+        already = set() if force else await _existing_ids(session, ids)
+        todo = [c for c in cards if _field(c, "id") not in already]
+        skipped = len(cards) - len(todo)
+        results = await asyncio.gather(*(_hash_one(c, sem) for c in todo))
+        records = [r for r in results if r is not None]
+        failed = len(todo) - len(records)
+        await _upsert(session, records)
+        return len(records), skipped, failed
+
+
+async def index_game_by_set(
+    game: str, *, page_size: int, concurrency: int, force: bool
+) -> dict[str, int]:
+    """Index a game set-by-set — the ONLY way to reach 100% coverage when the
+    upstream caps global pagination (pokemontcg.io 400s past ~page 55). Each
+    set is shallow (<500 cards) so no deep-pagination wall.
+    """
+    sm = get_sessionmaker()
+    sem = asyncio.Semaphore(concurrency)
+    indexed = skipped = failed = 0
+    sets_body = await card_search_service.list_sets(game)
+    sets = sets_body.get("results") or []
+    logger.info("[%s] by-set: %d sets", game, len(sets))
+    for st in sets:
+        set_id = st.get("id") if isinstance(st, dict) else getattr(st, "id", None)
+        set_name = st.get("name") if isinstance(st, dict) else getattr(st, "name", None)
+        if not set_id:
+            continue
+        page = 1
+        while True:
+            result = await catalog_browse_service.browse_catalog(
+                game, page, page_size, "name", set_id=set_id
+            )
+            cards = result.get("cards") or []
+            if not cards:
+                break
+            total = int(result.get("total") or 0)
+            i, s, f = await _process_cards(sm, sem, cards, force)
+            indexed += i
+            skipped += s
+            failed += f
+            if total and page * page_size >= total:
+                break
+            page += 1
+        logger.info(
+            "[%s] set %s — indexed=%d skipped=%d failed=%d",
+            game,
+            set_name or set_id,
+            indexed,
+            skipped,
+            failed,
+        )
+    return {"game": game, "indexed": indexed, "skipped": skipped, "failed": failed}  # type: ignore[dict-item]
+
+
 async def main() -> None:
     ap = argparse.ArgumentParser(description="Backfill catalog perceptual-hash index")
     ap.add_argument("--games", default=",".join(DEFAULT_GAMES))
@@ -220,18 +273,32 @@ async def main() -> None:
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--start-page", type=int, default=1)
     ap.add_argument("--force", action="store_true")
+    ap.add_argument(
+        "--by-set",
+        action="store_true",
+        help="Walk set-by-set for 100%% coverage (required for Pokémon — the "
+        "upstream 400s past ~page 55 of global pagination).",
+    )
     args = ap.parse_args()
 
     games = [g.strip() for g in args.games.split(",") if g.strip()]
     for game in games:
-        summary = await index_game(
-            game,
-            page_size=args.page_size,
-            max_pages=args.max_pages,
-            concurrency=args.concurrency,
-            force=args.force,
-            start_page=args.start_page,
-        )
+        if args.by_set:
+            summary = await index_game_by_set(
+                game,
+                page_size=args.page_size,
+                concurrency=args.concurrency,
+                force=args.force,
+            )
+        else:
+            summary = await index_game(
+                game,
+                page_size=args.page_size,
+                max_pages=args.max_pages,
+                concurrency=args.concurrency,
+                force=args.force,
+                start_page=args.start_page,
+            )
         logger.info("DONE %s: %s", game, summary)
         print(summary)
 
