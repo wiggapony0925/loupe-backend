@@ -14,6 +14,8 @@ import pytest
 from app.services.catalog import (
     card_search_service,
     catalog_browse_service,
+)
+from app.services.catalog import (
     pokemon_mirror_service as mirror,
 )
 
