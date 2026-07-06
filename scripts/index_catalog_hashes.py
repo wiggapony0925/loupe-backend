@@ -62,20 +62,25 @@ def _image_url(card: Any) -> str | None:
 
 
 async def _existing_ids(session, upstream_ids: list[str]) -> set[str]:
+    """Ids that are FULLY indexed — a pokemontcg row without its alternate-art
+    hash still counts as todo, so a plain (non-force) rerun fills in alts."""
     if not upstream_ids:
         return set()
     rows = (
-        (
-            await session.execute(
-                select(CatalogImageHash.upstream_id).where(
-                    CatalogImageHash.upstream_id.in_(upstream_ids)
-                )
-            )
+        await session.execute(
+            select(
+                CatalogImageHash.upstream_id,
+                CatalogImageHash.image_url,
+                CatalogImageHash.phash_alt,
+            ).where(CatalogImageHash.upstream_id.in_(upstream_ids))
         )
-        .scalars()
-        .all()
-    )
-    return set(rows)
+    ).all()
+    done: set[str] = set()
+    for upstream_id, image_url, phash_alt in rows:
+        needs_alt = bool(image_url and _alt_art_url(image_url)) and phash_alt is None
+        if not needs_alt:
+            done.add(upstream_id)
+    return done
 
 
 def _alt_art_url(url: str) -> str | None:
