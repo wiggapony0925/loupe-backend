@@ -325,10 +325,19 @@ async def index_game_by_set(
             continue
         page = 1
         while True:
-            result = await catalog_browse_service.browse_catalog(
-                game, page, page_size, "name", set_id=set_id
-            )
-            cards = result.get("cards") or []
+            # Same flaky upstream as the global walk — retry an empty page a
+            # few times before treating it as this set's true end, or a flake
+            # burst silently skips whole sets.
+            cards: list = []
+            result: dict = {}
+            for attempt in range(3):
+                result = await catalog_browse_service.browse_catalog(
+                    game, page, page_size, "name", set_id=set_id
+                )
+                cards = result.get("cards") or []
+                if cards:
+                    break
+                await asyncio.sleep(1.5 * (attempt + 1))
             if not cards:
                 break
             total = int(result.get("total") or 0)
