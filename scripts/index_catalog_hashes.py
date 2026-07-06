@@ -277,17 +277,41 @@ async def _process_cards(
 
 
 async def index_game_by_set(
-    game: str, *, page_size: int, concurrency: int, force: bool
+    game: str,
+    *,
+    page_size: int,
+    concurrency: int,
+    force: bool,
+    only_sets: set[str] | None = None,
 ) -> dict[str, int]:
     """Index a game set-by-set — the ONLY way to reach 100% coverage when the
     upstream caps global pagination (pokemontcg.io 400s past ~page 55). Each
     set is shallow (<500 cards) so no deep-pagination wall.
+
+    ``only_sets`` (bare codes like ``base1`` or full ids) narrows the walk —
+    the tool for indexing a just-released set without re-walking everything.
     """
     sm = get_sessionmaker()
     sem = asyncio.Semaphore(concurrency)
     indexed = skipped = failed = 0
-    sets_body = await card_search_service.list_sets(game)
-    sets = sets_body.get("results") or []
+    # list_sets rides the same flaky upstream as everything else — retry a few
+    # times before concluding the game has no sets.
+    sets: list = []
+    for attempt in range(4):
+        sets_body = await card_search_service.list_sets(game)
+        sets = sets_body.get("results") or []
+        if sets:
+            break
+        await asyncio.sleep(2.0 * (attempt + 1))
+    if only_sets:
+        wanted = {s.lower() for s in only_sets}
+        sets = [
+            st
+            for st in sets
+            if (st.get("id") or "").lower() in wanted
+            or (st.get("id") or "").lower().split(":")[-1] in wanted
+            or (st.get("code") or "").lower() in wanted
+        ]
     logger.info("[%s] by-set: %d sets", game, len(sets))
     for st in sets:
         set_id = st.get("id") if isinstance(st, dict) else getattr(st, "id", None)
@@ -335,16 +359,26 @@ async def main() -> None:
         help="Walk set-by-set for 100%% coverage (required for Pokémon — the "
         "upstream 400s past ~page 55 of global pagination).",
     )
+    ap.add_argument(
+        "--sets",
+        default=None,
+        help="Comma-separated set codes/ids to index (implies --by-set) — "
+        "e.g. a just-released set, without re-walking the whole game.",
+    )
     args = ap.parse_args()
 
+    only_sets = (
+        {s.strip() for s in args.sets.split(",") if s.strip()} if args.sets else None
+    )
     games = [g.strip() for g in args.games.split(",") if g.strip()]
     for game in games:
-        if args.by_set:
+        if args.by_set or only_sets:
             summary = await index_game_by_set(
                 game,
                 page_size=args.page_size,
                 concurrency=args.concurrency,
                 force=args.force,
+                only_sets=only_sets,
             )
         else:
             summary = await index_game(
