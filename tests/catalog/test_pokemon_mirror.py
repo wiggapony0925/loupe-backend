@@ -28,7 +28,10 @@ SET_A = {
     "printedTotal": 3,
     "total": 3,
     "releaseDate": "2026/05/22",
-    "images": {"symbol": "https://img/tsta/sym.png", "logo": "https://img/tsta/logo.png"},
+    "images": {
+        "symbol": "https://img/tsta/sym.png",
+        "logo": "https://img/tsta/logo.png",
+    },
 }
 SET_B = {
     "id": "tstb",
@@ -37,7 +40,10 @@ SET_B = {
     "printedTotal": 2,
     "total": 2,
     "releaseDate": "1999/01/09",
-    "images": {"symbol": "https://img/tstb/sym.png", "logo": "https://img/tstb/logo.png"},
+    "images": {
+        "symbol": "https://img/tstb/sym.png",
+        "logo": "https://img/tstb/logo.png",
+    },
 }
 
 CARDS_A = [
