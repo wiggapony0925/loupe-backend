@@ -108,6 +108,27 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         _log.warning("admin flag seed skipped: %s", exc)
 
+    # Warm the catalog art-hash index in the background so the FIRST scan on
+    # a fresh instance doesn't pay the ~130k-row load. Never blocks startup.
+    async def _warm_hash_index() -> None:
+        try:
+            from app.db.session import get_sessionmaker
+            from app.services.catalog import catalog_hash_index
+
+            async with get_sessionmaker()() as db:
+                await catalog_hash_index.warm(db)
+        except Exception as exc:
+            _log.warning("catalog hash index warm skipped: %s", exc)
+
+    try:
+        from app.config import get_settings as _gs
+
+        if not _gs().is_test:
+            warm_task = asyncio.create_task(_warm_hash_index(), name="hash-index-warm")
+            _app_state.background_tasks.append(warm_task)
+    except Exception as exc:
+        _log.warning("hash index warm not spawned: %s", exc)
+
     _app_state.warmup_complete = True
     _log.info("loupe-backend ready")
 

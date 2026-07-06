@@ -65,6 +65,58 @@ def fingerprint_from_image_bytes(data: bytes) -> FingerprintResult | None:
     return FingerprintResult(phash=phash, dhash=dhash, feature_vector=vector)
 
 
+#: Query-side variants that recover real camera frames the raw hash misses.
+#: Counter-rotations cancel hand tilt (a 6° tilt is ~106 bits off raw but ~28
+#: after counter-rotation — measured); center-crops cancel loose framing (a
+#: card-on-table frame is ~122 bits off raw but ~0 after an 82% crop). Each
+#: variant is one cheap hash (~10ms); the in-memory index scan per variant is
+#: milliseconds, so the whole set costs ~100ms and replaces multi-second OCR.
+_VARIANT_ROTATIONS = (-6.0, -3.0, 3.0, 6.0)
+_VARIANT_CROPS = (0.9, 0.82)
+
+
+def fingerprint_variants_from_image_bytes(data: bytes) -> list[FingerprintResult]:
+    """Fingerprints of the frame plus camera-correction variants.
+
+    Returns the original first, then counter-rotations and center-crops.
+    Empty when the image can't be decoded. Used by the identify pipeline to
+    match hand-held frames against the catalog art index without OCR.
+    """
+    results: list[FingerprintResult] = []
+    base = fingerprint_from_image_bytes(data)
+    if base is None:
+        return results
+    results.append(base)
+    try:
+        import io
+
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as img:
+            rgb = img.convert("RGB")
+            variants: list[Image.Image] = []
+            for deg in _VARIANT_ROTATIONS:
+                variants.append(rgb.rotate(deg, expand=False, fillcolor=(24, 24, 28)))
+            w, h = rgb.size
+            for frac in _VARIANT_CROPS:
+                cw, ch = int(w * frac), int(h * frac)
+                box = ((w - cw) // 2, (h - ch) // 2, (w + cw) // 2, (h + ch) // 2)
+                variants.append(rgb.crop(box).resize((w, h)))
+            import imagehash  # type: ignore[import-not-found]
+
+            for v in variants:
+                results.append(
+                    FingerprintResult(
+                        phash=str(imagehash.phash(v, hash_size=16)),
+                        dhash=str(imagehash.dhash(v, hash_size=16)),
+                        feature_vector=base.feature_vector,
+                    )
+                )
+    except Exception as exc:  # pragma: no cover — variant failure is non-fatal
+        logger.info("fingerprint variants failed (%s); using base only", exc)
+    return results
+
+
 # Some image CDNs (notably Scryfall's cards.scryfall.io) reject the default
 # ``python-httpx/x.y`` User-Agent with a 400 — their documented bot policy. A
 # real UA is required, so send one for every fingerprint download.

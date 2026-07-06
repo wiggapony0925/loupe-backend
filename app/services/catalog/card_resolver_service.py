@@ -51,6 +51,10 @@ class ResolvedCard:
     unified: dict[str, Any] | None  # the rich card dict from card_search_service
     source: str  # 'local' | 'upstream' | 'fingerprint' | 'external_ref'
     confidence: float
+    #: True when the art-hash match is unambiguous (strict distance, or a
+    #: loose distance with a decisive margin over the runner-up + dHash
+    #: agreement) — the identify pipeline may skip OCR entirely.
+    decisive: bool = False
 
 
 # --------------------------------------------------------------------- by id
@@ -228,20 +232,7 @@ async def resolve_catalog_by_phash(
     bits = len(phash) * 4
 
     # (a) Local materialized cards (the small set with a backfilled hash).
-    rows = (
-        await db.execute(
-            select(Card.id, Card.image_phash).where(Card.image_phash.is_not(None))
-        )
-    ).all()
-    local_best_id: uuid.UUID | None = None
-    local_best_distance = bits + 1  # one worse than the theoretical max
-    for card_id, cand_hash in rows:
-        if not cand_hash or len(cand_hash) != len(phash):
-            continue
-        distance = _hamming(phash, cand_hash)
-        if distance < local_best_distance:
-            local_best_distance = distance
-            local_best_id = card_id
+    local_best_id, local_best_distance = await _best_local_card_phash(db, phash)
 
     # (b) The full-catalog art-hash index (every card, not just materialized
     # ones) — this is what makes a brand-new scan of any card matchable.
@@ -254,13 +245,17 @@ async def resolve_catalog_by_phash(
     )
 
     if use_index and index_hit is not None:
-        unified = await card_search_service.get_card(index_hit.upstream_id)
+        # Build the candidate from the row's DENORMALIZED identity — never an
+        # upstream fetch here. (A live get_card against pokemontcg.io added
+        # 4-24s to the "fast" path; the index carries everything a scan
+        # candidate needs precisely so this stays milliseconds.)
         return ResolvedCard(
             card_id=None,
             upstream_id=index_hit.upstream_id,
-            unified=unified,
+            unified=_unified_from_hit(index_hit),
             source="fingerprint",
             confidence=index_hit.confidence,
+            decisive=index_hit.distance <= get_settings().phash_fast_path_max_distance,
         )
 
     if local_best_id is None or local_best_distance > threshold:
@@ -275,6 +270,121 @@ async def resolve_catalog_by_phash(
         unified=resolved.unified,
         source="fingerprint",
         confidence=round(confidence, 3),
+        decisive=local_best_distance <= get_settings().phash_fast_path_max_distance,
+    )
+
+
+async def _best_local_card_phash(
+    db: AsyncSession, phash: str
+) -> tuple[uuid.UUID | None, int]:
+    """Closest locally-materialized Card by ``image_phash``. Returns
+    ``(card_id, distance)``; ``(None, bits+1)`` when nothing is hashed."""
+    bits = len(phash) * 4
+    rows = (
+        await db.execute(
+            select(Card.id, Card.image_phash).where(Card.image_phash.is_not(None))
+        )
+    ).all()
+    best_id: uuid.UUID | None = None
+    best_distance = bits + 1  # one worse than the theoretical max
+    for card_id, cand_hash in rows:
+        if not cand_hash or len(cand_hash) != len(phash):
+            continue
+        distance = _hamming(phash, cand_hash)
+        if distance < best_distance:
+            best_distance = distance
+            best_id = card_id
+    return best_id, best_distance
+
+
+def _unified_from_hit(hit: catalog_hash_index.CatalogHashHit) -> dict[str, Any]:
+    """Flat candidate dict from an index row — the keys the identify scorer
+    and ``_to_candidate`` read. Zero upstream calls by construction."""
+    return {
+        "id": hit.upstream_id,
+        "name": hit.name,
+        "tcg": hit.tcg,
+        "set_name": hit.set_name,
+        "number": hit.number,
+        "image_url": hit.image_url,
+    }
+
+
+async def resolve_catalog_best(
+    db: AsyncSession,
+    fingerprints: list[tuple[str, str | None]],
+    *,
+    tcg: str | None = None,
+) -> ResolvedCard | None:
+    """Match a frame + its camera-correction variants against the catalog art
+    index, with margin-based acceptance.
+
+    Acceptance (tuned for a 256-bit pHash over a ~130k-card index):
+
+    * ``distance <= phash_fast_path_max_distance`` — near-exact art. Decisive.
+    * ``distance <= phash_margin_accept_distance`` AND the runner-up (a
+      DIFFERENT card) is at least ``phash_margin_min_gap`` bits further AND
+      dHash agrees when known — a hand-tilted / loosely-framed frame whose
+      best match stands alone. Decisive.
+    * ``distance <= phash_max_distance`` — a plausible but not decisive match;
+      returned as a normal (non-decisive) candidate for the ranking pipeline.
+    """
+    settings = get_settings()
+    if not settings.phash_enabled or not fingerprints:
+        return None
+    best = await catalog_hash_index.find_best(db, fingerprints, tcg=tcg)
+
+    # Locally-materialized cards (e.g. custom/imported) may exist only in
+    # ``Card.image_phash`` — check them with the base frame hash and prefer
+    # the closer signal, mirroring resolve_catalog_by_phash.
+    base_phash = fingerprints[0][0]
+    local_id, local_distance = await _best_local_card_phash(db, base_phash)
+    if (
+        local_id is not None
+        and (best is None or local_distance < best.distance)
+        and local_distance <= settings.phash_max_distance
+    ):
+        resolved = await resolve_by_uuid(db, local_id)
+        if resolved is not None:
+            bits = len(base_phash) * 4
+            return ResolvedCard(
+                card_id=resolved.card_id,
+                upstream_id=resolved.upstream_id,
+                unified=resolved.unified,
+                source="fingerprint",
+                confidence=round(max(0.0, 1.0 - (local_distance / bits)), 3),
+                decisive=local_distance <= settings.phash_fast_path_max_distance,
+            )
+
+    if best is None:
+        return None
+
+    margin = best.runner_up_distance - best.distance
+    dhash_ok = (
+        best.dhash_distance is None
+        or best.dhash_distance <= settings.phash_dhash_max_distance
+    )
+    strict = best.distance <= settings.phash_fast_path_max_distance
+    margin_hit = (
+        best.distance <= settings.phash_margin_accept_distance
+        and margin >= settings.phash_margin_min_gap
+        and dhash_ok
+    )
+    if not strict and not margin_hit and best.distance > settings.phash_max_distance:
+        return None
+
+    confidence = max(0.0, 1.0 - (best.distance / max(1, best.hit.bits)))
+    if margin_hit and not strict:
+        # A decisive-margin hit is trustworthy despite the loose distance —
+        # floor its confidence so the ranking pipeline treats it as a lock.
+        confidence = max(confidence, 0.92)
+    return ResolvedCard(
+        card_id=None,
+        upstream_id=best.hit.upstream_id,
+        unified=_unified_from_hit(best.hit),
+        source="fingerprint",
+        confidence=round(confidence, 3),
+        decisive=strict or margin_hit,
     )
 
 

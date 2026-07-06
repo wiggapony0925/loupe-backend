@@ -316,6 +316,17 @@ class Settings(BaseSettings):
     # noticeably stricter than `phash_max_distance` so we only short-circuit on
     # near-certain matches; below it the normal OCR+text+pHash pipeline runs.
     phash_fast_path_max_distance: int = 6
+    # Margin acceptance for real camera frames: a hand-tilted / loosely-framed
+    # scan (after counter-rotation/crop query variants) lands 20-30 bits from
+    # its card while the nearest DIFFERENT card sits far beyond. Accept up to
+    # this distance when the runner-up gap is at least `phash_margin_min_gap`
+    # bits and dHash agrees — unambiguous in practice, no fixed-threshold
+    # false-positive risk. (Measured: 3-6° tilt ≈ 22-28 bits after correction;
+    # unrelated cards cluster ≈ 100+ bits apart on the 256-bit hash.)
+    phash_margin_accept_distance: int = 30
+    phash_margin_min_gap: int = 25
+    # dHash cross-check ceiling for margin-accepted hits (256-bit dHash).
+    phash_dhash_max_distance: int = 80
 
     # --- Observability (optional; no-ops when DSN is missing) ---
     sentry_dsn: str | None = None

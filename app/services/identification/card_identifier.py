@@ -44,7 +44,14 @@ from typing import Any, TypeVar
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.services.catalog import card_resolver_service, card_search_service
+from app.services.catalog import (
+    card_resolver_service,
+    card_search_service,
+    catalog_hash_index,
+)
+from app.services.catalog.card_fingerprint_service import (
+    fingerprint_variants_from_image_bytes,
+)
 from app.services.identification.confidence import (
     ScoreBreakdown,
     infer_tcg,
@@ -131,29 +138,39 @@ class CardIdentifier:
         phash_str = prepared.fingerprint.phash if prepared.fingerprint else None
 
         # Step 1.5 — pHash fast path. The single biggest speed (and cost) win:
-        # if the frame's perceptual hash is a near-exact match for a catalog
-        # art hash, the card's identity is already settled — there's nothing
-        # OCR can add. Resolve the catalog pHash ONCE here; if it's within the
-        # tight fast-path distance, return immediately and skip the slow, paid
-        # Google Vision round-trip entirely. A looser match is reused below as
-        # the normal pipeline's pHash candidate (no second catalog scan).
-        catalog_phash = await self._resolve_catalog_phash(db, phash_str)
+        # match the frame PLUS camera-correction variants (counter-rotations
+        # for hand tilt, center-crops for loose framing) against the full
+        # catalog art index. A decisive hit — near-exact, or margin-accepted
+        # with dHash agreement — settles the card's identity with no OCR at
+        # all. A weaker hit is reused below as the pipeline's pHash candidate.
+        # The canonical frame fingerprint LEADS (hashed from the orientation-
+        # normalized image — the exact same normalization the catalog index
+        # used, so a clean frame matches at distance ~0). The variants add
+        # camera-correction candidates on top; ocr_bytes is autocontrasted so
+        # its base hash can drift a few bits — never let it displace the lead.
+        fingerprints: list[tuple[str, str | None]] = []
+        if prepared.fingerprint and prepared.fingerprint.phash:
+            fingerprints.append(
+                (prepared.fingerprint.phash, prepared.fingerprint.dhash)
+            )
+        variants = await asyncio.to_thread(
+            fingerprint_variants_from_image_bytes, prepared.ocr_bytes
+        )
+        fingerprints.extend((fp.phash, fp.dhash) for fp in variants if fp.phash)
+        catalog_phash = await self._resolve_catalog_best(db, fingerprints, tcg_hint)
         if (
             catalog_phash is not None
             and catalog_phash.unified is not None
-            and phash_str
+            and catalog_phash.decisive
         ):
-            bits = max(1, len(phash_str) * 4)
-            distance = round((1.0 - catalog_phash.confidence) * bits)
-            if distance <= settings.phash_fast_path_max_distance:
-                return await self._phash_fast_outcome(
-                    db,
-                    prepared=prepared,
-                    resolved=catalog_phash,
-                    tcg_hint=tcg_hint,
-                    user_id=user_id,
-                    started=started,
-                )
+            return await self._phash_fast_outcome(
+                db,
+                prepared=prepared,
+                resolved=catalog_phash,
+                tcg_hint=tcg_hint,
+                user_id=user_id,
+                started=started,
+            )
 
         # Step 2 — OCR. Errors become an empty result so the pipeline still
         # produces a (low-confidence) identification + analytics row.
@@ -211,7 +228,7 @@ class CardIdentifier:
         # The catalog pHash was already resolved above (Step 1.5); reuse it
         # rather than scanning the catalog twice. Only fall back to the
         # user-submission fingerprint index when the catalog had no match.
-        text_task = self._search_text(parsed=parsed, tcg=tcg_inferred)
+        text_task = self._search_text(db, parsed=parsed, tcg=tcg_inferred)
         if catalog_phash is not None and catalog_phash.unified is not None:
             text_candidates = await text_task
             phash_candidate: dict[str, Any] | None = catalog_phash.unified
@@ -344,7 +361,7 @@ class CardIdentifier:
 
         parsed = parse_ocr_text(ocr_result.full_text)
         tcg_inferred = infer_tcg(parsed, user_hint=tcg_hint)
-        text_candidates = await self._search_text(parsed=parsed, tcg=tcg_inferred)
+        text_candidates = await self._search_text(db, parsed=parsed, tcg=tcg_inferred)
         merged = self._dedupe(text_candidates, None)
 
         feedback_priors: dict[str, float] = {}
@@ -478,9 +495,16 @@ class CardIdentifier:
     # ────────────────────────────────────────────────────────────── helpers
 
     async def _search_text(
-        self, *, parsed: ParsedCard, tcg: str
+        self, db: AsyncSession, *, parsed: ParsedCard, tcg: str
     ) -> list[dict[str, Any]]:
-        """Run catalog text search across each title candidate."""
+        """Candidates for the OCR'd text — LOCAL index first, upstream fallback.
+
+        The denormalized art-hash index holds name/set/number for every
+        catalog card, so an in-memory scan answers in milliseconds what the
+        upstream catalog search answers in seconds (and sometimes not at all —
+        it intermittently returns empty pages). Upstream remains the fallback
+        for anything the index hasn't covered yet.
+        """
         if not parsed.title_candidates and not parsed.title:
             return []
         seen: dict[str, dict[str, Any]] = {}
@@ -488,6 +512,20 @@ class CardIdentifier:
         titles = [t for t in titles if t]
         if not titles:
             return []
+
+        try:
+            local = await catalog_hash_index.search_text(
+                db,
+                tcg=tcg,
+                titles=titles,
+                number=parsed.card_number,
+                limit=10,
+            )
+        except Exception:
+            logger.exception("local index text search failed")
+            local = []
+        if local:
+            return local
 
         def _merge(results: list[dict[str, Any]] | None) -> None:
             for result in results or []:
@@ -557,20 +595,25 @@ class CardIdentifier:
             logger.exception("identify catalog %s lookup failed", label)
         return default
 
-    async def _resolve_catalog_phash(
-        self, db: AsyncSession, phash: str | None
+    async def _resolve_catalog_best(
+        self,
+        db: AsyncSession,
+        fingerprints: list[tuple[str, str | None]],
+        tcg_hint: str | None,
     ) -> card_resolver_service.ResolvedCard | None:
-        """Best catalog art-hash match for a frame's pHash (with confidence).
+        """Best catalog art-hash match for the frame + its camera-correction
+        variants (with margin acceptance and dHash cross-check).
 
-        Returns the full :class:`ResolvedCard` so the caller can read the
-        match confidence/distance and decide between the fast path (skip OCR)
-        and using it as a normal pipeline candidate. ``None`` when pHash is
-        disabled or nothing is within ``phash_max_distance``.
+        Returns the full :class:`ResolvedCard`; ``decisive=True`` means the
+        identity is settled and the caller may skip OCR. ``None`` when pHash
+        is disabled or nothing plausible matched.
         """
-        if not phash or not get_settings().phash_enabled:
+        if not fingerprints or not get_settings().phash_enabled:
             return None
         try:
-            return await card_resolver_service.resolve_catalog_by_phash(db, phash)
+            return await card_resolver_service.resolve_catalog_best(
+                db, fingerprints, tcg=tcg_hint
+            )
         except Exception:
             logger.exception("catalog phash resolve failed")
             return None
