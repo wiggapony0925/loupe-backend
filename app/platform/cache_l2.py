@@ -86,7 +86,7 @@ async def kv_set(key: str, value: str, ttl_seconds: int) -> None:
                 .where(KvCacheEntry.key == key)
                 .values(value=value, expires_at=expires_at)
             )
-            if result.rowcount == 0:
+            if (getattr(result, "rowcount", 0) or 0) == 0:
                 session.add(KvCacheEntry(key=key, value=value, expires_at=expires_at))
             if random.random() < _PURGE_PROBABILITY:
                 await session.execute(
