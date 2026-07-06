@@ -250,6 +250,11 @@ async def test_degraded_price_refresh_never_wipes_prices(
     browse = await mirror.browse_pokemon(1, 10, "price_desc")
     assert browse["payloads"][0]["id"] == "tsta-2"  # sort_price survived
 
+    # A degraded fetch on a never-hydrated set must leave it STALE so the
+    # next walk retries it (not parked "fresh" and priceless for 24h).
+    assert await mirror.refresh_set_prices("tstb") == 0
+    assert "tstb" in await mirror.stale_price_set_ids(limit=50)
+
 
 @pytest.mark.asyncio
 async def test_browse_sorting_and_set_scope(db_engine, patched_dump):

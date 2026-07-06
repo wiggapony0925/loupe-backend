@@ -409,9 +409,14 @@ async def refresh_set_prices(set_id: str) -> int:
                 row.sort_price = new_sort
                 row.synced_at = _now()
                 updated += 1
-            set_row = await session.get(CatalogMirrorSet, set_id)
-            if set_row is not None:
-                set_row.prices_synced_at = _now()
+            # Only mark the set hydrated when prices actually landed — a
+            # degraded fetch (cards present, empty price dicts) must leave
+            # the set stale so the next walk retries it instead of parking
+            # it priceless for the whole freshness window.
+            if updated > 0:
+                set_row = await session.get(CatalogMirrorSet, set_id)
+                if set_row is not None:
+                    set_row.prices_synced_at = _now()
             await session.commit()
     except Exception as exc:
         logger.info("price refresh failed set=%s: %s", set_id, exc)
