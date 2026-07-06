@@ -325,6 +325,25 @@ async def _upsert_set_cards(set_obj: dict[str, Any], cards: list[Any]) -> int:
 # ------------------------------------------------------------- price refresh
 
 
+def _usable_price_block(kind: str, block: Any) -> bool:
+    """True when an upstream price block carries at least one number.
+
+    ``tcgplayer`` → ``prices.<variant>.{market,mid,low,high}``;
+    ``cardmarket`` → ``prices.{averageSellPrice,trendPrice,...}``.
+    """
+    if not isinstance(block, dict):
+        return False
+    prices = block.get("prices")
+    if not isinstance(prices, dict) or not prices:
+        return False
+    if kind == "tcgplayer":
+        return any(
+            isinstance(v, dict) and any(x is not None for x in v.values())
+            for v in prices.values()
+        )
+    return any(v is not None for v in prices.values())
+
+
 async def refresh_set_prices(set_id: str) -> int:
     """Refresh embedded tcgplayer/cardmarket blocks for one set from the live
     API. Never raises; returns how many cards got updated prices."""
@@ -373,13 +392,21 @@ async def refresh_set_prices(set_id: str) -> int:
                 payload = dict(row.payload or {})
                 changed = False
                 for block in ("tcgplayer", "cardmarket"):
-                    if live.get(block):
+                    # Only accept a block that actually carries numbers. A
+                    # degraded upstream answers cards with EMPTY price dicts
+                    # ({url, updatedAt, prices: {}}) — blindly merging those
+                    # replaced good hydrated prices with nothing (observed
+                    # wiping whole sets in prod on 2026-07-06).
+                    if _usable_price_block(block, live.get(block)):
                         payload[block] = live[block]
                         changed = True
                 if not changed:
                     continue
+                new_sort = _sort_price(payload)
+                if new_sort is None and row.sort_price is not None:
+                    continue  # never trade a real price for none
                 row.payload = payload
-                row.sort_price = _sort_price(payload)
+                row.sort_price = new_sort
                 row.synced_at = _now()
                 updated += 1
             set_row = await session.get(CatalogMirrorSet, set_id)

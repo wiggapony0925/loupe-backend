@@ -202,6 +202,56 @@ async def test_resync_preserves_hydrated_prices(db_engine, patched_dump, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_degraded_price_refresh_never_wipes_prices(
+    db_engine, patched_dump, monkeypatch
+):
+    """A degraded upstream answers cards with EMPTY price dicts — merging
+    those must never replace good hydrated prices (wiped real sets in prod)."""
+    await _synced(patched_dump)
+
+    good = {
+        "data": [
+            {
+                "id": "tsta-2",
+                "tcgplayer": {
+                    "url": "https://t",
+                    "updatedAt": "2026/07/06",
+                    "prices": {"holofoil": {"market": 99.0}},
+                },
+            }
+        ],
+        "totalCount": 1,
+    }
+    degraded = {
+        "data": [
+            {
+                "id": "tsta-2",
+                "tcgplayer": {"url": "https://t", "prices": {}},
+                "cardmarket": {"prices": {"averageSellPrice": None}},
+            }
+        ],
+        "totalCount": 1,
+    }
+
+    async def _live_good(*a: Any, **k: Any):
+        return good
+
+    async def _live_degraded(*a: Any, **k: Any):
+        return degraded
+
+    monkeypatch.setattr(mirror.pokemon_tcg, "search_cards", _live_good)
+    assert await mirror.refresh_set_prices("tsta") == 1
+
+    monkeypatch.setattr(mirror.pokemon_tcg, "search_cards", _live_degraded)
+    assert await mirror.refresh_set_prices("tsta") == 0
+
+    payload = await mirror.get_pokemon_by_id("tsta-2")
+    assert payload["tcgplayer"]["prices"]["holofoil"]["market"] == 99.0
+    browse = await mirror.browse_pokemon(1, 10, "price_desc")
+    assert browse["payloads"][0]["id"] == "tsta-2"  # sort_price survived
+
+
+@pytest.mark.asyncio
 async def test_browse_sorting_and_set_scope(db_engine, patched_dump):
     await _synced(patched_dump)
 
