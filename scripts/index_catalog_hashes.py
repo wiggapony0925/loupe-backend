@@ -78,6 +78,18 @@ async def _existing_ids(session, upstream_ids: list[str]) -> set[str]:
     return set(rows)
 
 
+def _alt_art_url(url: str) -> str | None:
+    """The upstream's alternate scan of the same card, when one exists.
+
+    pokemontcg.io serves ``<n>.png`` (small) and ``<n>_hires.png`` — two
+    DIFFERENT scans whose pHashes can differ by 40+ bits. Index both so a
+    scan matching either variant resolves.
+    """
+    if "images.pokemontcg.io" in url and url.endswith(".png") and "_hires" not in url:
+        return url[: -len(".png")] + "_hires.png"
+    return None
+
+
 async def _hash_one(card: Any, sem: asyncio.Semaphore) -> dict[str, Any] | None:
     upstream_id = _field(card, "id")
     url = _image_url(card)
@@ -87,6 +99,11 @@ async def _hash_one(card: Any, sem: asyncio.Semaphore) -> dict[str, Any] | None:
         fp = await fingerprint_from_image_url(url)
     if fp is None or not fp.phash:
         return None
+    alt_url = _alt_art_url(url)
+    fp_alt = None
+    if alt_url:
+        async with sem:
+            fp_alt = await fingerprint_from_image_url(alt_url)
     return {
         "upstream_id": upstream_id,
         "tcg": (_field(card, "tcg") or "").lower() or "unknown",
@@ -96,6 +113,8 @@ async def _hash_one(card: Any, sem: asyncio.Semaphore) -> dict[str, Any] | None:
         "image_url": url,
         "phash": fp.phash,
         "dhash": fp.dhash,
+        "phash_alt": fp_alt.phash if fp_alt else None,
+        "dhash_alt": fp_alt.dhash if fp_alt else None,
     }
 
 
@@ -111,6 +130,8 @@ async def _upsert(session, records: list[dict[str, Any]]) -> None:
             set_={
                 "phash": stmt.excluded.phash,
                 "dhash": stmt.excluded.dhash,
+                "phash_alt": stmt.excluded.phash_alt,
+                "dhash_alt": stmt.excluded.dhash_alt,
                 "image_url": stmt.excluded.image_url,
                 "name": stmt.excluded.name,
                 "set_name": stmt.excluded.set_name,

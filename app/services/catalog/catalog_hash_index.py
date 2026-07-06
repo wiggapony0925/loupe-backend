@@ -96,36 +96,52 @@ async def _refresh_if_stale(db: AsyncSession) -> None:
                     CatalogImageHash.image_url,
                     CatalogImageHash.phash,
                     CatalogImageHash.dhash,
+                    CatalogImageHash.phash_alt,
+                    CatalogImageHash.dhash_alt,
                 )
             )
         ).all()
         ph_ints: list[int] = []
         dh_ints: list[int | None] = []
         meta: list[CatalogHashHit] = []
-        for upstream_id, tcg, name, set_name, number, image_url, phash, dhash in rows:
-            val = _hex_to_int(phash)
-            if val is None:
-                continue
-            ph_ints.append(val)
-            dh_ints.append(_hex_to_int(dhash) if dhash else None)
-            meta.append(
-                CatalogHashHit(
-                    upstream_id=upstream_id,
-                    tcg=tcg,
-                    name=name,
-                    set_name=set_name,
-                    number=number,
-                    image_url=image_url,
-                    distance=0,
-                    bits=len(phash) * 4,
-                )
+        for (
+            upstream_id,
+            tcg,
+            name,
+            set_name,
+            number,
+            image_url,
+            phash,
+            dhash,
+            phash_alt,
+            dhash_alt,
+        ) in rows:
+            hit = CatalogHashHit(
+                upstream_id=upstream_id,
+                tcg=tcg,
+                name=name,
+                set_name=set_name,
+                number=number,
+                image_url=image_url,
+                distance=0,
+                bits=len(phash) * 4,
             )
+            # A card contributes one entry per art scan it has — the upstream's
+            # small and _hires scans can differ by 40+ bits, so both must be
+            # matchable. Entries share the same meta row.
+            for ph, dh in ((phash, dhash), (phash_alt, dhash_alt)):
+                val = _hex_to_int(ph) if ph else None
+                if val is None:
+                    continue
+                ph_ints.append(val)
+                dh_ints.append(_hex_to_int(dh) if dh else None)
+                meta.append(hit)
         _ph_ints = ph_ints
         _dh_ints = dh_ints
         _rows = meta
         _row_count = count
         _loaded_at = time.monotonic()
-        logger.info("catalog hash index loaded: %d rows", len(_ph_ints))
+        logger.info("catalog hash index loaded: %d entries", len(_ph_ints))
 
 
 async def find_nearest(
@@ -243,15 +259,19 @@ async def find_best(
             if tcg_norm is not None and rows[i].tcg.lower() != tcg_norm:
                 continue
             dist = (q ^ cand).bit_count()
+            # The margin runner-up is the nearest DIFFERENTLY-NAMED card:
+            # reprints share the exact artwork, so a same-name twin sitting a
+            # few bits away is expected and must not destroy decisiveness
+            # (and a card's own alternate-art entry must never count).
             if dist < best_dist:
-                if best_i >= 0 and rows[best_i].upstream_id != rows[i].upstream_id:
+                if best_i >= 0 and rows[best_i].name.lower() != rows[i].name.lower():
                     runner_up = min(runner_up, best_dist)
                 best_dist = dist
                 best_i = i
                 best_q_dhash = q_dh
             elif (
                 best_i >= 0
-                and rows[i].upstream_id != rows[best_i].upstream_id
+                and rows[i].name.lower() != rows[best_i].name.lower()
                 and dist < runner_up
             ):
                 runner_up = dist
@@ -330,17 +350,26 @@ async def search_text(
         scored.append((score, row))
 
     scored.sort(key=lambda s: -s[0])
-    return [
-        {
-            "id": r.upstream_id,
-            "name": r.name,
-            "tcg": r.tcg,
-            "set_name": r.set_name,
-            "number": r.number,
-            "image_url": r.image_url,
-        }
-        for _, r in scored[:limit]
-    ]
+    out: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for _, r in scored:
+        # Cards contribute one meta row per art entry — dedupe by id.
+        if r.upstream_id in seen_ids:
+            continue
+        seen_ids.add(r.upstream_id)
+        out.append(
+            {
+                "id": r.upstream_id,
+                "name": r.name,
+                "tcg": r.tcg,
+                "set_name": r.set_name,
+                "number": r.number,
+                "image_url": r.image_url,
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
 
 
 async def warm(db: AsyncSession) -> None:

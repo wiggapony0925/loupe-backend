@@ -48,6 +48,11 @@ class CatalogImageHash(Base):
     #: for a cheap prefix pre-filter should the in-memory cache ever be bypassed.
     phash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     dhash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: Hashes of the card's ALTERNATE art scan (pokemontcg ``_hires``): the two
+    #: upstream scans of one card can differ by 40+ bits, so we match against
+    #: both. Null when the catalog has a single art source.
+    phash_alt: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    dhash_alt: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
