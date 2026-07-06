@@ -54,7 +54,9 @@ async def search_cards(
         url=f"{BASE_URL}/cards",
         params=params,
         headers=_headers(),
-        timeout_s=timeout_s if timeout_s is not None else s.http_timeout_seconds,
+        timeout_s=timeout_s
+        if timeout_s is not None
+        else s.catalog_http_timeout_seconds,
     )
     return body or {"data": []}
 
@@ -67,7 +69,7 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
         method="GET",
         url=f"{BASE_URL}/cards/{card_id}",
         headers=_headers(),
-        timeout_s=s.http_timeout_seconds,
+        timeout_s=s.catalog_http_timeout_seconds,
         not_found_ok=True,
     )
     if body is None:

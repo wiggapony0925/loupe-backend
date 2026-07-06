@@ -44,6 +44,15 @@
   "/v1/admin/catalog": [
     "GET"
   ],
+  "/v1/admin/catalog/mirror": [
+    "GET"
+  ],
+  "/v1/admin/catalog/mirror/refresh-prices": [
+    "POST"
+  ],
+  "/v1/admin/catalog/mirror/sync": [
+    "POST"
+  ],
   "/v1/admin/cloud": [
     "GET"
   ],

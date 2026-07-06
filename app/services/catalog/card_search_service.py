@@ -34,6 +34,7 @@ from app.integrations._http import (
     scryfall,
     ygoprodeck,
 )
+from app.platform import cache_l2
 from app.platform.api_budget import ApiBudget
 from app.platform.cache_config import (
     CARD_DETAIL_TTL,
@@ -53,6 +54,7 @@ from app.schemas.unified_card import (
     UnifiedPricingSummary,
     UnifiedSet,
 )
+from app.services.catalog import pokemon_mirror_service
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 
@@ -780,10 +782,28 @@ def _find_in_catalog(
 # ------------------------------------------------------------------- caching
 
 
+#: On an L2 hit the value is re-seeded into L1 for this long. We don't know
+#: the key's remaining true TTL (L2 tracks absolute expiry), so keep it short:
+#: hot keys stay in-process, correctness stays with the L2 expiry.
+_L1_RESEED_TTL = 300
+
+
 async def _cache_get(key: str) -> dict[str, Any] | None:
+    """Two-tier read: Redis/in-process L1, then the durable Postgres L2.
+
+    Production has no reachable Redis, so L1 is a per-instance dict wiped on
+    every Cloud Run recycle — without the L2 every "cached" catalog surface
+    cold-starts into a live upstream proxy (the 30s-skeleton bug)."""
     try:
         r = await get_redis()
         raw = await r.get(key)
+        if raw is None:
+            raw = await cache_l2.kv_get(key)
+            if raw is not None:
+                try:
+                    await r.setex(key, _L1_RESEED_TTL, raw)
+                except Exception:  # pragma: no cover - L1 reseed best effort
+                    pass
         if raw is None:
             return None
         return json.loads(raw)
@@ -794,8 +814,10 @@ async def _cache_get(key: str) -> dict[str, Any] | None:
 
 async def _cache_set(key: str, value: dict[str, Any], ttl: int) -> None:
     try:
+        encoded = json.dumps(value, default=str)
         r = await get_redis()
-        await r.setex(key, ttl, json.dumps(value, default=str))
+        await r.setex(key, ttl, encoded)
+        await cache_l2.kv_set(key, encoded, ttl)
     except Exception as exc:  # pragma: no cover
         logger.debug("cache_set failed: %s", exc)
 
@@ -918,6 +940,14 @@ def _rank(items: list[dict[str, Any]], q: str, limit: int) -> list[dict[str, Any
 
 
 async def _search_pokemon(q: str, limit: int) -> list[dict[str, Any]]:
+    # Mirror first — complete catalog, ~ms latency, immune to upstream blips.
+    # Pull a wide pool and let the shared relevance ranker pick the top N,
+    # matching the live path's rank-after-fetch behavior.
+    mirror = await pokemon_mirror_service.search_pokemon(
+        q, page=1, page_size=max(limit * 5, 60)
+    )
+    if mirror is not None:
+        return _rank([_from_pokemon(p) for p in mirror["payloads"]], q, limit)
     raw = await pokemon_tcg.search_cards(
         _build_pokemon_query(q), page=1, page_size=limit
     )
@@ -979,6 +1009,14 @@ async def search_cards_precise(
         return []
     try:
         if tcg == "pokemon":
+            # Mirror first — the identify pipeline calls this on every scan,
+            # so the pinned-number lookup being a local indexed query (instead
+            # of 1-2 upstream round-trips) directly speeds up scanning.
+            mirror = await pokemon_mirror_service.precise_pokemon(
+                name, bare, limit=limit
+            )
+            if mirror is not None:
+                return [_from_pokemon(p) for p in mirror][: max(limit, 30)]
             tokens = [
                 t for t in _POKEMON_SAFE_RE.sub(" ", name).strip().lower().split() if t
             ]
@@ -1276,6 +1314,20 @@ async def search_cards_paged(
 
     try:
         if tcg == "pokemon":
+            # Mirror first: true pagination over the complete local catalog
+            # (newest printings first, same as the live orderBy), no upstream.
+            mirror = await pokemon_mirror_service.search_pokemon(
+                q, page=page, page_size=page_size
+            )
+            if mirror is not None:
+                body = {
+                    "results": [_from_pokemon(p) for p in mirror["payloads"]],
+                    "total": mirror["total"],
+                    "source": "pokemontcg",
+                }
+                body["page"] = page
+                body["page_size"] = page_size
+                return body
             raw = await pokemon_tcg.search_cards(
                 _build_pokemon_query(q),
                 page=page,
@@ -1750,7 +1802,15 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
 
     try:
         if source == "pokemontcg":
-            raw = await pokemon_tcg.get_card(upstream_id)
+            # Mirror first: identity (name/set/art) is a local PK lookup, so
+            # the detail page paints instantly instead of waiting seconds on
+            # the upstream. A mirror miss (brand-new card) falls through to
+            # the live API and back-fills the mirror for the next viewer.
+            raw = await pokemon_mirror_service.get_pokemon_by_id(upstream_id)
+            if raw is None:
+                raw = await pokemon_tcg.get_card(upstream_id)
+                if raw:
+                    await pokemon_mirror_service.upsert_card_payload(raw)
             result = _from_pokemon(raw) if raw else None
         elif source == "scryfall":
             raw = await scryfall.get_card(upstream_id)
@@ -2285,7 +2345,10 @@ async def list_sets(tcg: str) -> dict[str, Any]:
 
     try:
         if tcg == "pokemon":
-            sets = await pokemon_tcg.list_sets()
+            # Mirror first — same payload shape as the live /sets endpoint.
+            sets = await pokemon_mirror_service.list_pokemon_sets()
+            if sets is None:
+                sets = await pokemon_tcg.list_sets()
             items = [_pokemon_set(s) for s in sets]
             body = {"results": items, "total": len(items), "source": "pokemontcg"}
         elif tcg == "yugioh":

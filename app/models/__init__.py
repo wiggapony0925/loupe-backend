@@ -7,6 +7,7 @@ from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
 from app.models.career import ApplicationEvent, JobApplication, JobPosting
 from app.models.catalog_hash import CatalogImageHash
+from app.models.catalog_mirror import CatalogMirrorCard, CatalogMirrorSet
 from app.models.collection import Collection, CollectionItem
 from app.models.email_log import EmailLog
 from app.models.enums import (
@@ -31,6 +32,7 @@ from app.models.feature_flag import FeatureFlag
 from app.models.fingerprint import Fingerprint
 from app.models.grade import GradedCard
 from app.models.identification import CardIdentification, IdentificationFeedback
+from app.models.kv_cache import KvCacheEntry
 from app.models.price import PriceSnapshot
 from app.models.price_alert import PriceAlert
 from app.models.push_token import PushToken
@@ -56,6 +58,8 @@ __all__ = [
     "CardIdentification",
     "CardSet",
     "CatalogImageHash",
+    "CatalogMirrorCard",
+    "CatalogMirrorSet",
     "Collection",
     "CollectionItem",
     "EmailLog",
@@ -68,6 +72,7 @@ __all__ = [
     "JobApplication",
     "JobPosting",
     "JobStatusEnum",
+    "KvCacheEntry",
     "PriceAlert",
     "PriceAlertCondition",
     "PriceSnapshot",

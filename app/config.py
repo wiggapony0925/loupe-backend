@@ -261,6 +261,12 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 15.0
     http_max_connections: int = 20
     http_max_keepalive: int = 10
+    # Budget for USER-FACING catalog reads (browse/search/detail proxies).
+    # Deliberately much tighter than ``http_timeout_seconds``: prod sets the
+    # general timeout to 30s, and a browse request that inherits it hangs the
+    # UI skeleton for 30s x retries when pokemontcg.io has a bad day. Past this
+    # budget we'd rather serve a degraded/cached page than keep a user waiting.
+    catalog_http_timeout_seconds: float = 8.0
 
     # --- OCR / card identification pipeline ---
     # Provider selection. ``mock`` returns canned text so dev and CI never

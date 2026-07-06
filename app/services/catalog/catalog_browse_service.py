@@ -21,6 +21,7 @@ from typing import Any
 from app.config import get_settings
 from app.integrations._http import pokemon_tcg
 from app.integrations._http._resilient import request_json
+from app.services.catalog import pokemon_mirror_service
 from app.services.catalog.card_search_service import (
     _cache_get,
     _cache_set,
@@ -113,11 +114,19 @@ async def browse_catalog(
     game = (game or "").lower()
     sort = sort if sort in _POKEMON_ORDER else "name"
 
+    # Mirror-served games don't need the page cache: the mirror read is a
+    # single-digit-ms indexed query, and caching would pin pre-hydration
+    # (priceless) pages for the full TTL.
+    use_page_cache = not (
+        game in ("pokemon", "all") and await pokemon_mirror_service.mirror_ready()
+    )
+
     set_key = (set_id or "").strip() or "_"
     cache_key = f"{_CACHE_PREFIX}:{game}:{set_key}:{sort}:{page}:{page_size}"
-    cached = await _cache_get(cache_key)
-    if cached is not None:
-        return cached
+    if use_page_cache:
+        cached = await _cache_get(cache_key)
+        if cached is not None:
+            return cached
 
     result = _empty(game, page, page_size)
     for attempt in range(1, _MAX_FETCH_ATTEMPTS + 1):
@@ -153,7 +162,7 @@ async def browse_catalog(
             _MAX_FETCH_ATTEMPTS,
         )
 
-    if result.get("cards"):
+    if use_page_cache and result.get("cards"):
         await _cache_set(cache_key, result, _BROWSE_TTL)
     return result
 
@@ -168,6 +177,21 @@ async def _fetch_catalog(
     prov_set = set_id.split(":")[-1].strip() if set_id else ""
 
     if game in ("pokemon", "all"):
+        # Mirror first: the complete catalog lives in our own Postgres
+        # (synced from the upstream's bulk data), so a browse page is a
+        # ~5ms indexed query instead of a 30s round-trip to a flaky
+        # upstream. Live proxy only remains as the pre-sync fallback.
+        mirror = await pokemon_mirror_service.browse_pokemon(
+            page, page_size, sort, set_id=prov_set or None
+        )
+        if mirror is not None:
+            return {
+                "cards": [_from_pokemon(p) for p in mirror["payloads"]],
+                "total": mirror["total"],
+                "page": page,
+                "page_size": page_size,
+                "source": "pokemontcg",
+            }
         # Empty query → full catalog; `set.id:<code>` scopes to one set.
         q = f"set.id:{prov_set}" if prov_set else ""
         raw = await pokemon_tcg.search_cards(
@@ -200,7 +224,7 @@ async def _fetch_catalog(
                 "page": sf_page,
             },
             headers={"Accept": "application/json"},
-            timeout_s=s.http_timeout_seconds,
+            timeout_s=s.catalog_http_timeout_seconds,
             not_found_ok=True,
         )
         if not body:
@@ -228,7 +252,7 @@ async def _fetch_catalog(
             url="https://db.ygoprodeck.com/api/v7/cardinfo.php",
             params={"num": page_size, "offset": offset, "sort": _YGO_SORT[sort]},
             headers={"Accept": "application/json"},
-            timeout_s=s.http_timeout_seconds,
+            timeout_s=s.catalog_http_timeout_seconds,
             not_found_ok=True,
             extra_ok_statuses=(400,),
         )

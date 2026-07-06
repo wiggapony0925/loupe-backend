@@ -58,19 +58,26 @@ def _reset_process_singletons():
 
     def _reset() -> None:
         from app.platform import cache_swr, redis_client
-        from app.services.catalog import card_search_service, carousel_service
+        from app.services.catalog import (
+            card_search_service,
+            carousel_service,
+            pokemon_mirror_service,
+        )
 
         redis_client._client = None
         for taskset in (
             cache_swr._bg_tasks,
             carousel_service._bg_tasks,
             card_search_service._price_bg_tasks,
+            pokemon_mirror_service._bg_tasks,
         ):
             for task in list(taskset):
                 task.cancel()
             taskset.clear()
         carousel_service._inflight.clear()
         carousel_service._last_attempt.clear()
+        pokemon_mirror_service._price_refresh_inflight.clear()
+        pokemon_mirror_service.reset_ready_cache()
 
     _reset()
     yield

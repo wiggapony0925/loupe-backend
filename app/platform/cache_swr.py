@@ -44,9 +44,20 @@ _bg_tasks: set[asyncio.Task[Any]] = set()
 
 async def _safe_get(r: Any, key: str) -> str | None:
     try:
-        return await r.get(key)
+        raw = await r.get(key)
+        if raw is not None:
+            return raw
     except Exception as exc:  # pragma: no cover - cache best effort
         logger.debug("swr get failed key=%s: %s", key, exc)
+    # Durable L2 (Postgres) — in prod the L1 is a per-instance dict that dies
+    # with the instance; the envelope's own fresh_until keeps SWR semantics
+    # working on a value revived from L2 after a cold start.
+    try:
+        from app.platform.cache_l2 import kv_get
+
+        return await kv_get(key)
+    except Exception as exc:  # pragma: no cover
+        logger.debug("swr l2 get failed key=%s: %s", key, exc)
         return None
 
 
@@ -60,6 +71,12 @@ async def _store(
         await r.setex(key, stale_ttl, envelope)
     except Exception as exc:  # pragma: no cover
         logger.debug("swr store failed key=%s: %s", key, exc)
+    try:
+        from app.platform.cache_l2 import kv_set
+
+        await kv_set(key, envelope, stale_ttl)
+    except Exception as exc:  # pragma: no cover
+        logger.debug("swr l2 store failed key=%s: %s", key, exc)
 
 
 async def _acquire_lock(r: Any, lock_key: str, lock_ttl: int) -> bool:
