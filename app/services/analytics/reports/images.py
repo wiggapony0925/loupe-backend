@@ -14,7 +14,11 @@ import logging
 
 import httpx
 
-from app.services.analytics.reports.aggregator import ReportSnapshot
+from app.services.analytics.reports.aggregator import (
+    HoldingRow,
+    MoverRow,
+    ReportSnapshot,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -32,7 +36,7 @@ GALLERY_HOLDINGS = 8
 def _wanted_urls(snap: ReportSnapshot) -> dict[str, str]:
     """card_id → image_url for every row the renderer will draw art for."""
     wanted: dict[str, str] = {}
-    rows = [
+    rows: list[HoldingRow | MoverRow] = [
         *snap.top_gainers,
         *snap.top_losers,
         *snap.holdings[:GALLERY_HOLDINGS],

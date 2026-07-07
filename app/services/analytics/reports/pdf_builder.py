@@ -517,7 +517,7 @@ def _line_chart(snap: ReportSnapshot) -> Drawing:
 
     # Area fill + value line
     pts = [(sx(i), sy(v)) for i, v in enumerate(values)]
-    poly = [px, py]
+    poly: list[float] = [px, py]
     for x, y in pts:
         poly.extend([x, y])
     poly.extend([px + pw, py])
