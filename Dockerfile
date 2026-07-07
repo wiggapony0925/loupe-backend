@@ -24,8 +24,14 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/install/bin:${PATH}" \
     PYTHONPATH="/install/lib/python3.12/site-packages"
 
+# Runtime deps. WeasyPrint (HTML→PDF for statements) needs Pango + HarfBuzz +
+# fontconfig; fonts-liberation gives a metric-compatible Arial/Helvetica so the
+# statement typography renders identically to local/CI.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 curl tini \
+    && apt-get install -y --no-install-recommends \
+        libpq5 curl tini \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libfontconfig1 \
+        fonts-liberation fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system --gid 1001 app \
     && useradd  --system --uid 1001 --gid app --home /app --shell /usr/sbin/nologin app

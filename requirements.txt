@@ -53,6 +53,14 @@ google-cloud-vision>=3.7,<4
 rapidfuzz>=3.10,<4
 
 # --- PDF generation (user-facing portfolio statements) ---
+# Primary path: WeasyPrint renders the statement from HTML + SCSS (Jinja2
+# template + libsass-compiled styles + server-rendered SVG charts). Needs the
+# Pango/HarfBuzz/fontconfig system libs — installed in the Dockerfile runtime
+# stage and in CI (see .github/workflows/ci.yml). ReportLab stays as a
+# pure-Python, no-system-libs fallback so statements never hard-fail.
+weasyprint>=63,<66
+Jinja2>=3.1,<4
+libsass>=0.23,<1
 reportlab>=4.2,<5
 
 # --- Auth / crypto ---

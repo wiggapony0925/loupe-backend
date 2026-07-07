@@ -1,0 +1,300 @@
+// Portfolio-statement stylesheet — compiled to CSS by libsass at render time
+// and handed to WeasyPrint. Print-first: everything is sized for US Letter and
+// avoids CSS features WeasyPrint can't do (no JS, limited grid → we use flex +
+// tables). Palette mirrors charts.py / loupe-web tokens.scss.
+
+// ─── Brand tokens ────────────────────────────────────────────────────────
+$ink:        #0E1117;
+$ink-dim:    #5B6470;
+$ink-muted:  #9BA3AD;
+$line:       #E5E8EC;
+$bg-elev:    #F7F8FA;
+$mint:       #16C09C;
+$mint-dark:  #0E8A6C;
+$mint-tint:  #E9F9F4;
+$ink-band:   #0B0E14;
+$rose:       #E5484D;
+$rose-tint:  #FDECEC;
+$amber:      #F5A524;
+$blue:       #2F6CFB;
+
+// Liberation Sans carries the Latin text (Arial-metric); "DejaVu Sans" is a
+// per-glyph fallback for the brand mark ◆ and the P/L arrows ▲ ▼, which
+// Liberation lacks. Both fonts are apt-installed in the container + CI.
+$font: "Liberation Sans", "Helvetica Neue", Arial, "DejaVu Sans", sans-serif;
+
+// ─── Page setup: margins + running header/footer + page counter ──────────
+@page {
+  size: Letter;
+  margin: 78px 54px 60px 54px;
+
+  @top-left {
+    content: element(runBrand);
+    vertical-align: top;
+  }
+  @top-right {
+    content: element(runPeriod);
+    vertical-align: top;
+  }
+  @bottom-left {
+    content: element(runGenerated);
+    vertical-align: bottom;
+  }
+  @bottom-center {
+    content: element(runEmail);
+    vertical-align: bottom;
+  }
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    vertical-align: bottom;
+    font: 700 8px $font;
+    color: $ink-muted;
+  }
+}
+
+// The cover page hides the running header so the dark band reads as the top.
+@page :first {
+  @top-left { content: none; }
+  @top-right { content: none; }
+}
+
+* { box-sizing: border-box; }
+
+html { font-family: $font; }
+
+body {
+  margin: 0;
+  color: $ink;
+  font-family: $font;
+  font-size: 12px;
+  line-height: 1.45;
+  hyphens: none;
+}
+
+// ─── Running header / footer elements ────────────────────────────────────
+.run { font-size: 8px; }
+.run-brand    { position: running(runBrand);     font-weight: 700; color: $ink-dim;   letter-spacing: 0.3px; }
+.run-period   { position: running(runPeriod);    font-weight: 700; color: $ink-dim; }
+.run-generated{ position: running(runGenerated); color: $ink-muted; font-size: 7.5px; }
+.run-email    { position: running(runEmail);     color: $ink-muted; font-size: 7.5px; }
+
+// ─── Section scaffolding ─────────────────────────────────────────────────
+.page + .page { break-before: page; }
+
+.eyebrow {
+  margin: 0 0 4px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: $ink-muted;
+}
+
+h2.section {
+  margin: 0 0 3px;
+  font-size: 17px;
+  font-weight: 700;
+  color: $ink;
+}
+
+.dim { color: $ink-dim; font-size: 11px; margin: 0 0 4px; }
+.muted { color: $ink-muted; }
+
+.up   { color: $mint-dark; }
+.down { color: $rose; }
+
+// ─── Cover: dark brand band ──────────────────────────────────────────────
+.band {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: $ink-band;
+  border-radius: 8px;
+  padding: 20px 22px;
+  color: white;
+
+  .band-brand { color: $mint; font-weight: 700; font-size: 13px; letter-spacing: 0.4px; }
+  .band-title { color: white; font-weight: 700; font-size: 23px; margin-top: 6px; }
+  .band-sub   { color: #AEB6C2; font-size: 10px; margin-top: 2px; }
+  .band-right { text-align: right; }
+  .band-right .k { color: #AEB6C2; font-size: 8px; letter-spacing: 0.6px; text-transform: uppercase; }
+  .band-right .v { color: white; font-weight: 700; font-size: 11px; margin-top: 3px; }
+}
+
+// ─── Cover: closing-value hero + P/L chip ────────────────────────────────
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-top: 24px;
+
+  .hero-value { font-size: 42px; font-weight: 700; line-height: 1.02; margin: 2px 0; color: $ink; }
+  .hero-sub   { color: $ink-dim; font-size: 11px; }
+
+  .chip {
+    align-self: center;
+    border-radius: 11px;
+    padding: 9px 15px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    &.up   { background: $mint-tint; color: $mint-dark; }
+    &.down { background: $rose-tint; color: $rose; }
+    .chip-pct { font-weight: 400; margin-left: 4px; }
+  }
+}
+
+// ─── Cover: KPI cards ────────────────────────────────────────────────────
+.kpis {
+  display: flex;
+  gap: 11px;
+  margin-top: 22px;
+
+  .kpi {
+    flex: 1;
+    background: $bg-elev;
+    border: 0.75px solid $line;
+    border-radius: 8px;
+    padding: 12px 13px;
+    .kpi-label { font-size: 7.5px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: $ink-muted; }
+    .kpi-value { font-size: 17px; font-weight: 700; margin-top: 6px; color: $ink; }
+  }
+}
+
+// ─── Tables: account info + summary ──────────────────────────────────────
+.eyebrow.spaced { margin-top: 26px; }
+
+table { border-collapse: collapse; width: 100%; }
+
+.account {
+  background: $bg-elev;
+  border: 0.75px solid $line;
+  border-radius: 8px;
+  overflow: hidden;
+  td { padding: 9px 12px; font-size: 9px; vertical-align: top; }
+  .lbl { color: $ink-dim; width: 16%; }
+  .val { color: $ink; font-weight: 700; width: 34%; }
+  tr + tr td { border-top: 0.75px solid $line; }
+}
+
+.summary {
+  margin-top: 4px;
+  td { padding: 7px 2px; font-size: 11px; border-bottom: 0.5px solid $line; }
+  tr:last-child td { border-bottom: none; }
+  .lbl { color: $ink-dim; }
+  .val { text-align: right; font-weight: 700; color: $ink; }
+}
+
+// ─── Charts ──────────────────────────────────────────────────────────────
+.chart { margin-top: 12px; }
+.chart svg { display: block; }
+
+.empty {
+  margin-top: 10px;
+  padding: 22px;
+  background: $bg-elev;
+  border: 0.75px solid $line;
+  border-radius: 8px;
+  color: $ink-dim;
+  font-size: 11px;
+}
+
+// ─── Allocation: donut + legend ──────────────────────────────────────────
+.alloc {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  margin-top: 12px;
+
+  .donut { width: 210px; flex: none; }
+
+  .legend {
+    flex: 1;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    li {
+      display: flex;
+      align-items: center;
+      padding: 9px 0;
+      border-bottom: 0.5px solid $line;
+      font-size: 12px;
+      &:last-child { border-bottom: none; }
+      .sw { width: 11px; height: 11px; border-radius: 3px; flex: none; margin-right: 10px; }
+      .name { font-weight: 700; color: $ink; flex: 1; }
+      .val { color: $ink-dim; margin-right: 16px; }
+      .pct { font-weight: 700; color: $ink; width: 46px; text-align: right; }
+    }
+  }
+}
+
+.subhead {
+  margin: 26px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: $ink;
+}
+
+// ─── Movers + holdings tables ────────────────────────────────────────────
+.rowhead {
+  margin: 18px 0 6px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: $ink-muted;
+}
+
+.data-table {
+  th {
+    text-align: left;
+    font-size: 8.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: $ink-muted;
+    padding: 0 6px 6px;
+    border-bottom: 0.75px solid $line;
+  }
+  td {
+    font-size: 9.5px;
+    padding: 5px 6px;
+    border-bottom: 0.4px solid $line;
+    vertical-align: middle;
+  }
+  tr { break-inside: avoid; }
+  .num { text-align: right; }
+  .thumb { width: 26px; padding-left: 0; }
+  .thumb img { width: 22px; border-radius: 2px; display: block; }
+  .card-name { font-weight: 700; color: $ink; }
+  .set { color: $ink-dim; }
+  tbody tr:nth-child(even) td { background: $bg-elev; }
+}
+
+// Holdings table repeats its header on every overflow page.
+.holdings thead { display: table-header-group; }
+
+// ─── Showcase gallery ────────────────────────────────────────────────────
+.gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 14px;
+
+  .g-card {
+    width: 158px;
+    background: $bg-elev;
+    border: 0.75px solid $line;
+    border-radius: 8px;
+    padding: 10px;
+    break-inside: avoid;
+    text-align: center;
+
+    .g-art { width: 100%; border-radius: 4px; display: block; }
+    .g-meta { text-align: left; margin-top: 8px; }
+    .g-name { font-weight: 700; font-size: 10px; color: $ink; }
+    .g-grade { font-size: 7.5px; color: $ink-dim; margin-top: 1px; }
+    .g-value { font-size: 9px; font-weight: 700; color: $ink; margin-top: 3px; }
+    .g-delta { font-size: 8px; margin-left: 5px; }
+  }
+}
