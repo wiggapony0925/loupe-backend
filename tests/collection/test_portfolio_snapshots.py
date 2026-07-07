@@ -24,7 +24,7 @@ from app.services.collection import portfolio_service
 from tests.factories import make_card
 
 
-async def _mk_user(db) -> User:  # noqa: ANN001 - project fixture session
+async def _mk_user(db) -> User:
     user = User(
         id=uuid.uuid4(),
         email=f"snap-{uuid.uuid4().hex[:8]}@test.dev",
@@ -35,7 +35,7 @@ async def _mk_user(db) -> User:  # noqa: ANN001 - project fixture session
     return user
 
 
-async def _mk_holding(db, user: User, value: str) -> GradedCard:  # noqa: ANN001
+async def _mk_holding(db, user: User, value: str) -> GradedCard:
     card = await make_card(db, name="Snapshot Card")
     g = GradedCard(
         user_id=user.id,
@@ -50,7 +50,7 @@ async def _mk_holding(db, user: User, value: str) -> GradedCard:  # noqa: ANN001
 
 
 @pytest.mark.anyio
-async def test_capture_is_throttled(db_session):  # noqa: ANN001
+async def test_capture_is_throttled(db_session):
     user = await _mk_user(db_session)
     first = await portfolio_service.maybe_capture_snapshot(db_session, user, 100.0, 1)
     second = await portfolio_service.maybe_capture_snapshot(db_session, user, 105.0, 1)
@@ -71,14 +71,14 @@ async def test_capture_is_throttled(db_session):  # noqa: ANN001
 
 
 @pytest.mark.anyio
-async def test_capture_skips_empty_vaults(db_session):  # noqa: ANN001
+async def test_capture_skips_empty_vaults(db_session):
     user = await _mk_user(db_session)
     captured = await portfolio_service.maybe_capture_snapshot(db_session, user, 0.0, 0)
     assert captured is False
 
 
 @pytest.mark.anyio
-async def test_retention_purges_old_rows(db_session):  # noqa: ANN001
+async def test_retention_purges_old_rows(db_session):
     user = await _mk_user(db_session)
     stale = PortfolioSnapshot(
         user_id=user.id,
@@ -108,7 +108,7 @@ async def test_retention_purges_old_rows(db_session):  # noqa: ANN001
 
 
 @pytest.mark.anyio
-async def test_1d_history_splices_intraday_snapshots(db_session):  # noqa: ANN001
+async def test_1d_history_splices_intraday_snapshots(db_session):
     user = await _mk_user(db_session)
     await _mk_holding(db_session, user, "200.00")
 
@@ -139,7 +139,7 @@ async def test_1d_history_splices_intraday_snapshots(db_session):  # noqa: ANN00
 
 
 @pytest.mark.anyio
-async def test_history_read_captures_a_snapshot(db_session):  # noqa: ANN001
+async def test_history_read_captures_a_snapshot(db_session):
     user = await _mk_user(db_session)
     await _mk_holding(db_session, user, "75.00")
 

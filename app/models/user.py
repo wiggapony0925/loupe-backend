@@ -135,7 +135,7 @@ class UserSettings(Base):
         UuidCol(), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     # ISO-4217 fiat codes plus crypto tickers (BTC, USDC, MATIC…) — the
-    # clients share one display-currency catalog with 2–6 char codes.
+    # clients share one display-currency catalog with 2-6 char codes.
     currency: Mapped[str] = mapped_column(String(6), default="USD", nullable=False)
     theme: Mapped[str] = mapped_column(String(16), default="system", nullable=False)
     live_sync_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)

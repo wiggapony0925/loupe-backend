@@ -219,7 +219,7 @@ async def maybe_capture_snapshot(
         await db.commit()
         return True
     except Exception:
-        logger.warning("portfolio snapshot capture failed", exc_info=True)
+        _log.warning("portfolio snapshot capture failed", exc_info=True)
         try:
             await db.rollback()
         except Exception:
@@ -245,9 +245,9 @@ async def _intraday_snapshots(
     ).all()
     out: list[tuple[datetime, float]] = []
     for ts, total in rows:
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=UTC)
-        out.append((ts, float(total)))
+        # SQLite returns naive datetimes; treat them as UTC.
+        aware = ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
+        out.append((aware, float(total)))
     return out
 
 

@@ -12,7 +12,7 @@ from app.services.market import fx_service
 
 
 @pytest.fixture(autouse=True)
-async def _clear_fx_cache(db_session):  # noqa: ANN001 - project fixture
+async def _clear_fx_cache(db_session):
     """Each test starts with a cold FX cache."""
     from sqlalchemy import delete
 
@@ -77,7 +77,7 @@ async def test_upstream_failure_degrades_to_static(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_endpoint_returns_complete_table(client, monkeypatch):  # noqa: ANN001
+async def test_endpoint_returns_complete_table(client, monkeypatch):
     async def fake_live():
         return fx_service._complete({"EUR": 0.9, "GBP": 0.8})
 

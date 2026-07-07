@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.charts.piecharts import Pie
-from reportlab.graphics.shapes import Drawing, Line, PolyLine, Polygon, String
+from reportlab.graphics.shapes import Drawing, Line, Polygon, PolyLine, String
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -65,7 +65,7 @@ MARGIN = 0.6 * inch
 CONTENT_W = PAGE_W - 2 * MARGIN
 
 
-# Trading cards are 63×88mm — every embedded thumb keeps that aspect.
+# Trading cards are 63x88mm — every embedded thumb keeps that aspect.
 CARD_ASPECT = 88 / 63
 
 

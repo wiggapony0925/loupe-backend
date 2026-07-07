@@ -51,7 +51,7 @@ class UserSettingsUpdate(BaseModel):
     """Allowed mutations on user settings."""
 
     # ISO-4217 fiat codes (USD, EUR…) plus crypto tickers (BTC, USDC, MATIC) —
-    # the clients share one display-currency catalog, so codes run 2–6 chars.
+    # the clients share one display-currency catalog, so codes run 2-6 chars.
     currency: str | None = Field(
         default=None, min_length=2, max_length=6, pattern=r"^[A-Za-z]+$"
     )

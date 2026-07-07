@@ -153,4 +153,4 @@ async def get_rates(*, force_refresh: bool = False) -> dict[str, Any]:
         }
 
 
-__all__ = ["FIAT_CODES", "CRYPTO_IDS", "STATIC_RATES", "get_rates"]
+__all__ = ["CRYPTO_IDS", "FIAT_CODES", "STATIC_RATES", "get_rates"]

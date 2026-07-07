@@ -22,7 +22,6 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import optional_user, require_admin, require_user
-from app.services.catalog.identify_enrichment_service import enrich_candidates
 from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
@@ -35,6 +34,7 @@ from app.schemas.identification import (
     IdentifyParsed,
     IdentifyResponse,
 )
+from app.services.catalog.identify_enrichment_service import enrich_candidates
 from app.services.identification.card_identifier import CardIdentifier
 from app.services.identification.metrics_service import compute_ocr_metrics
 from app.utils.logger import get_logger

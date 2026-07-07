@@ -24,12 +24,12 @@ from tests.factories import make_card
 
 
 def _candidate(**kw) -> IdentifyCandidate:
-    base = dict(name="Charizard", confidence=0.9, source="phash")
+    base: dict = {"name": "Charizard", "confidence": 0.9, "source": "phash"}
     base.update(kw)
     return IdentifyCandidate(**base)
 
 
-async def _mk_user(db) -> User:  # noqa: ANN001
+async def _mk_user(db) -> User:
     user = User(
         id=uuid.uuid4(),
         email=f"enrich-{uuid.uuid4().hex[:8]}@test.dev",
@@ -40,7 +40,7 @@ async def _mk_user(db) -> User:  # noqa: ANN001
     return user
 
 
-async def _mk_mirror_row(db, upstream_id: str, price: float | None) -> None:  # noqa: ANN001
+async def _mk_mirror_row(db, upstream_id: str, price: float | None) -> None:
     source, external = upstream_id.split(":", 1)
     db.add(
         CatalogMirrorCard(
@@ -59,7 +59,7 @@ async def _mk_mirror_row(db, upstream_id: str, price: float | None) -> None:  # 
 
 
 @pytest.mark.anyio
-async def test_price_comes_from_mirror(db_session):  # noqa: ANN001
+async def test_price_comes_from_mirror(db_session):
     await _mk_mirror_row(db_session, "pokemontcg:base1-4", 412.5)
     cand = _candidate(upstream_id="pokemontcg:base1-4")
 
@@ -70,7 +70,7 @@ async def test_price_comes_from_mirror(db_session):  # noqa: ANN001
 
 
 @pytest.mark.anyio
-async def test_ownership_via_local_card_id(db_session):  # noqa: ANN001
+async def test_ownership_via_local_card_id(db_session):
     user = await _mk_user(db_session)
     card = await make_card(db_session, name="Charizard")
     for house in (GradeHouseEnum.psa, GradeHouseEnum.loupe, GradeHouseEnum.loupe):
@@ -94,7 +94,7 @@ async def test_ownership_via_local_card_id(db_session):  # noqa: ANN001
 
 
 @pytest.mark.anyio
-async def test_ownership_via_upstream_external_ref(db_session):  # noqa: ANN001
+async def test_ownership_via_upstream_external_ref(db_session):
     """Candidate carries only an upstream id; ownership resolves through the
     external-ref mapping to the materialized local card."""
     user = await _mk_user(db_session)
@@ -124,7 +124,7 @@ async def test_ownership_via_upstream_external_ref(db_session):  # noqa: ANN001
 
 
 @pytest.mark.anyio
-async def test_guest_gets_pricing_but_no_ownership(db_session):  # noqa: ANN001
+async def test_guest_gets_pricing_but_no_ownership(db_session):
     await _mk_mirror_row(db_session, "pokemontcg:base1-9", 55.0)
     cand = _candidate(upstream_id="pokemontcg:base1-9")
 
@@ -135,7 +135,7 @@ async def test_guest_gets_pricing_but_no_ownership(db_session):  # noqa: ANN001
 
 
 @pytest.mark.anyio
-async def test_soft_deleted_holdings_do_not_count(db_session):  # noqa: ANN001
+async def test_soft_deleted_holdings_do_not_count(db_session):
     from datetime import UTC, datetime
 
     user = await _mk_user(db_session)
