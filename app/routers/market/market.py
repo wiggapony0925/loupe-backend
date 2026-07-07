@@ -28,6 +28,7 @@ router = APIRouter(prefix="/market", tags=["market"])
 async def get_fx_rates() -> dict[str, Any]:
     return await fx_service.get_rates()
 
+
 _RangeT = Literal["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"]
 
 

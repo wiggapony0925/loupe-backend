@@ -34,8 +34,21 @@ _CACHE_TTL_SECONDS = 12 * 60 * 60
 _FETCH_TIMEOUT_S = 8.0
 
 FIAT_CODES = [
-    "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY",
-    "HKD", "SGD", "KRW", "INR", "MXN", "BRL", "AED",
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CAD",
+    "AUD",
+    "CHF",
+    "CNY",
+    "HKD",
+    "SGD",
+    "KRW",
+    "INR",
+    "MXN",
+    "BRL",
+    "AED",
 ]
 
 #: CoinGecko id → display code.
@@ -49,10 +62,25 @@ CRYPTO_IDS = {
 #: Last-resort snapshot (kept in sync with the clients' historical tables).
 #: Only served when both the cache AND the live fetch are unavailable.
 STATIC_RATES: dict[str, float] = {
-    "USD": 1.0, "EUR": 0.92, "GBP": 0.79, "JPY": 156.4, "CAD": 1.37,
-    "AUD": 1.51, "CHF": 0.91, "CNY": 7.24, "HKD": 7.81, "SGD": 1.35,
-    "KRW": 1378.0, "INR": 83.4, "MXN": 17.1, "BRL": 5.12, "AED": 3.67,
-    "BTC": 1 / 67_400, "ETH": 1 / 3_120, "SOL": 1 / 152, "USDC": 1.0,
+    "USD": 1.0,
+    "EUR": 0.92,
+    "GBP": 0.79,
+    "JPY": 156.4,
+    "CAD": 1.37,
+    "AUD": 1.51,
+    "CHF": 0.91,
+    "CNY": 7.24,
+    "HKD": 7.81,
+    "SGD": 1.35,
+    "KRW": 1378.0,
+    "INR": 83.4,
+    "MXN": 17.1,
+    "BRL": 5.12,
+    "AED": 3.67,
+    "BTC": 1 / 67_400,
+    "ETH": 1 / 3_120,
+    "SOL": 1 / 152,
+    "USDC": 1.0,
 }
 
 

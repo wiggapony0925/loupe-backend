@@ -233,9 +233,7 @@ async def _intraday_snapshots(
     """Chronological (captured_at, total) observations after *since*."""
     rows = (
         await db.execute(
-            select(
-                PortfolioSnapshot.captured_at, PortfolioSnapshot.total_value_usd
-            )
+            select(PortfolioSnapshot.captured_at, PortfolioSnapshot.total_value_usd)
             .where(
                 PortfolioSnapshot.user_id == user.id,
                 PortfolioSnapshot.captured_at > since,

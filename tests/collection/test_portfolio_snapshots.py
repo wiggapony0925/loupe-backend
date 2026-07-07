@@ -144,18 +144,26 @@ async def test_history_read_captures_a_snapshot(db_session):
     await _mk_holding(db_session, user, "75.00")
 
     before = (
-        await db_session.execute(
-            select(PortfolioSnapshot).where(PortfolioSnapshot.user_id == user.id)
+        (
+            await db_session.execute(
+                select(PortfolioSnapshot).where(PortfolioSnapshot.user_id == user.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert before == []
 
     await portfolio_service.history(db_session, user, "1W")
 
     after = (
-        await db_session.execute(
-            select(PortfolioSnapshot).where(PortfolioSnapshot.user_id == user.id)
+        (
+            await db_session.execute(
+                select(PortfolioSnapshot).where(PortfolioSnapshot.user_id == user.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(after) == 1
     assert float(after[0].total_value_usd) == 75.0
