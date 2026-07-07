@@ -120,6 +120,47 @@ async def entitlements_for(db: AsyncSession, user: User) -> EntitlementsRead:
     )
 
 
+#: Free accounts may hold this many ACTIVE price alerts. A constant (not a
+#: SiteConfig column) mirrors the paywall copy "a few alerts free"; promote it
+#: to the admin plan panel if it ever needs live tuning.
+FREE_ALERT_LIMIT = 5
+
+
+async def enforce_can_add_alert(db: AsyncSession, user: User) -> None:
+    """Raise 402 when a free account tries to exceed the alert allowance.
+
+    No-op for Pro, when the kill switch is off, or when the alerts feature
+    isn't gated. Structured ``detail`` (code=alert_limit_reached) lets the
+    client open the paywall with the right story instead of a generic error.
+    """
+    if await is_pro(db, user):
+        return
+    cfg = await site_config_service.get(db)
+    if not cfg.gate_unlimited_alerts:
+        return
+    from sqlalchemy import func, select
+
+    from app.models.price_alert import PriceAlert
+
+    count = (
+        await db.execute(
+            select(func.count(PriceAlert.id)).where(PriceAlert.user_id == user.id)
+        )
+    ).scalar_one()
+    if count >= FREE_ALERT_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail={
+                "code": "alert_limit_reached",
+                "limit": FREE_ALERT_LIMIT,
+                "message": (
+                    f"Free accounts can keep up to {FREE_ALERT_LIMIT} price "
+                    "alerts. Upgrade to Loupe Pro for unlimited alerts."
+                ),
+            },
+        )
+
+
 async def enforce_can_add_card(db: AsyncSession, user: User) -> None:
     """Raise 402 if adding one more card would exceed the free-tier cap.
 
@@ -150,9 +191,11 @@ async def enforce_can_add_card(db: AsyncSession, user: User) -> None:
 
 
 __all__ = [
+    "FREE_ALERT_LIMIT",
     "FREE_CARD_LIMIT",
     "SUBSCRIPTIONS_FLAG",
     "count_cards",
+    "enforce_can_add_alert",
     "enforce_can_add_card",
     "entitlements_for",
     "is_pro",

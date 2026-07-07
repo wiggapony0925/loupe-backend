@@ -11,6 +11,7 @@ from app.auth.dependencies import require_user
 from app.db import get_db
 from app.models.user import User
 from app.schemas.price_alert import PriceAlertCreate, PriceAlertRead
+from app.services import entitlement_service
 from app.services.market import price_alert_service
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
@@ -47,6 +48,9 @@ async def create(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> PriceAlertRead:
+    # Free tier keeps a handful of alerts; Pro is unlimited. 402 with a
+    # structured code so clients open the paywall (mirrors the card cap).
+    await entitlement_service.enforce_can_add_alert(db, user)
     try:
         return await price_alert_service.create(db, user, payload)
     except price_alert_service.CardNotResolvable as exc:
