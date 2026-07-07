@@ -87,7 +87,69 @@ async def create(
         card = (
             await db.execute(select(Card).where(Card.id == card_id))
         ).scalar_one_or_none()
+
+    # Fire immediately if the card is ALREADY past the threshold when the
+    # alert is set (e.g. "above $10" on a card already at $15). Without this
+    # the alert would sit silent until the next live-price observation.
+    await _maybe_fire_on_create(db, row, card)
+
     return _to_read(row, card)
+
+
+async def _last_known_price(card: Card | None) -> Decimal | None:
+    """Best current price for *card* from its cached metadata (no network)."""
+    if card is None or not isinstance(card.card_metadata, dict):
+        return None
+    meta = card.card_metadata
+    # Prefer the freshest observed history point, else the pricing summary.
+    history = meta.get("price_history")
+    if isinstance(history, list) and history:
+        last = history[-1]
+        if isinstance(last, dict):
+            val = last.get("priceUsd", last.get("price"))
+            try:
+                if val is not None:
+                    return Decimal(str(val))
+            except (TypeError, ValueError, ArithmeticError):
+                pass
+    pricing = meta.get("pricing_summary")
+    if isinstance(pricing, dict):
+        market = pricing.get("market")
+        if isinstance(market, dict) and market.get("amount") is not None:
+            try:
+                return Decimal(str(market["amount"]))
+            except (TypeError, ValueError, ArithmeticError):
+                pass
+    return None
+
+
+async def _maybe_fire_on_create(
+    db: AsyncSession, alert: PriceAlert, card: Card | None
+) -> None:
+    """Trip + push a just-created alert if its condition already holds."""
+    price = await _last_known_price(card)
+    if price is None or not _satisfies(alert.condition, price, alert.threshold_usd):
+        return
+    from datetime import UTC, datetime
+
+    alert.triggered_at = datetime.now(UTC)
+    alert.triggered_price_usd = price
+    await db.commit()
+    try:
+        from app.services import push_service
+
+        await push_service.send_price_alert_push(
+            alert.user_id,
+            card_name=(card.name if card else None) or "A watched card",
+            condition=alert.condition.value
+            if hasattr(alert.condition, "value")
+            else str(alert.condition),
+            price_usd=float(price),
+            threshold_usd=float(alert.threshold_usd),
+            card_id=alert.card_id,
+        )
+    except Exception:  # pragma: no cover — push is best effort
+        pass
 
 
 async def delete(db: AsyncSession, user: User, alert_id: uuid.UUID) -> bool:

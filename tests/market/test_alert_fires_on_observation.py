@@ -134,3 +134,35 @@ async def test_already_triggered_alert_not_refired(db_session, monkeypatch):
     await price_snapshot.record_price_observation(str(card.id), 200.0)
 
     assert pushes == [], "a triggered alert must not re-fire"
+
+
+@pytest.mark.anyio
+async def test_alert_fires_immediately_when_already_satisfied(db_session, monkeypatch):
+    """Setting 'above $10' on a card already priced at $15 fires at once."""
+    from app.schemas.price_alert import PriceAlertCreate
+    from app.services.market import price_alert_service
+
+    user = await _mk_user(db_session)
+    card = await make_card(db_session, name="Already High")
+    card.card_metadata = {"price_history": [{"date": "2026-07-07", "priceUsd": 15.0}]}
+    await db_session.commit()
+
+    pushes: list[dict] = []
+
+    async def fake_push(user_id, **kw):
+        pushes.append(kw)
+        return 1
+
+    monkeypatch.setattr(push_service, "send_price_alert_push", fake_push)
+
+    read = await price_alert_service.create(
+        db_session,
+        user,
+        PriceAlertCreate(
+            card_id=card.id, condition="above", threshold_usd=Decimal("10.00")
+        ),
+    )
+
+    assert read.triggered_at is not None, "already-satisfied alert must fire on create"
+    assert len(pushes) == 1
+    assert pushes[0]["threshold_usd"] == 10.0
