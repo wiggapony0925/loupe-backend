@@ -78,15 +78,23 @@ async def test_capture_skips_empty_vaults(db_session):
 
 
 @pytest.mark.anyio
-async def test_retention_purges_old_rows(db_session):
+async def test_retention_purges_rows_past_the_window(db_session):
+    """Rows beyond the ~400-day retention purge; recent daily rows survive
+    (they ARE the long-range chart now)."""
     user = await _mk_user(db_session)
-    stale = PortfolioSnapshot(
+    ancient = PortfolioSnapshot(
+        user_id=user.id,
+        captured_at=datetime.now(UTC) - timedelta(days=500),
+        total_value_usd=Decimal("10.00"),
+        holdings_count=1,
+    )
+    monthly = PortfolioSnapshot(
         user_id=user.id,
         captured_at=datetime.now(UTC) - timedelta(days=30),
         total_value_usd=Decimal("50.00"),
         holdings_count=1,
     )
-    db_session.add(stale)
+    db_session.add_all([ancient, monthly])
     await db_session.commit()
 
     captured = await portfolio_service.maybe_capture_snapshot(
@@ -103,8 +111,8 @@ async def test_retention_purges_old_rows(db_session):
         .scalars()
         .all()
     )
-    assert len(remaining) == 1, "30-day-old snapshot must be purged"
-    assert float(remaining[0].total_value_usd) == 120.0
+    values = sorted(float(r.total_value_usd) for r in remaining)
+    assert values == [50.0, 120.0], "500d row purged; 30d daily row kept"
 
 
 @pytest.mark.anyio
@@ -167,3 +175,67 @@ async def test_history_read_captures_a_snapshot(db_session):
     )
     assert len(after) == 1
     assert float(after[0].total_value_usd) == 75.0
+
+
+@pytest.mark.anyio
+async def test_compaction_keeps_last_snapshot_per_day(db_session):
+    """Rows older than the intraday window collapse to one (the day's last)."""
+    user = await _mk_user(db_session)
+    base = datetime.now(UTC) - timedelta(days=5)
+    for hour, total in ((9, "100.00"), (13, "110.00"), (21, "120.00")):
+        db_session.add(
+            PortfolioSnapshot(
+                user_id=user.id,
+                captured_at=base.replace(hour=hour, minute=0),
+                total_value_usd=Decimal(total),
+                holdings_count=1,
+            )
+        )
+    await db_session.commit()
+
+    assert await portfolio_service.maybe_capture_snapshot(db_session, user, 130.0, 1)
+
+    remaining = (
+        (
+            await db_session.execute(
+                select(PortfolioSnapshot)
+                .where(PortfolioSnapshot.user_id == user.id)
+                .order_by(PortfolioSnapshot.captured_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # 1 compacted row for the old day (the 21:00 = $120 one) + today's new one.
+    assert len(remaining) == 2, [float(r.total_value_usd) for r in remaining]
+    assert float(remaining[0].total_value_usd) == 120.0
+    assert float(remaining[-1].total_value_usd) == 130.0
+
+
+@pytest.mark.anyio
+async def test_long_ranges_chart_real_snapshots(db_session):
+    """1W buckets use REAL observed totals where snapshots exist (no more
+    flat modeled line once tracking has begun)."""
+    user = await _mk_user(db_session)
+    await _mk_holding(db_session, user, "200.00")
+
+    now = datetime.now(UTC)
+    for days_ago, total in ((6, "150.00"), (4, "170.00"), (2, "185.00")):
+        db_session.add(
+            PortfolioSnapshot(
+                user_id=user.id,
+                captured_at=now - timedelta(days=days_ago),
+                total_value_usd=Decimal(total),
+                holdings_count=1,
+            )
+        )
+    await db_session.commit()
+
+    hist = await portfolio_service.history(db_session, user, "1W")
+    values = [p.price_usd for p in hist.points]
+
+    assert 150.0 in values and 170.0 in values and 185.0 in values, values
+    # Terminal bucket still pinned to the live canonical total.
+    assert values[-1] == 200.0
+    # The week actually MOVES now.
+    assert len(set(values)) >= 4, values

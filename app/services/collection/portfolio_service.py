@@ -171,7 +171,11 @@ def holding_value_usd(grade: GradedCard) -> float:
 # series splices those true observations between the anchors.
 
 _SNAPSHOT_MIN_INTERVAL = timedelta(minutes=30)
-_SNAPSHOT_RETENTION = timedelta(days=7)
+# Long retention so snapshots become the REAL long-range series (1W…1Y):
+# full intraday granularity for the last 48 h, compacted to one point per
+# UTC day beyond that (see the compaction pass in maybe_capture_snapshot).
+_SNAPSHOT_RETENTION = timedelta(days=400)
+_SNAPSHOT_INTRADAY_WINDOW = timedelta(hours=48)
 
 
 async def maybe_capture_snapshot(
@@ -216,6 +220,30 @@ async def maybe_capture_snapshot(
                 PortfolioSnapshot.captured_at < now - _SNAPSHOT_RETENTION,
             )
         )
+        # Compaction: beyond the intraday window keep only the LAST snapshot
+        # of each UTC day, so the table stays bounded (~1 row/user/day) while
+        # long ranges chart real observed values. Piggybacks on the throttled
+        # write path, so it runs at most every 30 min per active user.
+        cutoff = now - _SNAPSHOT_INTRADAY_WINDOW
+        old_rows = (
+            await db.execute(
+                select(PortfolioSnapshot.id, PortfolioSnapshot.captured_at)
+                .where(
+                    PortfolioSnapshot.user_id == user.id,
+                    PortfolioSnapshot.captured_at < cutoff,
+                )
+                .order_by(PortfolioSnapshot.captured_at.asc())
+            )
+        ).all()
+        keep_per_day: dict[str, object] = {}
+        for row_id, ts in old_rows:
+            day = (ts if ts.tzinfo else ts.replace(tzinfo=UTC)).date().isoformat()
+            keep_per_day[day] = row_id  # ordered asc → ends on the day's last
+        drop = [rid for rid, _ in old_rows if rid not in set(keep_per_day.values())]
+        if drop:
+            await db.execute(
+                delete(PortfolioSnapshot).where(PortfolioSnapshot.id.in_(drop))
+            )
         await db.commit()
         return True
     except Exception:
@@ -526,6 +554,34 @@ async def history(
 
     buckets = _bucket_dates(range_, earliest)
     max_carry_days = _RANGE_MAX_CARRY_DAYS.get(range_)
+
+    # REAL observations first: the user's compacted daily snapshots. Where a
+    # bucket has a fresh-enough snapshot, chart the value we actually
+    # recorded (same canonical basis) instead of the raw-ratio model — every
+    # range gets progressively truer the longer Loupe has been tracking.
+    snap_rows = await _intraday_snapshots(
+        db, user, datetime.now(UTC) - _SNAPSHOT_RETENTION
+    )
+    snap_daily: dict[date, float] = {}
+    for ts, v in snap_rows:
+        snap_daily[ts.date()] = v  # asc order → last write of each day wins
+    snap_days = sorted(snap_daily)
+
+    def _snapshot_on(b: date) -> float | None:
+        """Last real observation on-or-before *b*, capped for staleness."""
+        chosen: date | None = None
+        for d in snap_days:
+            if d <= b:
+                chosen = d
+            else:
+                break
+        if chosen is None:
+            return None
+        staleness = (b - chosen).days
+        if staleness > (max_carry_days if max_carry_days is not None else 7):
+            return None
+        return snap_daily[chosen]
+
     points: list[PortfolioPoint] = []
     for b in buckets:
         # The terminal bucket ("today") is pinned to the canonical total so
@@ -536,6 +592,12 @@ async def history(
         if b >= today:
             points.append(
                 PortfolioPoint(date=b.isoformat(), price_usd=round(canonical_total, 2))
+            )
+            continue
+        observed = _snapshot_on(b)
+        if observed is not None:
+            points.append(
+                PortfolioPoint(date=b.isoformat(), price_usd=round(observed, 2))
             )
             continue
         total = 0.0

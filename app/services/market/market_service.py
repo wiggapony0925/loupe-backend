@@ -378,6 +378,20 @@ async def get_card_market(card_id: str) -> dict[str, Any] | None:
     snapshot = await build_market_for_card(card)
     body = {"card_id": card_id, "snapshot": snapshot}
     await _cache_set(cache_key, body)
+
+    # Write-on-read price history: persist today's raw price for this card
+    # (cache-miss path only, so at most one write per card per cache TTL;
+    # the upsert itself no-ops after the first observation of the day).
+    # This is what keeps portfolio ranges honest with the nightly worker
+    # offline — see price_snapshot.record_price_observation.
+    try:
+        raw = ((snapshot.get("summary") or {}).get("raw") or {}).get("amount")
+        if isinstance(raw, (int, float)) and raw > 0:
+            from app.tasks.price_snapshot import record_price_observation
+
+            await record_price_observation(card_id, float(raw))
+    except Exception:  # pragma: no cover — observation is optional
+        pass
     return body
 
 

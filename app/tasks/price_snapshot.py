@@ -171,4 +171,76 @@ async def snapshot_prices(
     return result
 
 
-__all__ = ["DEFAULT_BATCH_SIZE", "MAX_HISTORY_POINTS", "snapshot_prices"]
+async def record_price_observation(card_id: str, price: float) -> bool:
+    """Write-on-read: persist today's live raw price for ONE card.
+
+    The scheduled worker that used to run :func:`snapshot_prices` nightly is
+    offline in prod, so per-card ``price_history`` never accumulated and every
+    portfolio range beyond the snapshot window rendered flat. This hook runs
+    whenever a card's market snapshot is actually SERVED (cache-miss path):
+    the cards users look at — which includes everything in their vaults —
+    build real daily history organically.
+
+    ``card_id`` may be a local UUID or a composite upstream id
+    ("pokemontcg:base1-4"); the latter resolves through card_external_refs.
+    Best effort: never raises, no-ops when today's point already exists.
+    """
+    if not price or price <= 0:
+        return False
+    try:
+        import uuid as _uuid
+
+        from app.models.card_external_ref import CardExternalRef
+
+        today = datetime.now(UTC).date()
+        sm = get_sessionmaker()
+        async with sm() as session:
+            card: Card | None = None
+            try:
+                local_id = _uuid.UUID(card_id)
+            except (ValueError, TypeError):
+                local_id = None
+            if local_id is not None:
+                card = (
+                    await session.execute(select(Card).where(Card.id == local_id))
+                ).scalar_one_or_none()
+            elif ":" in card_id:
+                source, external = card_id.split(":", 1)
+                ref = (
+                    await session.execute(
+                        select(CardExternalRef.card_id).where(
+                            CardExternalRef.source == source,
+                            CardExternalRef.external_id == external,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if ref is not None:
+                    card = (
+                        await session.execute(select(Card).where(Card.id == ref))
+                    ).scalar_one_or_none()
+            if card is None:
+                return False
+
+            meta = card.card_metadata if isinstance(card.card_metadata, dict) else {}
+            new_history, changed = _upsert_today(
+                meta.get("price_history"), today, float(price)
+            )
+            if not changed:
+                return False
+            new_meta = dict(meta)
+            new_meta["price_history"] = new_history
+            card.card_metadata = new_meta
+            flag_modified(card, "card_metadata")
+            await session.commit()
+            return True
+    except Exception:  # pragma: no cover — observation is always optional
+        logger.warning("price observation failed for %s", card_id, exc_info=True)
+        return False
+
+
+__all__ = [
+    "DEFAULT_BATCH_SIZE",
+    "MAX_HISTORY_POINTS",
+    "record_price_observation",
+    "snapshot_prices",
+]
