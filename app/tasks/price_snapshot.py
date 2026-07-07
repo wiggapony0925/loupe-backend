@@ -24,6 +24,7 @@ card whose recorded value hasn't changed.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -221,21 +222,81 @@ async def record_price_observation(card_id: str, price: float) -> bool:
             if card is None:
                 return False
 
+            # 1) Persist today's price point (once-per-day upsert).
             meta = card.card_metadata if isinstance(card.card_metadata, dict) else {}
             new_history, changed = _upsert_today(
                 meta.get("price_history"), today, float(price)
             )
-            if not changed:
-                return False
-            new_meta = dict(meta)
-            new_meta["price_history"] = new_history
-            card.card_metadata = new_meta
-            flag_modified(card, "card_metadata")
-            await session.commit()
-            return True
+            if changed:
+                new_meta = dict(meta)
+                new_meta["price_history"] = new_history
+                card.card_metadata = new_meta
+                flag_modified(card, "card_metadata")
+
+            # 2) Evaluate pending price alerts against this live price and fan
+            #    out pushes for any that just fired. Runs on EVERY observation
+            #    (not gated on the history no-op) so an intraday threshold
+            #    crossing still notifies. This is what makes alerts actually
+            #    fire with the nightly worker offline.
+            fired = await _evaluate_and_collect(session, card, Decimal(str(price)))
+            if changed or fired:
+                await session.commit()
+            await _fan_out_alert_pushes(fired, card)
+            return changed
     except Exception:  # pragma: no cover — observation is always optional
         logger.warning("price observation failed for %s", card_id, exc_info=True)
         return False
+
+
+async def _evaluate_and_collect(session, card: Card, price: Decimal) -> list:
+    """Trip any pending alerts for *card* that *price* satisfies.
+
+    Returns lightweight (user_id, card_name, condition, threshold, price,
+    card_id) tuples captured BEFORE commit, so the push fan-out can read
+    them after the session closes without lazy-loading detached rows.
+    """
+    from app.services.market import price_alert_service
+
+    try:
+        fired_rows = await price_alert_service.evaluate_for_card(
+            session, card.id, price
+        )
+    except Exception:  # pragma: no cover
+        logger.warning("alert evaluation failed for %s", card.id, exc_info=True)
+        return []
+    return [
+        {
+            "user_id": row.user_id,
+            "card_name": card.name or "A watched card",
+            "condition": row.condition.value
+            if hasattr(row.condition, "value")
+            else str(row.condition),
+            "threshold": float(row.threshold_usd),
+            "price": float(price),
+            "card_id": card.id,
+        }
+        for row in fired_rows
+    ]
+
+
+async def _fan_out_alert_pushes(fired: list, card: Card) -> None:
+    """Send one price-alert push per fired alert. Best effort."""
+    if not fired:
+        return
+    from app.services import push_service
+
+    for f in fired:
+        try:
+            await push_service.send_price_alert_push(
+                f["user_id"],
+                card_name=f["card_name"],
+                condition=f["condition"],
+                price_usd=f["price"],
+                threshold_usd=f["threshold"],
+                card_id=f["card_id"],
+            )
+        except Exception:  # pragma: no cover
+            logger.warning("alert push failed for user %s", f["user_id"])
 
 
 __all__ = [
