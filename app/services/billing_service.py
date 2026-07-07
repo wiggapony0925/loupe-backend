@@ -222,6 +222,30 @@ async def cancel_subscription(
     }
 
 
+async def reactivate_subscription(db: AsyncSession, user: User) -> dict[str, Any]:
+    """Undo a scheduled cancellation (clear ``cancel_at_period_end``).
+
+    The self-serve twin of :func:`cancel_subscription` — lets a member who
+    changed their mind keep Pro without re-checking out, as long as the paid
+    period hasn't lapsed yet. Stripe remains the source of truth.
+    """
+    if not user.stripe_subscription_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This user has no active Stripe subscription.",
+        )
+    _client()  # raises 503 when billing isn't configured
+    sub = stripe.Subscription.modify(
+        user.stripe_subscription_id, cancel_at_period_end=False
+    )
+    period_end = _period_end(sub)
+    return {
+        "status": sub.get("status"),
+        "cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
+        "current_period_end": period_end.isoformat() if period_end else None,
+    }
+
+
 async def refund_latest(db: AsyncSession, user: User) -> dict[str, Any]:
     """Refund a user's most recent successful charge (admin support action).
 

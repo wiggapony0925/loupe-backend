@@ -409,6 +409,9 @@
     "GET",
     "PATCH"
   ],
+  "/v1/me/billing/cancel": [
+    "POST"
+  ],
   "/v1/me/billing/checkout": [
     "POST"
   ],
@@ -416,6 +419,9 @@
     "GET"
   ],
   "/v1/me/billing/portal": [
+    "POST"
+  ],
+  "/v1/me/billing/reactivate": [
     "POST"
   ],
   "/v1/me/billing/subscribe": [

@@ -251,4 +251,31 @@ async def billing_portal(
     return await billing_service.create_portal_session(db, user)
 
 
+@router.post(
+    "/billing/cancel",
+    summary="Cancel my Loupe Pro subscription (keeps access until period end)",
+)
+async def billing_cancel(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Self-serve cancel — schedules ``cancel_at_period_end`` so the member
+    keeps Pro until the paid period runs out. The plan downgrade itself is
+    driven by the Stripe webhook, keeping Stripe the source of truth."""
+    return await billing_service.cancel_subscription(db, user)
+
+
+@router.post(
+    "/billing/reactivate",
+    summary="Undo a scheduled cancellation and keep Loupe Pro",
+)
+async def billing_reactivate(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Self-serve reactivate — clears a pending ``cancel_at_period_end`` so a
+    member who changed their mind keeps Pro without re-checking out."""
+    return await billing_service.reactivate_subscription(db, user)
+
+
 __all__ = ["router"]
