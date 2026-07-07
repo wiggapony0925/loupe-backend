@@ -40,6 +40,24 @@ class IdentifyCandidate(BaseModel):
         description="Per-signal weights that produced ``confidence``.",
     )
 
+    # ── Server-composed enrichment (pricing + ownership) ──
+    market_price_usd: float | None = Field(
+        default=None,
+        description="Best cached market price (USD) from the catalog mirror.",
+    )
+    owned: bool = Field(
+        default=False,
+        description="True when the signed-in user already holds this card.",
+    )
+    copies_owned: int = Field(
+        default=0, ge=0, description="How many copies the user holds."
+    )
+    graded_copies: int = Field(
+        default=0,
+        ge=0,
+        description="How many of those copies are graded slabs (non-raw).",
+    )
+
 
 class IdentifyParsed(BaseModel):
     """Structured fields extracted from OCR text. All optional."""

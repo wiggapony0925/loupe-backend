@@ -24,9 +24,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from reportlab.graphics.charts.barcharts import VerticalBarChart
-from reportlab.graphics.charts.lineplots import LinePlot
 from reportlab.graphics.charts.piecharts import Pie
-from reportlab.graphics.shapes import Drawing, String
+from reportlab.graphics.shapes import Drawing, Line, PolyLine, Polygon, String
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import LETTER
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -34,6 +33,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
+    Image,
     PageBreak,
     PageTemplate,
     Paragraph,
@@ -65,11 +65,26 @@ MARGIN = 0.6 * inch
 CONTENT_W = PAGE_W - 2 * MARGIN
 
 
+# Trading cards are 63×88mm — every embedded thumb keeps that aspect.
+CARD_ASPECT = 88 / 63
+
+
 def _money(v: float | None) -> str:
     if v is None:
         return "—"
     sign = "-" if v < 0 else ""
     return f"{sign}${abs(v):,.2f}"
+
+
+def _thumb(snap: ReportSnapshot, card_id: str, width: float) -> Image | str:
+    """Embedded card art for a table cell, or "" when we have no bytes."""
+    data = snap.images.get(card_id)
+    if not data:
+        return ""
+    try:
+        return Image(io.BytesIO(data), width=width, height=width * CARD_ASPECT)
+    except Exception:  # corrupt/unsupported bytes — render art-less
+        return ""
 
 
 def _pct(v: float | None) -> str:
@@ -456,32 +471,91 @@ def _section_performance(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) ->
 
 
 def _line_chart(snap: ReportSnapshot) -> Drawing:
+    """Robinhood-style area chart: soft filled area under a colored value
+    line, dollar-labeled gridlines, and start/end date + value callouts."""
     width = PAGE_W - 2 * MARGIN
-    d = Drawing(width, 220)
-    data = [[(i, p.value_usd) for i, p in enumerate(snap.series)]]
-    lp = LinePlot()
-    lp.x = 40
-    lp.y = 30
-    lp.height = 170
-    lp.width = width - 60
-    lp.data = data
-    lp.lines[0].strokeColor = MINT if snap.delta_usd >= 0 else ROSE
-    lp.lines[0].strokeWidth = 1.6
-    lp.xValueAxis.visibleLabels = 0
-    lp.xValueAxis.visibleTicks = 0
-    lp.xValueAxis.strokeColor = LINE
-    lp.yValueAxis.strokeColor = LINE
-    lp.yValueAxis.gridStrokeColor = LINE
-    lp.yValueAxis.gridStrokeWidth = 0.3
-    lp.yValueAxis.visibleGrid = 1
-    lp.yValueAxis.labels.fontSize = 7
-    lp.yValueAxis.labels.fillColor = INK_DIM
-    d.add(lp)
+    height = 230
+    d = Drawing(width, height)
+
+    values = [p.value_usd for p in snap.series]
+    lo, hi = min(values), max(values)
+    if hi <= lo:  # flat series — pad so the line sits mid-chart
+        hi = lo + max(1.0, abs(lo) * 0.05)
+    pad = (hi - lo) * 0.08
+    lo -= pad
+    hi += pad
+
+    # Plot rect
+    px, py = 58, 34
+    pw, ph = width - px - 14, height - py - 26
+    up = snap.delta_usd >= 0
+    tone = MINT if up else ROSE
+    fill = colors.Color(tone.red, tone.green, tone.blue, alpha=0.13)
+
+    def sx(i: int) -> float:
+        return px + (i / (len(values) - 1)) * pw
+
+    def sy(v: float) -> float:
+        return py + ((v - lo) / (hi - lo)) * ph
+
+    # Gridlines + $ labels (4 bands)
+    for k in range(5):
+        gy = py + (k / 4) * ph
+        gv = lo + (k / 4) * (hi - lo)
+        d.add(Line(px, gy, px + pw, gy, strokeColor=LINE, strokeWidth=0.35))
+        d.add(
+            String(
+                px - 6,
+                gy - 2.5,
+                f"${gv:,.0f}",
+                fontName="Helvetica",
+                fontSize=6.5,
+                fillColor=INK_MUTED,
+                textAnchor="end",
+            )
+        )
+
+    # Area fill + value line
+    pts = [(sx(i), sy(v)) for i, v in enumerate(values)]
+    poly = [px, py]
+    for x, y in pts:
+        poly.extend([x, y])
+    poly.extend([px + pw, py])
+    d.add(Polygon(poly, fillColor=fill, strokeColor=None, strokeWidth=0))
+    flat: list[float] = []
+    for x, y in pts:
+        flat.extend([x, y])
+    d.add(PolyLine(flat, strokeColor=tone, strokeWidth=1.8))
+
+    # Opening / closing callouts above the endpoints
     d.add(
         String(
-            40,
-            10,
-            snap.series[0].date.isoformat(),
+            pts[0][0],
+            min(height - 10, pts[0][1] + 7),
+            _money(values[0]),
+            fontName="Helvetica-Bold",
+            fontSize=7.5,
+            fillColor=INK_DIM,
+        )
+    )
+    d.add(
+        String(
+            pts[-1][0],
+            min(height - 10, pts[-1][1] + 7),
+            _money(values[-1]),
+            fontName="Helvetica-Bold",
+            fontSize=7.5,
+            fillColor=tone,
+            textAnchor="end",
+        )
+    )
+
+    # Date labels under the plot
+    d.add(
+        String(
+            px,
+            12,
+            snap.series[0].date.strftime("%b %d, %Y"),
             fontName="Helvetica",
             fontSize=7,
             fillColor=INK_MUTED,
@@ -489,9 +563,9 @@ def _line_chart(snap: ReportSnapshot) -> Drawing:
     )
     d.add(
         String(
-            width - 80,
-            10,
-            snap.series[-1].date.isoformat(),
+            px + pw,
+            12,
+            snap.series[-1].date.strftime("%b %d, %Y"),
             fontName="Helvetica",
             fontSize=7,
             fillColor=INK_MUTED,
@@ -525,30 +599,60 @@ def _section_allocation(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> 
 
 
 def _pie_chart(snap: ReportSnapshot) -> Drawing:
+    """Donut allocation chart with a total-value center label and a legend
+    carrying value + share per game."""
     width = PAGE_W - 2 * MARGIN
-    d = Drawing(width, 180)
+    d = Drawing(width, 190)
+    total = sum(v for _, v in snap.tcg_breakdown) or 1.0
     pie = Pie()
-    pie.x = 60
-    pie.y = 10
+    pie.x = 50
+    pie.y = 15
     pie.width = 160
     pie.height = 160
+    pie.innerRadiusFraction = 0.62
     pie.data = [v for _, v in snap.tcg_breakdown] or [1]
-    pie.labels = [k for k, _ in snap.tcg_breakdown]
+    pie.labels = None
+    pie.slices.label_visible = 0
     palette = [MINT, BLUE, AMBER, ROSE, INK_DIM, INK_MUTED]
     for i, _ in enumerate(snap.tcg_breakdown):
         pie.slices[i].fillColor = palette[i % len(palette)]
         pie.slices[i].strokeColor = colors.white
-        pie.slices[i].strokeWidth = 1.2
-    # Legend column on the right.
+        pie.slices[i].strokeWidth = 1.4
+    d.add(pie)
+    # Center label — total closing value inside the donut.
+    cx, cy = pie.x + pie.width / 2, pie.y + pie.height / 2
+    d.add(
+        String(
+            cx,
+            cy + 3,
+            _money(total if snap.tcg_breakdown else 0),
+            fontName="Helvetica-Bold",
+            fontSize=11,
+            fillColor=INK,
+            textAnchor="middle",
+        )
+    )
+    d.add(
+        String(
+            cx,
+            cy - 9,
+            "TOTAL",
+            fontName="Helvetica-Bold",
+            fontSize=6,
+            fillColor=INK_MUTED,
+            textAnchor="middle",
+        )
+    )
+    # Legend column on the right: swatch · game · value · share.
     cursor_y = 150
     for i, (label, value) in enumerate(snap.tcg_breakdown):
         sw = palette[i % len(palette)]
-        d.add(String(260, cursor_y, "■", fontSize=14, fillColor=sw))
+        d.add(String(260, cursor_y, "■", fontSize=13, fillColor=sw))
         d.add(
             String(
                 278,
                 cursor_y + 1,
-                f"{label.title()}",
+                label.title(),
                 fontName="Helvetica-Bold",
                 fontSize=10,
                 fillColor=INK,
@@ -556,7 +660,7 @@ def _pie_chart(snap: ReportSnapshot) -> Drawing:
         )
         d.add(
             String(
-                380,
+                392,
                 cursor_y + 1,
                 _money(value),
                 fontName="Helvetica",
@@ -564,8 +668,18 @@ def _pie_chart(snap: ReportSnapshot) -> Drawing:
                 fillColor=INK_DIM,
             )
         )
+        d.add(
+            String(
+                width - 14,
+                cursor_y + 1,
+                f"{value / total * 100:.1f}%",
+                fontName="Helvetica-Bold",
+                fontSize=10,
+                fillColor=INK,
+                textAnchor="end",
+            )
+        )
         cursor_y -= 20
-    d.add(pie)
     return d
 
 
@@ -597,27 +711,28 @@ def _section_movers(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list
         )
         return flow
     flow.append(Paragraph("Gainers", st["eyebrow"]))
-    flow.append(_movers_table(snap.top_gainers, is_gain=True))
+    flow.append(_movers_table(snap, snap.top_gainers, is_gain=True))
     flow.append(Spacer(1, 0.25 * inch))
     flow.append(Paragraph("Losers", st["eyebrow"]))
-    flow.append(_movers_table(snap.top_losers, is_gain=False))
+    flow.append(_movers_table(snap, snap.top_losers, is_gain=False))
     return flow
 
 
-def _movers_table(rows, *, is_gain: bool) -> Table:
-    head = ["Card", "Set", "Value", "Δ"]
+def _movers_table(snap: ReportSnapshot, rows, *, is_gain: bool) -> Table:
+    head = ["", "Card", "Set", "Value", "Change"]
     body = [
         [
+            _thumb(snap, r.card_id, 0.30 * inch),
             r.name,
             r.set_name or "—",
             _money(r.value_close_usd),
             f"{_money(r.delta_usd)}  ({_pct(r.delta_pct)})",
         ]
         for r in rows
-    ] or [["—", "—", "—", "—"]]
+    ] or [["", "—", "—", "—", "—"]]
     t = Table(
         [head, *body],
-        colWidths=[2.6 * inch, 1.8 * inch, 1.0 * inch, 1.6 * inch],
+        colWidths=[0.45 * inch, 2.35 * inch, 1.6 * inch, 1.0 * inch, 1.6 * inch],
     )
     delta_color = MINT if is_gain else ROSE
     t.setStyle(
@@ -626,16 +741,104 @@ def _movers_table(rows, *, is_gain: bool) -> Table:
                 ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
                 ("FONT", (0, 1), (-1, -1), "Helvetica", 9),
                 ("TEXTCOLOR", (0, 0), (-1, 0), INK_DIM),
-                ("TEXTCOLOR", (3, 1), (3, -1), delta_color),
-                ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+                ("TEXTCOLOR", (4, 1), (4, -1), delta_color),
+                ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
+                ("VALIGN", (0, 1), (-1, -1), "MIDDLE"),
                 ("LINEBELOW", (0, 0), (-1, 0), 0.4, LINE),
                 ("LINEBELOW", (0, 1), (-1, -2), 0.2, LINE),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("LEFTPADDING", (0, 0), (0, -1), 0),
             ]
         )
     )
     return t
+
+
+def _section_gallery(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
+    """Top holdings as a 4-across art gallery — the cards themselves, with
+    name, grade, and closing value under each. Skipped entirely when no
+    artwork could be hydrated (keeps the fallback PDF byte-identical-ish)."""
+    rows = [h for h in snap.holdings[:8] if snap.images.get(h.card_id)]
+    if not rows:
+        return []
+    flow = [
+        _eyebrow("Showcase", st),
+        Paragraph("Top holdings", st["h2"]),
+        Paragraph("Your most valuable cards at period close.", st["dim"]),
+        Spacer(1, 0.16 * inch),
+    ]
+    per_row = 4
+    gap = 0.16 * inch
+    cell_w = (CONTENT_W - (per_row - 1) * gap) / per_row
+    art_w = cell_w - 0.24 * inch
+
+    def cell(h) -> Table:
+        up = h.delta_pct >= 0
+        delta_hex = (MINT_DARK if up else ROSE).hexval().replace("0x", "#")
+        inner = Table(
+            [
+                [_thumb(snap, h.card_id, art_w)],
+                [
+                    Paragraph(
+                        f"<b>{h.name}</b><br/>"
+                        f'<font size="7" color="{INK_DIM.hexval().replace("0x", "#")}">'
+                        f"Grade {h.grade:.1f}</font><br/>"
+                        f'<font size="8"><b>{_money(h.value_close_usd)}</b></font>  '
+                        f'<font size="7" color="{delta_hex}">{_pct(h.delta_pct)}</font>',
+                        ParagraphStyle(
+                            "galleryCell",
+                            fontName="Helvetica",
+                            fontSize=8,
+                            leading=10,
+                            textColor=INK,
+                        ),
+                    )
+                ],
+            ],
+            colWidths=[cell_w - 0.16 * inch],
+        )
+        inner.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, -1), BG_ELEV),
+                    ("BOX", (0, 0), (-1, -1), 0.5, LINE),
+                    ("ALIGN", (0, 0), (0, 0), "CENTER"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (0, 0), 8),
+                    ("BOTTOMPADDING", (0, -1), (-1, -1), 8),
+                    ("ROUNDEDCORNERS", [6, 6, 6, 6]),
+                ]
+            )
+        )
+        return inner
+
+    for chunk_start in range(0, len(rows), per_row):
+        chunk = rows[chunk_start : chunk_start + per_row]
+        line: list = []
+        widths: list[float] = []
+        for i, h in enumerate(chunk):
+            if i:
+                line.append("")
+                widths.append(gap)
+            line.append(cell(h))
+            widths.append(cell_w)
+        grid = Table([line], colWidths=widths)
+        grid.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        flow.append(grid)
+        flow.append(Spacer(1, gap))
+    return flow
 
 
 def _section_holdings(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> list:
@@ -649,7 +852,7 @@ def _section_holdings(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> li
             )
         )
         return flow
-    head = ["Card", "Set", "Grade", "Opening", "Closing", "Δ%"]
+    head = ["Card", "Set", "Grade", "Opening", "Closing", "Chg %"]
     body = [
         [
             h.name,
@@ -673,20 +876,22 @@ def _section_holdings(snap: ReportSnapshot, st: dict[str, ParagraphStyle]) -> li
         ],
         repeatRows=1,
     )
-    t.setStyle(
-        TableStyle(
-            [
-                ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8.5),
-                ("FONT", (0, 1), (-1, -1), "Helvetica", 8.5),
-                ("TEXTCOLOR", (0, 0), (-1, 0), INK_DIM),
-                ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, BG_ELEV]),
-                ("LINEBELOW", (0, 0), (-1, 0), 0.4, LINE),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ]
+    style: list = [
+        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 8.5),
+        ("FONT", (0, 1), (-1, -1), "Helvetica", 8.5),
+        ("TEXTCOLOR", (0, 0), (-1, 0), INK_DIM),
+        ("ALIGN", (2, 0), (-1, -1), "RIGHT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, BG_ELEV]),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.4, LINE),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]
+    # Color each Δ% cell by direction so the table scans like the app.
+    for i, h in enumerate(snap.holdings, start=1):
+        style.append(
+            ("TEXTCOLOR", (5, i), (5, i), MINT_DARK if h.delta_pct >= 0 else ROSE)
         )
-    )
+    t.setStyle(TableStyle(style))
     flow.append(t)
     return flow
 
@@ -781,6 +986,10 @@ def render_pdf(snap: ReportSnapshot) -> bytes:
         flow.extend(_section_allocation(snap, st))
         flow.append(PageBreak())
         flow.extend(_section_movers(snap, st))
+        gallery = _section_gallery(snap, st)
+        if gallery:
+            flow.append(PageBreak())
+            flow.extend(gallery)
         flow.append(PageBreak())
         flow.extend(_section_holdings(snap, st))
         doc.build(flow)

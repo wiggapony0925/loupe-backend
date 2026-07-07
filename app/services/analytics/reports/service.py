@@ -30,6 +30,7 @@ from app.models.enums import ReportPeriodEnum, ReportStatusEnum
 from app.models.user import User
 from app.models.user_report import UserReport
 from app.services.analytics.reports.aggregator import build_snapshot
+from app.services.analytics.reports.images import hydrate_report_images
 from app.services.analytics.reports.pdf_builder import render_pdf
 from app.services.analytics.reports.storage import upload_report_pdf
 from app.utils.logger import get_logger
@@ -164,6 +165,9 @@ async def generate_report(
             period_end=period_end,
         )
         stage = "render"
+        # Best-effort card art for the movers tables + top-holdings gallery.
+        # Internal try/except: a CDN hiccup can never fail the statement.
+        await hydrate_report_images(snap)
         pdf_bytes = render_pdf(snap)
         stage = "upload"
         storage_key = await upload_report_pdf(user.id, row.id, pdf_bytes)

@@ -43,6 +43,7 @@ class HoldingRow:
     value_close_usd: float
     value_open_usd: float
     delta_pct: float
+    image_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -53,6 +54,7 @@ class MoverRow:
     value_close_usd: float
     delta_usd: float
     delta_pct: float
+    image_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -85,6 +87,9 @@ class ReportSnapshot:
     top_losers: list[MoverRow] = field(default_factory=list)
     grade_buckets: list[tuple[str, int]] = field(default_factory=list)
     tcg_breakdown: list[tuple[str, float]] = field(default_factory=list)
+    # card_id → raw image bytes, hydrated async by `images.hydrate_report_images`
+    # before the sync render. Empty ⇒ the PDF renders art-less (old behavior).
+    images: dict[str, bytes] = field(default_factory=dict)
 
 
 def _value_on(
@@ -167,6 +172,7 @@ async def build_snapshot(
         delta_pct = (delta_usd / v_open * 100.0) if v_open > 0 else 0.0
         name = card.name if card is not None else "Unknown card"
         set_name = card_set.name if card_set is not None else None
+        image_url = card.image_url if card is not None else None
 
         holdings.append(
             HoldingRow(
@@ -177,6 +183,7 @@ async def build_snapshot(
                 value_close_usd=v_close,
                 value_open_usd=v_open,
                 delta_pct=delta_pct,
+                image_url=image_url,
             )
         )
         mover = MoverRow(
@@ -186,6 +193,7 @@ async def build_snapshot(
             value_close_usd=v_close,
             delta_usd=delta_usd,
             delta_pct=delta_pct,
+            image_url=image_url,
         )
         # Only consider cards that actually had a price reference at both
         # endpoints — otherwise the "movement" is just metadata noise.

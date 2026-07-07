@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import optional_user, require_admin, require_user
+from app.services.catalog.identify_enrichment_service import enrich_candidates
 from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
@@ -122,11 +123,16 @@ async def identify_card(
         outcome.fallback_required,
     )
 
+    candidates = [
+        IdentifyCandidate(**dataclasses.asdict(c)) for c in outcome.candidates
+    ]
+    # Server-composed pricing + ownership so every client renders the same
+    # "worth $X - you own N (M graded)" without local math.
+    await enrich_candidates(db, user, candidates)
+
     return IdentifyResponse(
         identification_id=outcome.identification_id,
-        candidates=[
-            IdentifyCandidate(**dataclasses.asdict(c)) for c in outcome.candidates
-        ],
+        candidates=candidates,
         accuracy_score=outcome.accuracy_score,
         primary_source=outcome.primary_source,
         tcg_inferred=outcome.tcg_inferred,
@@ -174,11 +180,16 @@ async def identify_card_from_text(
         ocr_confidence=body.ocr_confidence,
         user_id=user.id if user else None,
     )
+    candidates = [
+        IdentifyCandidate(**dataclasses.asdict(c)) for c in outcome.candidates
+    ]
+    # Server-composed pricing + ownership so every client renders the same
+    # "worth $X - you own N (M graded)" without local math.
+    await enrich_candidates(db, user, candidates)
+
     return IdentifyResponse(
         identification_id=outcome.identification_id,
-        candidates=[
-            IdentifyCandidate(**dataclasses.asdict(c)) for c in outcome.candidates
-        ],
+        candidates=candidates,
         accuracy_score=outcome.accuracy_score,
         primary_source=outcome.primary_source,
         tcg_inferred=outcome.tcg_inferred,

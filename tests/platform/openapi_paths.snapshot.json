@@ -399,6 +399,9 @@
   "/v1/img": [
     "GET"
   ],
+  "/v1/market/fx/rates": [
+    "GET"
+  ],
   "/v1/market/indices/{index_id}/history": [
     "GET"
   ],

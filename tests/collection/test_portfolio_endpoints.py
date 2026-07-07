@@ -203,8 +203,10 @@ def _wire_envelope_shape_ok(body: dict) -> None:
     assert isinstance(body["points"], list)
     for p in body["points"]:
         assert set(p.keys()) == {"date", "priceUsd"}
-        # `date` must be ISO YYYY-MM-DD parsable
-        date.fromisoformat(p["date"])
+        # `date` is ISO — date-only for daily buckets, full datetimes for the
+        # 1D range's intraday snapshot points. Both parse with
+        # datetime.fromisoformat (and with `new Date()` on the clients).
+        datetime.fromisoformat(p["date"])
         assert isinstance(p["priceUsd"], (int, float))
 
 

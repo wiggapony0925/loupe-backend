@@ -14,11 +14,12 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import Card
 from app.models.grade import GradedCard
+from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.user import User
 from app.utils.logger import get_logger
 
@@ -162,6 +163,94 @@ def holding_value_usd(grade: GradedCard) -> float:
     )
 
 
+# ── Portfolio snapshots — real intraday points for the 1D chart ─────────
+# Card prices tick at most daily, so the 1D range used to be two buckets
+# (yesterday close → live now): a flat line whenever the market hadn't
+# moved. Every live-total computation now opportunistically persists a
+# snapshot (write-on-read; no worker/scheduler dependency), and the 1D
+# series splices those true observations between the anchors.
+
+_SNAPSHOT_MIN_INTERVAL = timedelta(minutes=30)
+_SNAPSHOT_RETENTION = timedelta(days=7)
+
+
+async def maybe_capture_snapshot(
+    db: AsyncSession,
+    user: User,
+    total_value_usd: float,
+    holdings_count: int,
+) -> bool:
+    """Persist the live canonical total, at most once per throttle window.
+
+    Best effort — a failed snapshot must never break the read path that
+    triggered it. Also enforces the retention window so the table stays
+    bounded without a vacuum job.
+    """
+    if holdings_count <= 0:
+        return False
+    try:
+        now = datetime.now(UTC)
+        last = (
+            await db.execute(
+                select(func.max(PortfolioSnapshot.captured_at)).where(
+                    PortfolioSnapshot.user_id == user.id
+                )
+            )
+        ).scalar()
+        if last is not None:
+            if last.tzinfo is None:  # SQLite returns naive datetimes
+                last = last.replace(tzinfo=UTC)
+            if now - last < _SNAPSHOT_MIN_INTERVAL:
+                return False
+        db.add(
+            PortfolioSnapshot(
+                user_id=user.id,
+                captured_at=now,
+                total_value_usd=Decimal(str(round(total_value_usd, 2))),
+                holdings_count=holdings_count,
+            )
+        )
+        await db.execute(
+            delete(PortfolioSnapshot).where(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.captured_at < now - _SNAPSHOT_RETENTION,
+            )
+        )
+        await db.commit()
+        return True
+    except Exception:
+        logger.warning("portfolio snapshot capture failed", exc_info=True)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return False
+
+
+async def _intraday_snapshots(
+    db: AsyncSession, user: User, since: datetime
+) -> list[tuple[datetime, float]]:
+    """Chronological (captured_at, total) observations after *since*."""
+    rows = (
+        await db.execute(
+            select(
+                PortfolioSnapshot.captured_at, PortfolioSnapshot.total_value_usd
+            )
+            .where(
+                PortfolioSnapshot.user_id == user.id,
+                PortfolioSnapshot.captured_at > since,
+            )
+            .order_by(PortfolioSnapshot.captured_at.asc())
+        )
+    ).all()
+    out: list[tuple[datetime, float]] = []
+    for ts, total in rows:
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        out.append((ts, float(total)))
+    return out
+
+
 async def summary(db: AsyncSession, user: User) -> dict:
     """Aggregate the user's vault into a single hero card payload."""
     rows = await _load_grades_with_cards(db, user)
@@ -216,6 +305,9 @@ async def summary(db: AsyncSession, user: User) -> dict:
     ).all()
     available_sets = [r[0] for r in set_rows if r[0]]
     avg_grade = float(grade_sum / grade_count) if grade_count else None
+    # Opportunistic intraday snapshot (throttled) — the summary path runs on
+    # every vault/dashboard open, so active users build a real 1D curve.
+    await maybe_capture_snapshot(db, user, float(total), len(rows))
     # Unrealized P/L is `value - cost`, but only meaningful when the user
     # has recorded a cost on at least one card. We report `null` (not 0)
     # in that case so the UI can hide the P/L chip instead of showing
@@ -468,6 +560,37 @@ async def history(
             )
             total += value * (raw_b / raw_ref)
         points.append(PortfolioPoint(date=b.isoformat(), price_usd=round(total, 2)))
+
+    # 1D: splice REAL intraday observations between the yesterday-close and
+    # live-now anchors. Snapshot totals use the same canonical grade-aware
+    # basis, so the curve stays in identical units. Timestamps are full ISO
+    # datetimes (the anchors are date-only ISO / a datetime for "now"), and
+    # the whole series is kept chronological.
+    if range_ == "1D" and len(points) == 2:
+        yesterday_anchor, live_anchor = points
+        now_dt = datetime.now(UTC)
+        since = datetime.combine(
+            date.fromisoformat(yesterday_anchor.date), datetime.min.time(), tzinfo=UTC
+        )
+        snaps = await _intraday_snapshots(db, user, since)
+        if snaps:
+            mid = [
+                PortfolioPoint(date=ts.isoformat(), price_usd=round(v, 2))
+                for ts, v in snaps
+                if ts < now_dt
+            ]
+            points = [
+                yesterday_anchor,
+                *mid,
+                PortfolioPoint(
+                    date=now_dt.isoformat(), price_usd=live_anchor.price_usd
+                ),
+            ]
+
+    # Opportunistic snapshot of the live canonical total (throttled inside).
+    # Runs AFTER the 1D splice so the snapshot written by this request never
+    # appears inside its own response.
+    await maybe_capture_snapshot(db, user, canonical_total, len(rows))
 
     first = points[0].price_usd if points else 0.0
     last = points[-1].price_usd if points else 0.0
