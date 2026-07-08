@@ -57,9 +57,7 @@ def test_reduce_extracts_full_grade_ladder():
 def test_reduce_raw_only_tier_still_works():
     """A limited tier that only returns the loose price yields just UNGRADED —
     the richer grades light up automatically when the tier provides them."""
-    mp = reduce_product(
-        {"status": "success", "product-name": "X", "loose-price": 500}
-    )
+    mp = reduce_product({"status": "success", "product-name": "X", "loose-price": 500})
     assert mp is not None
     assert mp.extras["grade_ladder"] == {"UNGRADED": 5.0}
     assert "sales_volume" not in mp.extras

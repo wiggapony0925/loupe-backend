@@ -155,7 +155,11 @@ async def test_pricecharting_grade_ladder_merges_into_grades(monkeypatch):
         # A real PSA 10 sold comp already exists — the guide must NOT clobber it.
         return {
             "grades": [
-                {"grade": "PSA 10", "median_recent": 2600.0, "last_sale": _money(2650.0)}
+                {
+                    "grade": "PSA 10",
+                    "median_recent": 2600.0,
+                    "last_sale": _money(2650.0),
+                }
             ]
         }
 
