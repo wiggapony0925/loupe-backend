@@ -36,6 +36,7 @@ from app.services.catalog import (
     card_catalog_service,
     card_resolver_service,
     card_search_service,
+    game_registry,
 )
 from app.services.collection import graded_card_service
 from app.services.market import (
@@ -60,10 +61,7 @@ router = APIRouter(prefix="/cards", tags=["cards"])
 )
 async def search_live(
     q: str = Query("", max_length=120),
-    tcg: str = Query(
-        "all",
-        pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$",
-    ),
+    tcg: str = Query("all", pattern=game_registry.tcg_pattern()),
     limit: int = Query(20, ge=1, le=50),
 ) -> dict[str, Any]:
     """Live search against Scryfall / Pokémon TCG / YGOPRODeck.
@@ -81,7 +79,7 @@ async def search_live(
     dependencies=[Depends(catalog_read_limit)],
 )
 async def get_trending(
-    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|digimon|onepiece|all)$"),
+    tcg: str = Query("all", pattern=game_registry.tcg_pattern(supported_only=True)),
     sort: str = Query("trending", pattern="^(trending|value)$"),
     max_price: float | None = Query(None, ge=0),
     limit: int = Query(24, ge=1, le=100),
@@ -146,7 +144,7 @@ class ResolveCardRequest(BaseModel):
     uuid: str | None = Field(None, description="Existing local Card UUID.")
     tcg: str | None = Field(
         None,
-        pattern="^(pokemon|magic|yugioh|onepiece|lorcana|sports|all)$",
+        pattern=game_registry.tcg_pattern(),
         description="Optional tcg hint to narrow free-text matches.",
     )
     materialize: bool = Field(

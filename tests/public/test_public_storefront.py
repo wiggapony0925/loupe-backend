@@ -404,3 +404,25 @@ async def test_public_trending_drops_priceless_cards(client, monkeypatch):
     resp = await client.get("/v1/public/trending")
     ids = [c["id"] for c in resp.json()["data"]["cards"]]
     assert ids == ["p"]  # the priceless card is filtered out
+
+
+@pytest.mark.asyncio
+async def test_public_games_tags(client):
+    """One backend-driven list of category tags for both clients — availability
+    derived from real catalog capability (not per-client hardcoding)."""
+    resp = await client.get("/v1/public/games")
+    assert resp.status_code == 200
+    tags = {t["key"]: t for t in resp.json()["data"]["tags"]}
+
+    # Data-backed games are live; provider-less games are "soon".
+    assert tags["all"]["status"] == "live"
+    assert tags["pokemon"]["status"] == "live"
+    assert tags["onepiece"]["status"] == "live"  # cached catalog → not stale "Soon"
+    assert tags["lorcana"]["status"] == "soon"
+    assert tags["sports"]["status"] == "soon"
+
+    # Games vs content sections are distinguished so the client can badge them.
+    assert tags["pokemon"]["kind"] == "game"
+    assert tags["sealed"]["kind"] == "section"
+    # Canonical labels — the client renders them verbatim (no per-client drift).
+    assert tags["yugioh"]["label"] == "Yu-Gi-Oh!"

@@ -23,10 +23,27 @@ from app.services.catalog import (
     card_search_service,
     carousel_service,
     catalog_browse_service,
+    game_registry,
+    games,
 )
 from app.services.market import trending_service
 
 router = APIRouter(prefix="/public", tags=["public"])
+
+
+@router.get(
+    "/games",
+    summary="Storefront category tags (games + sections; backend-driven)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def public_games(response: Response) -> dict[str, Any]:
+    """The canonical marketplace/search category tags both web + mobile render,
+    each with a ``status`` (``live`` | ``soon``) derived from real catalog
+    capability — so One Piece flips live everywhere from here, no client
+    release. App-only actions (Scan/Grade/Scanner) stay client-side."""
+    _cache(response)
+    return games.catalog_tags()
+
 
 # Catalog identity (names, sets, art, rarity) is effectively immutable; only
 # pricing drifts. So we let the browser/CDN serve a cached copy instantly and
@@ -79,9 +96,7 @@ def _apply_sort(cards: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
 async def public_search(
     response: Response,
     q: str = Query("", max_length=120),
-    tcg: str = Query(
-        "all", pattern="^(pokemon|magic|yugioh|digimon|onepiece|lorcana|sports|all)$"
-    ),
+    tcg: str = Query("all", pattern=game_registry.tcg_pattern()),
     rarity: str | None = Query(None, max_length=80),
     set_name: str | None = Query(None, alias="set", max_length=120),
     sort: str = Query("best", pattern="^(best|price_asc|price_desc|name)$"),
@@ -221,9 +236,7 @@ async def public_sparklines(
 )
 async def public_browse(
     response: Response,
-    game: str = Query(
-        "pokemon", pattern="^(pokemon|magic|yugioh|lorcana|onepiece|digimon|all)$"
-    ),
+    game: str = Query("pokemon", pattern=game_registry.tcg_pattern()),
     set_id: str | None = Query(None, alias="set", max_length=120),
     page: int = Query(1, ge=1),
     page_size: int = Query(24, ge=1, le=50),
@@ -245,7 +258,10 @@ async def public_browse(
 )
 async def public_carousels(
     response: Response,
-    game: str = Query("pokemon", pattern="^(pokemon|magic|yugioh|onepiece|digimon)$"),
+    game: str = Query(
+        "pokemon",
+        pattern=game_registry.tcg_pattern(supported_only=True, allow_all=False),
+    ),
 ) -> dict[str, Any]:
     """A game's discovery shelves as serializable recipes (theme + filter), AI-
     designed and cached daily. The web compiles each into a real rail and mixes
@@ -263,7 +279,7 @@ async def public_carousels(
 )
 async def public_trending(
     response: Response,
-    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|digimon|onepiece|all)$"),
+    tcg: str = Query("all", pattern=game_registry.tcg_pattern(supported_only=True)),
     sort: str = Query("trending", pattern="^(trending|value)$"),
     max_price: float | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=100),

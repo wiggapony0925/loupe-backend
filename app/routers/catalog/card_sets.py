@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import require_user
 from app.db import get_db
 from app.models.user import User
-from app.services.catalog import card_search_service
+from app.services.catalog import card_search_service, game_registry
 from app.services.collection import set_progress_service
 
 router = APIRouter(prefix="/sets", tags=["sets"])
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/sets", tags=["sets"])
 
 @router.get("", summary="List card sets (public)")
 async def list_sets(
-    tcg: str = Query("magic", pattern="^(pokemon|magic|yugioh|digimon|onepiece|all)$"),
+    tcg: str = Query("magic", pattern=game_registry.tcg_pattern(supported_only=True)),
 ) -> dict[str, Any]:
     return await card_search_service.list_sets(tcg)
 
