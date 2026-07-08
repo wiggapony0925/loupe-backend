@@ -86,6 +86,12 @@ def prepare_image_for_ocr(image_bytes: bytes) -> PreparedImage:
     thumb_b64: str | None = None
     try:
         with Image.open(io.BytesIO(image_bytes)) as im:
+            # Decode LARGE uploads at reduced resolution. `draft()` lets the
+            # JPEG decoder downscale DURING decode (DCT scaling) so a 12MP
+            # phone photo never fully materializes. Decoding one in full
+            # (~48MB uncompressed) was OOM-killing the Cloud Run container and
+            # returning a bare 503 on /cards/identify for any big capture.
+            im.draft("RGB", (max_edge, max_edge))
             im.load()
             # 1) Respect camera orientation FIRST. Phone photos carry an EXIF
             #    rotation tag; if we ignore it a "sideways" capture is fed to
@@ -94,6 +100,18 @@ def prepare_image_for_ocr(image_bytes: bytes) -> PreparedImage:
             #    the frame is upright — the single biggest real-world angle fix.
             base = ImageOps.exif_transpose(im) or im
             base = base.convert("RGB")
+
+        # Hard-cap the working image to `max_edge` up front so every step below
+        # (PNG fingerprint, thumbnail, autocontrast, OCR copy) operates on a
+        # small bitmap — `draft` only snaps to coarse 1/2·1/4 scales, so a huge
+        # photo can still land well above the target until we resize it here.
+        bw, bh = base.size
+        base_scale = min(1.0, max_edge / float(max(bw, bh)))
+        if base_scale < 1.0:
+            base = base.resize(
+                (max(1, int(bw * base_scale)), max(1, int(bh * base_scale))),
+                Image.Resampling.LANCZOS,
+            )
 
         # 2) Fingerprint from the *orientation-normalized* image (lossless PNG),
         #    so a rotated capture aligns to the catalog's upright art hash.
