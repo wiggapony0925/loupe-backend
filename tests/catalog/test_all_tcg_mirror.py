@@ -193,3 +193,67 @@ async def test_empty_magic_mirror_falls_back_to_live(db_engine, monkeypatch):
     monkeypatch.setattr(card_search_service.scryfall, "search_cards", _fake_scry)
     body = await card_search_service.search_cards("counterspell", "magic", 10)
     assert any(r["name"] == "Counterspell" for r in body["results"])
+
+
+async def _seed_card(*, cid: str, name: str, language: str) -> None:
+    from app.models.catalog_mirror import CatalogMirrorCard
+
+    upstream = cid.split(":", 1)[-1]
+    maker = mirror._sessionmaker()
+    async with maker() as s:
+        s.add(
+            CatalogMirrorCard(
+                id=cid,
+                source=cid.split(":", 1)[0],
+                tcg="pokemon",
+                upstream_id=upstream,
+                set_id="base1",
+                set_name="Base Set",
+                name=name,
+                name_lower=name.lower(),
+                number="58",
+                bare_number="58",
+                number_int=58,
+                rarity="Common",
+                language=language,
+                release_date="1999/01/09",
+                sort_price=1.0,
+                payload={
+                    "id": upstream,
+                    "name": name,
+                    "number": "58",
+                    "set": {"id": "base1", "name": "Base Set"},
+                    "images": {"small": "s", "large": "l"},
+                },
+            )
+        )
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_language_filter_and_available_languages(db_engine):
+    """`langs` filters by ISO language; English sorts first; the mirror reports
+    its real languages so the client picker offers only real options."""
+    # "Pikachu" keeps the same name across en/fr — isolates the language filter.
+    await _seed_card(cid="pokemontcg:base1-58", name="Pikachu", language="en")
+    await _seed_card(cid="tcgdex:base1-58-fr", name="Pikachu", language="fr")
+    mirror.reset_ready_cache("pokemon")
+
+    # Availability drives the picker's options (English always first).
+    assert await mirror.mirror_languages("pokemon") == ["en", "fr"]
+
+    # Default (English only) hides the French printing.
+    en_only = await mirror.search_mirror("pokemon", "pikachu", langs=["en"])
+    assert en_only is not None
+    assert en_only["total"] == 1
+    assert en_only["payloads"][0]["id"] == "base1-58"
+
+    # Mixed: both printings surface, English sorted first.
+    both = await mirror.search_mirror("pokemon", "pikachu", langs=["en", "fr"])
+    assert both is not None
+    assert both["total"] == 2
+    assert both["payloads"][0]["id"] == "base1-58"  # English leads
+
+    # No filter = every language.
+    alll = await mirror.search_mirror("pokemon", "pikachu")
+    assert alll is not None and alll["total"] == 2

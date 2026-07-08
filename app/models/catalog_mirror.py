@@ -84,6 +84,12 @@ class CatalogMirrorCard(Base):
     #: Numeric prefix of the collector number for stable in-set ordering.
     number_int: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rarity: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    #: ISO language of this printing (en, fr, de, ja…). Existing rows backfill
+    #: to "en"; the client language picker + the search `langs` filter key off
+    #: this so a user can mix languages or stay on English (the default).
+    language: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="en", index=True
+    )
     #: Denormalized from the set for "newest" sorts without a join.
     release_date: Mapped[str | None] = mapped_column(
         String(20), nullable=True, index=True

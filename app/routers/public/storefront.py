@@ -85,15 +85,27 @@ async def public_search(
     rarity: str | None = Query(None, max_length=80),
     set_name: str | None = Query(None, alias="set", max_length=120),
     sort: str = Query("best", pattern="^(best|price_asc|price_desc|name)$"),
+    langs: str = Query(
+        "en",
+        max_length=80,
+        description="Comma-separated ISO languages to include (default English).",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(12, ge=1, le=60),
 ) -> dict[str, Any]:
     """Search (or, with no query, browse trending) with all derivation done here.
 
-    Returns the paginated slice plus ``total`` and ``facets`` so the client
-    renders directly — no client-side filtering/sorting/pagination.
+    Returns the paginated slice plus ``total``, ``facets`` and
+    ``available_languages`` so the client renders + drives its language picker
+    directly — no client-side filtering/sorting/pagination.
     """
     _cache(response)
+    lang_list = [x for x in (s.strip().lower() for s in langs.split(",")) if x] or [
+        "en"
+    ]
+    langs_avail = await card_search_service.available_languages(
+        tcg if tcg != "all" else None
+    )
     if q.strip():
         # Default experience (relevance sort, no facet filters): TRUE upstream
         # pagination, so every printing of a popular name is reachable —
@@ -101,7 +113,7 @@ async def public_search(
         # catalog look like it was missing most of them.
         if rarity is None and set_name is None and sort == "best" and page_size > 12:
             paged = await card_search_service.search_cards_paged(
-                q=q, tcg=tcg, page=page, page_size=page_size
+                q=q, tcg=tcg, page=page, page_size=page_size, langs=lang_list
             )
             items = list(paged.get("results") or [])
             return {
@@ -119,6 +131,7 @@ async def public_search(
                         {c.get("set_name") for c in items if c.get("set_name")}
                     ),
                 },
+                "available_languages": langs_avail,
                 "source": paged.get("source"),
             }
         # Typeahead (small page_size) and filtered/price-sorted views work on
@@ -155,6 +168,7 @@ async def public_search(
         "page": page,
         "page_size": page_size,
         "facets": {"rarities": rarities, "sets": sets},
+        "available_languages": langs_avail,
         "source": source,
     }
 
