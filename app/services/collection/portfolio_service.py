@@ -9,6 +9,7 @@ values; the UI is expected to render an empty state.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -21,6 +22,7 @@ from app.models.card import Card
 from app.models.grade import GradedCard
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.user import User
+from app.services.collection import collection_service
 from app.utils.logger import get_logger
 
 _log = get_logger("portfolio")
@@ -96,13 +98,17 @@ class CardSparkline:
 
 
 async def _load_grades_with_cards(
-    db: AsyncSession, user: User
+    db: AsyncSession, user: User, collection_id: uuid.UUID | None = None
 ) -> list[tuple[GradedCard, Card | None]]:
+    where = [GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None)]
+    scope = collection_service.holdings_scope(collection_id, user)
+    if scope is not None:
+        where.append(scope)
     rows = (
         await db.execute(
             select(GradedCard, Card)
             .outerjoin(Card, Card.id == GradedCard.card_id)
-            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+            .where(*where)
         )
     ).all()
     return [(g, c) for (g, c) in rows]
@@ -277,9 +283,11 @@ async def _intraday_snapshots(
     return out
 
 
-async def summary(db: AsyncSession, user: User) -> dict:
+async def summary(
+    db: AsyncSession, user: User, collection_id: uuid.UUID | None = None
+) -> dict:
     """Aggregate the user's vault into a single hero card payload."""
-    rows = await _load_grades_with_cards(db, user)
+    rows = await _load_grades_with_cards(db, user, collection_id)
     total = Decimal("0")
     cost = Decimal("0")
     cost_count = 0
@@ -518,10 +526,13 @@ def _bucket_dates(range_: PortfolioRange, earliest: date) -> list[date]:
 
 
 async def history(
-    db: AsyncSession, user: User, range_: PortfolioRange
+    db: AsyncSession,
+    user: User,
+    range_: PortfolioRange,
+    collection_id: uuid.UUID | None = None,
 ) -> PortfolioHistory:
     """Compute portfolio value over time from real per-card price history."""
-    rows = await _load_grades_with_cards(db, user)
+    rows = await _load_grades_with_cards(db, user, collection_id)
     if not rows:
         return PortfolioHistory(range=range_, points=[], delta_usd=0.0, delta_pct=0.0)
 
@@ -669,9 +680,14 @@ async def history(
     )
 
 
-async def sparklines(db: AsyncSession, user: User, points: int = 14) -> list[dict]:
+async def sparklines(
+    db: AsyncSession,
+    user: User,
+    points: int = 14,
+    collection_id: uuid.UUID | None = None,
+) -> list[dict]:
     """Per-card 14-point trend pulled from real `price_history`."""
-    rows = await _load_grades_with_cards(db, user)
+    rows = await _load_grades_with_cards(db, user, collection_id)
     out: list[dict] = []
     for g, c in rows:
         hist = _extract_price_history(c)

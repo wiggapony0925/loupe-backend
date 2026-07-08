@@ -26,6 +26,7 @@ from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
 from app.schemas.ownership import CardHolding, CardOwnership
 from app.services import entitlement_service
 from app.services.catalog import card_resolver_service
+from app.services.collection import collection_service
 from app.utils.time import utcnow
 
 
@@ -100,6 +101,7 @@ async def list_for_user(
     graded_only: bool = False,
     raw_only: bool = False,
     watchlist: bool = False,
+    collection_id: uuid.UUID | None = None,
 ) -> list[GradedCardRead]:
     if sort not in SORT_OPTIONS:
         raise HTTPException(
@@ -135,6 +137,10 @@ async def list_for_user(
                 select(WatchlistItem.card_id).where(WatchlistItem.user_id == user.id)
             )
         )
+    # Active-collection scope — the same seam the dashboard/analytics/PDF use.
+    scope = collection_service.holdings_scope(collection_id, user)
+    if scope is not None:
+        base_where.append(scope)
     if min_grade is not None:
         base_where.append(GradedCard.grade >= min_grade)
     if max_grade is not None:

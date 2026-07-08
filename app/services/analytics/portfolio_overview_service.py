@@ -24,6 +24,7 @@ endpoint):
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -33,6 +34,7 @@ from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.services.analytics.home_feed_service import _change_pct_1y
+from app.services.collection import collection_service
 from app.services.collection.portfolio_service import holding_value_usd
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
@@ -67,14 +69,20 @@ _GRADE_BUCKET_ORDER = ["10", "9.5", "9", "8", "7", "≤6"]
 # ─── Builder ──────────────────────────────────────────────────────────────
 
 
-async def build_overview(db: AsyncSession, user: User) -> dict[str, Any]:
+async def build_overview(
+    db: AsyncSession, user: User, collection_id: uuid.UUID | None = None
+) -> dict[str, Any]:
     """Compute every analytics widget the Analytics tab needs in one query."""
+    where = [GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None)]
+    scope = collection_service.holdings_scope(collection_id, user)
+    if scope is not None:
+        where.append(scope)
     rows = (
         await db.execute(
             select(GradedCard, Card, CardSet)
             .outerjoin(Card, Card.id == GradedCard.card_id)
             .outerjoin(CardSet, CardSet.id == Card.set_id)
-            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+            .where(*where)
         )
     ).all()
 

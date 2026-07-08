@@ -8,9 +8,10 @@ Replaces the previous client-side aggregation over `/v1/collection`.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_user
@@ -34,8 +35,9 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 async def get_overview(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
+    collection_id: uuid.UUID | None = Query(None),
 ) -> dict[str, Any]:
-    return await portfolio_overview_service.build_overview(db, user)
+    return await portfolio_overview_service.build_overview(db, user, collection_id)
 
 
 __all__ = ["router"]

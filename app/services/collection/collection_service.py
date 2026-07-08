@@ -14,11 +14,36 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.models.collection import Collection, CollectionItem
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.collection import CollectionCreate, CollectionUpdate
+
+
+def holdings_scope(
+    collection_id: uuid.UUID | None, user: User
+) -> ColumnElement[bool] | None:
+    """A reusable ``WHERE`` fragment scoping ``GradedCard`` rows to one
+    collection — the single seam every value surface (dashboard, analytics,
+    vault list, statement PDF) uses so the *active collection* consistently
+    scopes them all, backend-side.
+
+    ``None`` ⇒ the "All" view (no scoping). Ownership-safe: the subquery only
+    matches items in a collection owned by ``user``, so a foreign / unknown
+    collection id yields an empty scope instead of leaking anyone's holdings.
+    """
+    if collection_id is None:
+        return None
+    return GradedCard.id.in_(
+        select(CollectionItem.graded_card_id)
+        .join(Collection, Collection.id == CollectionItem.collection_id)
+        .where(
+            CollectionItem.collection_id == collection_id,
+            Collection.user_id == user.id,
+        )
+    )
 
 
 async def get_owned(
