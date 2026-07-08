@@ -373,6 +373,9 @@
     "GET",
     "POST"
   ],
+  "/v1/collections/overview": [
+    "GET"
+  ],
   "/v1/collections/{collection_id}": [
     "DELETE",
     "PATCH"
@@ -383,6 +386,9 @@
   ],
   "/v1/collections/{collection_id}/items/{graded_card_id}": [
     "DELETE"
+  ],
+  "/v1/collections/{collection_id}/merge": [
+    "POST"
   ],
   "/v1/flags": [
     "GET"

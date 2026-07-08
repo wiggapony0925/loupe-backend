@@ -47,9 +47,36 @@ class CollectionItemAdd(BaseModel):
     graded_card_id: uuid.UUID
 
 
+class CollectionMerge(BaseModel):
+    """Body for ``POST /v1/collections/{id}/merge`` — fold ``source_id`` into
+    the path collection, then delete the (now-empty) source."""
+
+    source_id: uuid.UUID
+
+
+class CollectionSummary(BaseModel):
+    """One row of the portfolio switcher (the currency-style dropdown).
+
+    ``id`` is null for the synthetic **All** entry — everything the user owns,
+    which is derived (not a real row) and therefore never deletable. Custom
+    collections are categorizations layered on top; deleting one drops the
+    categorization, never the cards.
+    """
+
+    id: uuid.UUID | None
+    name: str
+    color: str | None = None
+    card_count: int
+    total_value_usd: float
+    is_all: bool = False
+    deletable: bool = True
+
+
 __all__ = [
     "CollectionCreate",
     "CollectionItemAdd",
+    "CollectionMerge",
     "CollectionRead",
+    "CollectionSummary",
     "CollectionUpdate",
 ]
