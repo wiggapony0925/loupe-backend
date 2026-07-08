@@ -667,31 +667,79 @@ async def resolve(
 # ------------------------------------------------------------------- helpers
 
 
-async def _preferred_external_ref(db: AsyncSession, card_id: uuid.UUID) -> str | None:
-    """Pick the most useful upstream id for a card.
+# Preference order for the composite id we surface to clients — providers we
+# can use for live pricing first (that's the id the browse/search views key off).
+_REF_PRIORITY = {
+    "pokemontcg": 0,
+    "scryfall": 1,
+    "ygoprodeck": 2,
+    "tcgplayer": 3,
+    "psa": 4,
+}
 
-    Preference order favours providers we can use for live pricing.
+
+async def upstream_ids_for(
+    db: AsyncSession, card_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Map each local card id → its preferred composite upstream id, one query.
+
+    The single batch helper the watchlist / alert lists use to hand each row
+    back the ``<source>:<external_id>`` the client can match on without knowing
+    the local UUID.
     """
+    ids = list(dict.fromkeys(card_ids))  # de-dupe, preserve order
+    if not ids:
+        return {}
     rows = (
         (
             await db.execute(
-                select(CardExternalRef).where(CardExternalRef.card_id == card_id)
+                select(CardExternalRef).where(CardExternalRef.card_id.in_(ids))
             )
         )
         .scalars()
         .all()
     )
-    if not rows:
+    best: dict[uuid.UUID, CardExternalRef] = {}
+    for r in rows:
+        cur = best.get(r.card_id)
+        if cur is None or _REF_PRIORITY.get(r.source, 99) < _REF_PRIORITY.get(
+            cur.source, 99
+        ):
+            best[r.card_id] = r
+    return {cid: f"{r.source}:{r.external_id}" for cid, r in best.items()}
+
+
+async def _preferred_external_ref(db: AsyncSession, card_id: uuid.UUID) -> str | None:
+    """Pick the most useful upstream id for a single card."""
+    return (await upstream_ids_for(db, [card_id])).get(card_id)
+
+
+async def ensure_local_card_id(db: AsyncSession, ref: str) -> uuid.UUID | None:
+    """Resolve a card *reference* — a local ``uuid`` or a composite upstream id
+    like ``pokemontcg:base1-4`` — to a local Card UUID, materializing an
+    upstream-only card if we don't have it yet.
+
+    The single funnel every "pin/alert whatever the user is looking at" flow
+    should use, so clients can pass the id they already have (the browse/search
+    view only knows the composite upstream id) and never need a pre-resolve
+    round-trip. Returns ``None`` when the reference can't be resolved
+    (unknown UUID, non-composite string, or an upstream card we can't fetch).
+    """
+    if not ref:
         return None
-    priority = {
-        "pokemontcg": 0,
-        "scryfall": 1,
-        "ygoprodeck": 2,
-        "tcgplayer": 3,
-        "psa": 4,
-    }
-    best = min(rows, key=lambda r: priority.get(r.source, 99))
-    return f"{best.source}:{best.external_id}"
+    # A local UUID already? Verify it exists so we never pin a dangling id.
+    try:
+        cid = uuid.UUID(str(ref))
+    except (ValueError, AttributeError):
+        cid = None
+    if cid is not None:
+        row = await card_catalog_service.get_card(db, cid)
+        return cid if row is not None else None
+    # Composite upstream id → find-or-create the local Card (idempotent).
+    if ":" in str(ref):
+        card = await ensure_local_card(db, upstream_id=str(ref))
+        return card.id if card is not None else None
+    return None
 
 
 def _hamming(a: str, b: str) -> int:
@@ -711,10 +759,12 @@ __all__ = [
     "Card",
     "ResolvedCard",
     "ensure_local_card",
+    "ensure_local_card_id",
     "link_external_ref",
     "resolve",
     "resolve_by_phash",
     "resolve_by_text",
     "resolve_by_upstream_id",
     "resolve_by_uuid",
+    "upstream_ids_for",
 ]

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,19 +44,27 @@ async def create(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> WatchlistItemRead:
-    return await watchlist_service.add(db, user, payload.card_id)
+    try:
+        return await watchlist_service.add(db, user, payload.card_id)
+    except watchlist_service.CardNotResolvable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not resolve card '{exc}' to pin it.",
+        ) from exc
 
 
 @router.delete(
-    "/{card_id}",
+    "/{card_id:path}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Unpin a card from my watchlist",
 )
 async def delete(
-    card_id: uuid.UUID,
+    card_id: str,
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
+    # `card_id` may be a UUID or a composite upstream id (`pokemontcg:base1-4`);
+    # the `:path` converter keeps the colon/slashes intact.
     ok = await watchlist_service.remove(db, user, card_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Card not on watchlist")

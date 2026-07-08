@@ -18,6 +18,10 @@ class PriceAlertRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     card_id: uuid.UUID
+    #: The composite catalog id (`<source>:<external_id>`) the card resolves to,
+    #: e.g. `pokemontcg:base1-4` — so a client that only knows the upstream id
+    #: (browse/card-detail) can match its "already has an alert?" state.
+    upstream_id: str | None = None
     condition: PriceAlertCondition
     threshold_usd: Decimal
     note: str | None = None
@@ -31,11 +35,11 @@ class PriceAlertRead(BaseModel):
 
 
 class PriceAlertCreate(BaseModel):
-    # Identify the card by *either* a local catalog UUID (mobile, which has
-    # already resolved a local card) *or* an upstream ``<source>:<id>`` id
-    # (web card-detail, which only knows the composite id). The service
-    # materializes a local Card from ``upstream_id`` when ``card_id`` is absent.
-    card_id: uuid.UUID | None = None
+    # Identify the card by whatever id the client has: a local catalog UUID *or*
+    # a composite upstream id (`pokemontcg:base1-4`) — the browse/card-detail
+    # views only know the latter. The backend resolves + materializes it, so
+    # `card_id` accepts either form (the legacy `upstream_id` field still works).
+    card_id: str | uuid.UUID | None = None
     upstream_id: str | None = Field(None, max_length=128)
     condition: PriceAlertCondition
     threshold_usd: Decimal = Field(..., gt=Decimal("0"))
@@ -43,9 +47,14 @@ class PriceAlertCreate(BaseModel):
 
     @model_validator(mode="after")
     def _require_a_card(self) -> Self:
-        if self.card_id is None and not self.upstream_id:
+        if not self.card_id and not self.upstream_id:
             raise ValueError("Provide either card_id or upstream_id.")
         return self
+
+    @property
+    def card_ref(self) -> str:
+        """The single card reference to resolve (UUID or composite)."""
+        return str(self.card_id) if self.card_id else (self.upstream_id or "")
 
 
 __all__ = ["PriceAlertCreate", "PriceAlertRead"]

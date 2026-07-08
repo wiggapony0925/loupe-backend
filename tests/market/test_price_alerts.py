@@ -47,6 +47,38 @@ async def test_create_list_delete_alert_roundtrip(
 
 
 @pytest.mark.asyncio
+async def test_create_alert_by_composite_id_in_card_id(
+    client, db_session, created_user, auth_headers
+):
+    """Set an alert on a catalog card by its composite id passed in `card_id`.
+
+    This is exactly what the mobile card-detail sends — the backend resolves +
+    materializes it instead of rejecting the non-UUID, and echoes `upstream_id`
+    so the client can match the "already has an alert?" state.
+    """
+    from app.services.catalog import card_resolver_service
+
+    card = await make_card(db_session)
+    await card_resolver_service.link_external_ref(
+        db_session, card_id=card.id, source="pokemontcg", external_id="base1-99"
+    )
+    await db_session.commit()
+    composite = "pokemontcg:base1-99"
+
+    resp = await client.post(
+        "/v1/alerts",
+        json={"card_id": composite, "condition": "above", "threshold_usd": "10.00"},
+        headers=auth_headers,
+    )
+    data = assert_envelope_ok(resp, expected_status=201)
+    assert data["card_id"] == str(card.id)
+    assert data["upstream_id"] == composite
+
+    rows = assert_envelope_ok(await client.get("/v1/alerts", headers=auth_headers))
+    assert rows[0]["upstream_id"] == composite
+
+
+@pytest.mark.asyncio
 async def test_delete_unknown_alert_returns_404(client, auth_headers):
     resp = await client.delete(f"/v1/alerts/{uuid.uuid4()}", headers=auth_headers)
     assert_envelope_error(resp, expected_status=404)
