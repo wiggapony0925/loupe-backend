@@ -5,8 +5,8 @@ empty on any lower tier, so it has zero effect until a Legendary subscription is
 active and a sync runs — then per-card price lookups resolve from here instead
 of the 1-request/second API. Pure ``CREATE TABLE`` — safe online, no backfill.
 
-Revision ID: 0035_pricecharting_prices
-Revises: 0034_mirror_language
+Revision ID: 0036_pricecharting_prices
+Revises: 0035_grade_tags
 Create Date: 2026-07-08
 """
 
@@ -19,8 +19,8 @@ from alembic import op
 
 from app.db.types import JsonCol
 
-revision: str = "0035_pricecharting_prices"
-down_revision: str | Sequence[str] | None = "0034_mirror_language"
+revision: str = "0036_pricecharting_prices"
+down_revision: str | Sequence[str] | None = "0035_grade_tags"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
