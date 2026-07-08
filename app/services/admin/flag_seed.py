@@ -43,6 +43,11 @@ ADMIN_PAGE_FLAGS: tuple[tuple[str, str, str], ...] = (
     ("admin_announce", "Admin · Announcements", "Monetization: global banner editor."),
     ("admin_users", "Admin · Users", "People: user search, roles, bans."),
     ("admin_catalog", "Admin · Catalog", "Catalog: coverage by game."),
+    (
+        "admin_pricecharting",
+        "Admin · PriceCharting",
+        "Catalog: PriceCharting tier detection + fallback chain.",
+    ),
     ("admin_cards", "Admin · Card data", "Catalog: explore & override card data."),
     ("admin_card_tree", "Admin · Card tree", "Catalog: card data-lineage tree."),
     ("admin_grades", "Admin · Grade review", "Catalog: QA graded cards."),
