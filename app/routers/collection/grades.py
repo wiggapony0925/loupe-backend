@@ -94,11 +94,22 @@ async def list_mine(
             "(repeatable, case-insensitive)."
         ),
     ),
+    graded_only: bool = Query(
+        False,
+        description="Show only slabbed/graded cards (house ≠ loupe).",
+    ),
+    raw_only: bool = Query(
+        False, description="Show only raw/ungraded cards (house = loupe)."
+    ),
+    watchlist: bool = Query(
+        False, description="Show only cards on the user's watchlist."
+    ),
     sort: str = Query(
         "recent",
         description=(
             "Result ordering. One of: `recent` (default), `oldest`, "
-            "`value_desc`, `value_asc`, `grade_desc`, `grade_asc`."
+            "`value_desc`, `value_asc`, `grade_desc`, `grade_asc`, "
+            "`name_asc`, `name_desc`, `number_asc`, `number_desc`."
         ),
     ),
 ) -> list[GradedCardRead]:
@@ -116,6 +127,9 @@ async def list_mine(
         min_value=min_value,
         max_value=max_value,
         tags=tags,
+        graded_only=graded_only,
+        raw_only=raw_only,
+        watchlist=watchlist,
         sort=sort,
     )
 
