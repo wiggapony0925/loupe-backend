@@ -23,10 +23,26 @@ from app.services.catalog import (
     card_search_service,
     carousel_service,
     catalog_browse_service,
+    games,
 )
 from app.services.market import trending_service
 
 router = APIRouter(prefix="/public", tags=["public"])
+
+
+@router.get(
+    "/games",
+    summary="Storefront category tags (games + sections; backend-driven)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def public_games(response: Response) -> dict[str, Any]:
+    """The canonical marketplace/search category tags both web + mobile render,
+    each with a ``status`` (``live`` | ``soon``) derived from real catalog
+    capability — so One Piece flips live everywhere from here, no client
+    release. App-only actions (Scan/Grade/Scanner) stay client-side."""
+    _cache(response)
+    return games.catalog_tags()
+
 
 # Catalog identity (names, sets, art, rarity) is effectively immutable; only
 # pricing drifts. So we let the browser/CDN serve a cached copy instantly and
