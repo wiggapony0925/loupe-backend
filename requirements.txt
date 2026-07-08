@@ -82,3 +82,11 @@ openai>=1.40,<2
 
 # --- Observability (optional; no-ops without SENTRY_DSN) ---
 sentry-sdk[fastapi]>=2.18,<3
+
+# --- Learned-embedding card matcher (optional; inert until enabled) ---
+# onnxruntime runs the CNN image encoder on CPU; pgvector provides the
+# SQLAlchemy Vector type + `<=>` nearest-neighbour. numpy is used by the
+# encoder directly.
+numpy>=1.26,<3
+onnxruntime>=1.17,<2
+pgvector>=0.3,<1

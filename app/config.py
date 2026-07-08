@@ -337,6 +337,21 @@ class Settings(BaseSettings):
     # dHash cross-check ceiling for margin-accepted hits (256-bit dHash).
     phash_dhash_max_distance: int = 80
 
+    # --- Learned-embedding matcher (Collectr-style far/blurry recognition) ---
+    # A CNN image encoder + pgvector nearest-neighbour, robust to distance,
+    # blur and glare where pHash is brittle. OFF until the model is hosted and
+    # the catalog is back-filled (see scripts/backfill_embeddings.py) — the
+    # whole path is inert when disabled, so identify falls back to pHash+OCR.
+    embeddings_identify_enabled: bool = False
+    # Path (local file or gs:// URI) to the ONNX image-encoder model. When
+    # unset, the encoder returns None and the matcher no-ops.
+    card_embed_model_path: str | None = None
+    # Embedding dimensionality (must match the model + the pgvector column).
+    card_embed_dim: int = 512
+    # Cosine-distance ceiling (pgvector `<=>`) for an embedding match; a hit
+    # above this similarity is accepted as a candidate. Tune on real scans.
+    card_embed_max_distance: float = 0.28
+
     # --- Observability (optional; no-ops when DSN is missing) ---
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.1
