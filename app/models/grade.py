@@ -77,6 +77,11 @@ class GradedCard(Base):
         nullable=True,
     )
     notes: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # User-defined organization tags for this holding (e.g. "PC", "For sale",
+    # "Trade"). A small JSON array of short strings — per-holding so different
+    # copies of the same card can be tagged differently. Nullable so legacy rows
+    # stay valid; readers treat null as an empty list.
+    tags: Mapped[list | None] = mapped_column(JsonCol, nullable=True)
     graded_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

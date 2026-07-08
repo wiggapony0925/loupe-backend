@@ -291,6 +291,9 @@ async def summary(db: AsyncSession, user: User) -> dict:
     # `Set(c.set)` and `count(c.house == 'loupe')` in JS.
     unique_card_ids: set = set()
     loupe_graded_count = 0
+    # Distinct user tags across the vault — feeds the mobile filter sheet + the
+    # grade-form tag suggestions (case-insensitive de-dupe, first casing wins).
+    tags_seen: dict[str, str] = {}
     for g, _card in rows:
         # Collection value is the grade-aware per-card estimate — the same
         # `holding_value_usd` basis the analytics overview and the history
@@ -313,6 +316,10 @@ async def summary(db: AsyncSession, user: User) -> dict:
         ).lower()
         if house_val == "loupe":
             loupe_graded_count += 1
+        for raw_tag in g.tags or []:
+            tag = str(raw_tag).strip()
+            if tag:
+                tags_seen.setdefault(tag.lower(), tag)
     # Distinct set names the user owns. Pulled in a single SQL pass
     # (graded_cards → cards → card_sets) so the cost is one query, not
     # one per row. Result is sorted for stable client-side rendering.
@@ -365,6 +372,7 @@ async def summary(db: AsyncSession, user: User) -> dict:
         "uniqueCardCount": len(unique_card_ids),
         "loupeGradedCount": loupe_graded_count,
         "availableSets": available_sets,
+        "availableTags": sorted(tags_seen.values(), key=str.lower),
     }
 
 
