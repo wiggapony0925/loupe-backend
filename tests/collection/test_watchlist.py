@@ -113,7 +113,18 @@ async def test_pin_by_composite_upstream_id_materializes(
 
 
 @pytest.mark.asyncio
-async def test_pin_unresolvable_id_returns_422(client, auth_headers):
+async def test_pin_unresolvable_id_returns_422(client, auth_headers, monkeypatch):
+    # Force the resolver to fail fast. Otherwise the unknown upstream id makes a
+    # live catalog HTTP call whose async client leaks into teardown and flakes
+    # CI with "RuntimeError: Event loop is closed" — the resolve *result* (None
+    # → 422) is what this test cares about, not the network round-trip.
+    from app.services.catalog import card_resolver_service
+
+    async def _unresolvable(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(card_resolver_service, "ensure_local_card", _unresolvable)
+
     resp = await client.post(
         "/v1/watchlist",
         json={"card_id": "pokemontcg:does-not-exist"},
