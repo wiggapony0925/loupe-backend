@@ -27,6 +27,35 @@ def _strip_control_chars(value: str | None) -> str | None:
     return cleaned or None
 
 
+# User organization tags — kept small + tidy so the vault filter UI stays clean.
+_MAX_TAGS = 12
+_MAX_TAG_LEN = 24
+
+
+def _clean_tags(value: list[str] | None) -> list[str] | None:
+    """Trim, drop empties/control chars, cap length + count, de-dupe (case-
+    insensitive, first casing wins). ``None`` passes through so an update can
+    distinguish "not provided" from "clear to none"."""
+    if value is None:
+        return None
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in value:
+        if not isinstance(raw, str):
+            continue
+        tag = _CTRL_RE.sub("", raw).strip()[:_MAX_TAG_LEN].strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(tag)
+        if len(out) >= _MAX_TAGS:
+            break
+    return out
+
+
 class GradedCardRead(BaseModel):
     """Public representation of a graded card."""
 
@@ -47,9 +76,18 @@ class GradedCardRead(BaseModel):
     purchase_date: date | None = None
     fingerprint_hash: str | None = None
     notes: str | None = None
+    # User organization tags (e.g. "PC", "For sale"). Legacy rows store NULL;
+    # coalesce to an empty list so clients never special-case null.
+    tags: list[str] = []
     graded_at: datetime
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _tags_never_null(cls, v: object) -> object:
+        return v or []
+
     # Joined card metadata so clients can render a row without an N+1 round-trip.
     card_name: str | None = None
     card_image_url: str | None = None
@@ -96,10 +134,16 @@ class GradedCardCreate(BaseModel):
     purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"), le=_MAX_VALUE_USD)
     purchase_date: date | None = None
     notes: str | None = Field(None, max_length=2000)
+    tags: list[str] | None = None
     scan_job_id: uuid.UUID | None = None
     fingerprint_hash: str | None = Field(None, max_length=128)
 
     # -------- validators ----------------------------------------------------
+
+    @field_validator("tags")
+    @classmethod
+    def _clean_create_tags(cls, v: list[str] | None) -> list[str] | None:
+        return _clean_tags(v)
 
     @field_validator("upstream_id")
     @classmethod
@@ -183,11 +227,18 @@ class GradedCardUpdate(BaseModel):
     )
     purchase_price_usd: Decimal | None = Field(None, ge=Decimal("0"), le=_MAX_VALUE_USD)
     purchase_date: date | None = None
+    # `None` = leave tags unchanged; `[]` = clear all tags.
+    tags: list[str] | None = None
 
     @field_validator("notes")
     @classmethod
     def _strip_notes(cls, v: str | None) -> str | None:
         return _strip_control_chars(v)
+
+    @field_validator("tags")
+    @classmethod
+    def _clean_update_tags(cls, v: list[str] | None) -> list[str] | None:
+        return _clean_tags(v)
 
     @field_validator("purchase_date")
     @classmethod
