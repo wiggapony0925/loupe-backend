@@ -34,6 +34,8 @@ from app.integrations._http import (
     scryfall,
     ygoprodeck,
 )
+from app.integrations.pricecharting import catalog as pc_catalog
+from app.integrations.pricecharting import grades as pc_grades
 from app.platform import cache_l2
 from app.platform.api_budget import ApiBudget
 from app.platform.cache_config import (
@@ -251,6 +253,85 @@ def _from_pokemon(card: dict[str, Any]) -> dict[str, Any]:
         tags=tags,
         metadata=_meta("pokemontcg"),
     ).model_dump()
+
+
+def _pricecharting_pricing(
+    product: dict[str, Any], card_id: str
+) -> UnifiedPricingSummary | None:
+    """Pricing summary from a PriceCharting product's grade ladder (detail view)."""
+    ladder = pc_grades.card_grade_ladder(product)
+    raw = ladder.get("UNGRADED")
+    top = ladder.get("PSA 10") or ladder.get("PSA 9")
+    if raw is None and top is None:
+        return None
+    return UnifiedPricingSummary(
+        card_id=card_id,
+        currency="USD",
+        market=_money(raw if raw is not None else top),
+        low=_money(raw),
+        high=_money(top),
+        as_of=_now_iso(),
+        sources=["pricecharting"],
+    )
+
+
+def _from_pricecharting(
+    parsed: dict[str, Any], product: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """A parsed PriceCharting product → ``UnifiedCard`` dict, language carried in
+    ``attributes``. Pass the full ``product`` (from ``/api/product``) to attach
+    the price ladder for the detail view."""
+    pricing = (
+        _pricecharting_pricing(product, parsed["id"]) if product is not None else None
+    )
+    return UnifiedCard(
+        id=parsed["id"],
+        name=parsed["name"],
+        tcg="pokemon",
+        source="pricecharting",
+        set_name=parsed.get("set_name"),
+        number=parsed.get("number"),
+        attributes={
+            "language": parsed.get("language", "en"),
+            "console": parsed.get("console"),
+        },
+        pricing_summary=pricing,
+        metadata=_meta("pricecharting"),
+    ).model_dump()
+
+
+async def _merge_pricecharting_pokemon(
+    body: dict[str, Any], q: str, langs: list[str] | None, page: int
+) -> dict[str, Any]:
+    """Augment English Pokémon search with PriceCharting's non-English (esp.
+    Japanese) printings when the language picker asks for them.
+
+    Only runs when a non-English language is explicitly requested (so default
+    English search never pays a PriceCharting call), and only on page 1 (the
+    products feed isn't paginated). Failures degrade to the English body."""
+    wanted = {x for x in (langs or []) if x != "en"}
+    if not wanted or page != 1 or not q.strip() or not pc_catalog.configured():
+        return body
+    try:
+        products = await pc_catalog.search_products(q, limit=40)
+    except Exception as exc:  # pragma: no cover - never break search
+        logger.debug("pricecharting pokemon augment failed: %s", exc)
+        return body
+    seen = {c.get("id") for c in body.get("results", [])}
+    extra: list[dict[str, Any]] = []
+    for product in products:
+        parsed = pc_catalog.parse_product(product)
+        if parsed is None or parsed["language"] not in wanted or parsed["id"] in seen:
+            continue
+        seen.add(parsed["id"])
+        extra.append(_from_pricecharting(parsed))
+    if not extra:
+        return body
+    return {
+        **body,
+        "results": [*body.get("results", []), *extra],
+        "total": int(body.get("total", 0)) + len(extra),
+    }
 
 
 def _pokemon_pricing(card: dict[str, Any]) -> UnifiedPricingSummary | None:
@@ -1290,7 +1371,13 @@ _SCRYFALL_PAGE_SIZE = 175  # fixed by Scryfall's API
 async def available_languages(tcg: str | None = None) -> list[str]:
     """ISO languages the catalog actually has (for the client language picker to
     offer only real options). English first; empty until the mirror is synced."""
-    return await pokemon_mirror_service.mirror_languages(tcg)
+    langs = await pokemon_mirror_service.mirror_languages(tcg)
+    # PriceCharting carries Japanese Pokémon even though our catalog mirror is
+    # English-only — advertise it so the picker can offer it (search then pulls
+    # the actual cards from PriceCharting on demand).
+    if tcg == "pokemon" and pc_catalog.configured() and "ja" not in langs:
+        langs = [*langs, "ja"]
+    return langs
 
 
 async def search_cards_paged(
@@ -1341,28 +1428,29 @@ async def search_cards_paged(
                     "total": mirror["total"],
                     "source": "pokemontcg",
                 }
-                body["page"] = page
-                body["page_size"] = page_size
-                return body
-            raw = await pokemon_tcg.search_cards(
-                _build_pokemon_query(q),
-                page=page,
-                page_size=page_size,
-                order_by="-set.releaseDate",
-            )
-            items = [_from_pokemon(c) for c in (raw.get("data") or [])]
-            total = int(raw.get("totalCount") or 0)
-            # Nothing under the strict query? Fall back to the forgiving
-            # substring search so partial names still page through results.
-            if total == 0:
-                relaxed = _build_pokemon_relaxed_query(q)
-                if relaxed:
-                    raw = await pokemon_tcg.search_cards(
-                        relaxed, page=page, page_size=page_size
-                    )
-                    items = [_from_pokemon(c) for c in (raw.get("data") or [])]
-                    total = int(raw.get("totalCount") or len(items))
-            body = {"results": items, "total": total, "source": "pokemontcg"}
+            else:
+                raw = await pokemon_tcg.search_cards(
+                    _build_pokemon_query(q),
+                    page=page,
+                    page_size=page_size,
+                    order_by="-set.releaseDate",
+                )
+                items = [_from_pokemon(c) for c in (raw.get("data") or [])]
+                total = int(raw.get("totalCount") or 0)
+                # Nothing under the strict query? Fall back to the forgiving
+                # substring search so partial names still page through results.
+                if total == 0:
+                    relaxed = _build_pokemon_relaxed_query(q)
+                    if relaxed:
+                        raw = await pokemon_tcg.search_cards(
+                            relaxed, page=page, page_size=page_size
+                        )
+                        items = [_from_pokemon(c) for c in (raw.get("data") or [])]
+                        total = int(raw.get("totalCount") or len(items))
+                body = {"results": items, "total": total, "source": "pokemontcg"}
+            # Surface PriceCharting's non-English (esp. Japanese) printings —
+            # our pokemontcg.io catalog is English-only — when asked for them.
+            body = await _merge_pricecharting_pokemon(body, q, langs, page)
         elif tcg == "magic":
             # Mirror first: true local pagination over the complete catalog.
             mirror = await pokemon_mirror_service.search_mirror(
@@ -1870,6 +1958,12 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             if result is None:
                 raw = await apitcg.get_card(apitcg.GAME_SLUGS["onepiece"], upstream_id)
                 result = _from_apitcg_onepiece(raw) if raw else None
+        elif source == "pricecharting":
+            # A card surfaced from PriceCharting's catalog (e.g. a Japanese
+            # printing). Fetch the full product for its name/set + price ladder.
+            product = await pc_catalog.get_product(upstream_id)
+            parsed = pc_catalog.parse_product(product) if product else None
+            result = _from_pricecharting(parsed, product) if parsed else None
         else:
             return None
     except (httpx.HTTPError, CircuitOpenError) as exc:
