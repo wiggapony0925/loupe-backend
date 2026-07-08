@@ -29,6 +29,7 @@ from app.routers.admin import (
     integrations,
     jobs,
     metrics,
+    pricecharting,
     pulse,
     retention,
     revenue,
@@ -51,6 +52,7 @@ admin_router.include_router(integrations.router)
 admin_router.include_router(revenue.router)
 # Catalog & product.
 admin_router.include_router(catalog.router)
+admin_router.include_router(pricecharting.router)
 admin_router.include_router(scanner.router)
 admin_router.include_router(cards.router)
 admin_router.include_router(card_tree.router)

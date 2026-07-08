@@ -36,6 +36,7 @@ from app.models.kv_cache import KvCacheEntry
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.price import PriceSnapshot
 from app.models.price_alert import PriceAlert
+from app.models.pricecharting_price import PriceChartingPrice
 from app.models.push_token import PushToken
 from app.models.scan import ScanJob
 from app.models.scanner import Scanner
@@ -77,6 +78,7 @@ __all__ = [
     "PortfolioSnapshot",
     "PriceAlert",
     "PriceAlertCondition",
+    "PriceChartingPrice",
     "PriceSnapshot",
     "PriceSourceEnum",
     "PushToken",

@@ -123,3 +123,67 @@ async def test_valuation_none_for_unknown_card(monkeypatch):
 
     monkeypatch.setattr(vs.card_search_service, "get_card", no_card)
     assert await vs.get_valuation("nope:404") is None
+
+
+@pytest.mark.asyncio
+async def test_pricecharting_grade_ladder_merges_into_grades(monkeypatch):
+    """PriceCharting's real per-grade ladder fills the price-by-grade row for
+    grades sold-comps don't cover, without overwriting a real sale."""
+
+    async def fake_card(card_id: str) -> dict[str, Any]:
+        return {"id": card_id, "pricing_summary": {"market": _money(300.0)}}
+
+    async def fake_marketplace(card_id: str, **_: Any) -> dict[str, Any]:
+        return {
+            "providers": [
+                {
+                    "source": "pricecharting",
+                    "label": "PriceCharting",
+                    "price": _money(300.0),
+                    "sales_volume": 1234,
+                    "grade_ladder": {
+                        "UNGRADED": 300.0,
+                        "PSA 9": 900.0,
+                        "PSA 10": 2500.0,
+                        "BGS 10": 4000.0,
+                    },
+                }
+            ]
+        }
+
+    async def fake_grades(card_id: str, **_: Any) -> dict[str, Any]:
+        # A real PSA 10 sold comp already exists — the guide must NOT clobber it.
+        return {
+            "grades": [
+                {
+                    "grade": "PSA 10",
+                    "median_recent": 2600.0,
+                    "last_sale": _money(2650.0),
+                }
+            ]
+        }
+
+    monkeypatch.setattr(vs.card_search_service, "get_card", fake_card)
+    monkeypatch.setattr(
+        vs.marketplace_prices_service,
+        "get_marketplace_prices_for_card",
+        fake_marketplace,
+    )
+    monkeypatch.setattr(
+        vs.grade_summary_service, "get_grade_summary_for_card", fake_grades
+    )
+
+    v = await vs.get_valuation("x:9")
+    assert v is not None
+    assert v["sales_volume"] == 1234
+    by_grade = {r["grade"]: r for r in v["grades"]}
+    # Real PSA 10 comp preserved (guide did not overwrite it).
+    assert by_grade["PSA 10"]["median_recent"] == 2600.0
+    assert "is_guide" not in by_grade["PSA 10"]
+    # Grades comps didn't cover are filled from the PriceCharting guide.
+    assert by_grade["BGS 10"]["median_recent"] == 4000.0
+    assert by_grade["BGS 10"]["is_guide"] is True
+    assert by_grade["BGS 10"]["house"] == "bgs"
+    assert by_grade["PSA 9"]["is_guide"] is True
+    # Sorted UNGRADED-first, then by price desc.
+    assert v["grades"][0]["grade"] == "UNGRADED"

@@ -75,13 +75,78 @@ def _ungraded_comp_signal(grade_summary: dict[str, Any] | None) -> float | None:
     return None
 
 
-def _pricecharting_signal(marketplace: dict[str, Any] | None) -> float | None:
-    """PriceCharting's price is a recent-sales guide — a real "sold" signal."""
+def _pricecharting_row(marketplace: dict[str, Any] | None) -> dict[str, Any] | None:
     for row in (marketplace or {}).get("providers", []):
         src = f"{row.get('source') or ''} {row.get('label') or ''}".lower()
         if "pricecharting" in src:
-            return _amount(row.get("price"))
+            return row
     return None
+
+
+def _pricecharting_signal(marketplace: dict[str, Any] | None) -> float | None:
+    """PriceCharting's price is a recent-sales guide — a real "sold" signal."""
+    row = _pricecharting_row(marketplace)
+    return _amount(row.get("price")) if row else None
+
+
+_GRADE_HOUSES = ("PSA", "BGS", "CGC", "SGC")
+
+
+def _house_for(grade_label: str) -> str | None:
+    upper = grade_label.upper()
+    for house in _GRADE_HOUSES:
+        if upper.startswith(house):
+            return house.lower()
+    return None
+
+
+def _merge_guide_grades(
+    comp_grades: list[dict[str, Any]],
+    ladder: dict[str, Any] | None,
+    currency: str,
+) -> list[dict[str, Any]]:
+    """Fold PriceCharting's per-grade guide ladder into the sold-comps ladder.
+
+    Real sold comps always win — we only *add* rows for grades comps don't
+    cover (which is most, for anything but vintage chase cards), so the
+    price-by-grade row is populated even when sales are sparse. Guide rows carry
+    ``is_guide=True`` so the client can badge "guide" vs "recent sale"; the
+    shape otherwise matches a comp row, so existing clients render them as-is.
+    """
+    if not ladder:
+        return comp_grades
+    present = {str(r.get("grade", "")).upper() for r in comp_grades}
+    merged = list(comp_grades)
+    for label, price in ladder.items():
+        if not isinstance(price, (int, float)) or price <= 0:
+            continue
+        if str(label).upper() in present:
+            continue  # a real sale already covers this grade
+        merged.append(
+            {
+                "grade": label,
+                "house": _house_for(str(label)),
+                "currency": currency,
+                "last_sale": None,
+                "median_recent": round(float(price), 2),
+                "sales_count": 0,
+                "delta_amount": None,
+                "delta_pct": None,
+                "source": "pricecharting",
+                "is_guide": True,
+            }
+        )
+
+    def _sort_key(row: dict[str, Any]) -> tuple[int, float]:
+        is_ungraded = str(row.get("grade", "")).upper() == _UNGRADED
+        price = row.get("median_recent")
+        if not isinstance(price, (int, float)):
+            last = row.get("last_sale") or {}
+            price = last.get("amount") or 0.0
+        return (0 if is_ungraded else 1, -float(price))
+
+    merged.sort(key=_sort_key)
+    return merged
 
 
 def _money(amount: float | None, currency: str) -> dict[str, Any] | None:
@@ -103,6 +168,7 @@ async def get_valuation(card_id: str) -> dict[str, Any] | None:
 
     catalog = _catalog_signal(card)
     listings = _listings_signal(marketplace)
+    pc_row = _pricecharting_row(marketplace)
     # PriceCharting tracks realised sale prices, so prefer it as the "sold
     # comps" signal; fall back to ungraded sold comps when it's unavailable.
     comps = _pricecharting_signal(marketplace) or _ungraded_comp_signal(grade_summary)
@@ -122,6 +188,10 @@ async def get_valuation(card_id: str) -> dict[str, Any] | None:
         "currency"
     ) or "USD"
 
+    comp_grades = (grade_summary or {}).get("grades", [])
+    ladder = pc_row.get("grade_ladder") if pc_row else None
+    grades = _merge_guide_grades(comp_grades, ladder, currency)
+
     return {
         "card_id": card_id,
         "fair_value": _money(fair_value, currency),
@@ -131,7 +201,10 @@ async def get_valuation(card_id: str) -> dict[str, Any] | None:
             "listings": _money(listings, currency),
             "catalog": _money(catalog, currency),
         },
-        "grades": (grade_summary or {}).get("grades", []),
+        # Yearly units sold from PriceCharting — a real liquidity signal for
+        # "how easily does this move".
+        "sales_volume": pc_row.get("sales_volume") if pc_row else None,
+        "grades": grades,
     }
 
 
