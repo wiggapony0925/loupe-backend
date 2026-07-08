@@ -79,6 +79,11 @@ async def list_for_user(
     house: str | None,
     min_grade: float | None,
     sort: str,
+    houses: list[str] | None = None,
+    max_grade: float | None = None,
+    min_value: Decimal | None = None,
+    max_value: Decimal | None = None,
+    tags: list[str] | None = None,
 ) -> list[GradedCardRead]:
     if sort not in SORT_OPTIONS:
         raise HTTPException(
@@ -92,10 +97,25 @@ async def list_for_user(
         GradedCard.user_id == user.id,
         GradedCard.deleted_at.is_(None),
     ]
-    if house is not None:
-        base_where.append(GradedCard.house == house.lower())
+    # Grading-house filter: `houses` (multi-select) supersedes the legacy
+    # singular `house`.
+    house_slugs = (
+        [h.lower() for h in houses if h]
+        if houses
+        else ([house.lower()] if house else [])
+    )
+    if house_slugs:
+        base_where.append(GradedCard.house.in_(house_slugs))
     if min_grade is not None:
         base_where.append(GradedCard.grade >= min_grade)
+    if max_grade is not None:
+        base_where.append(GradedCard.grade <= max_grade)
+    # Value range filters over the grade-aware estimate; unpriced rows (NULL)
+    # never satisfy a value bound, which is the intuitive behaviour.
+    if min_value is not None:
+        base_where.append(GradedCard.estimated_value_usd >= min_value)
+    if max_value is not None:
+        base_where.append(GradedCard.estimated_value_usd <= max_value)
 
     # Set & free-text filters touch joined Card/CardSet columns so they
     # have to be applied to the SELECT, not the copy-count rollup.
@@ -112,18 +132,31 @@ async def list_for_user(
         )
 
     order_factory, tie_factory = SORT_OPTIONS[sort]
+    base_query = (
+        select(GradedCard, Card, CardSet)
+        .outerjoin(Card, Card.id == GradedCard.card_id)
+        .outerjoin(CardSet, CardSet.id == Card.set_id)
+        .where(*join_where)
+        .order_by(order_factory(), tie_factory())
+    )
 
-    rows = (
-        await db.execute(
-            select(GradedCard, Card, CardSet)
-            .outerjoin(Card, Card.id == GradedCard.card_id)
-            .outerjoin(CardSet, CardSet.id == Card.set_id)
-            .where(*join_where)
-            .order_by(order_factory(), tie_factory())
-            .offset(cursor)
-            .limit(limit)
-        )
-    ).all()
+    # Tag filter (match ANY selected tag, case-insensitive). JSON-array
+    # containment isn't portable across Postgres (JSONB) and the SQLite test
+    # DB, so when a tag filter is active we fetch the ordered candidate set and
+    # filter + paginate in Python. Vaults are bounded, so this stays cheap; the
+    # common no-tags path keeps pure-SQL offset/limit.
+    wanted_tags = {t.lower() for t in (tags or []) if t}
+    rows: list[Any]
+    if wanted_tags:
+        candidates = (await db.execute(base_query)).all()
+        matched = [
+            (g, c, s)
+            for (g, c, s) in candidates
+            if wanted_tags & {str(t).lower() for t in (g.tags or [])}
+        ]
+        rows = matched[cursor : cursor + limit]
+    else:
+        rows = list((await db.execute(base_query.offset(cursor).limit(limit))).all())
     # Per-card copy counts. Scope to *base* filters only — a sibling
     # copy hidden by the search/set filter should still contribute to
     # the "x3" badge for total ownership.
@@ -178,6 +211,7 @@ async def create(db: AsyncSession, user: User, payload: GradedCardCreate) -> Gra
         purchase_price_usd=payload.purchase_price_usd,
         purchase_date=payload.purchase_date,
         notes=payload.notes,
+        tags=payload.tags or [],
         fingerprint_hash=payload.fingerprint_hash,
     )
     db.add(row)
@@ -245,6 +279,11 @@ async def update(
         row.purchase_price_usd = payload.purchase_price_usd
     if "purchase_date" in fields:
         row.purchase_date = payload.purchase_date
+    if "tags" in fields:
+        # `None` (not provided) is filtered out by `model_fields_set` only when
+        # omitted; an explicit `tags: null` clears to []. The validator already
+        # cleaned the list.
+        row.tags = payload.tags or []
     await db.commit()
     await db.refresh(row)
     return row
