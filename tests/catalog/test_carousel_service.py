@@ -33,14 +33,46 @@ async def _fresh_redis():
 
 
 @pytest.mark.asyncio
-async def test_fallback_is_curated_empty_when_unconfigured(monkeypatch) -> None:
-    # No model configured → return an empty "curated" set so the web uses its
-    # own built-in strategy pool (never an error).
+async def test_priced_game_serves_curated_pool_when_unconfigured(monkeypatch) -> None:
+    # No model configured → serve the canonical curated pool (the single source
+    # of truth both clients render), NOT an empty set. This is what makes the
+    # endpoint work without any AI key configured.
     monkeypatch.setattr(carousel_service, "configured", lambda: False)
     resp = await carousel_service.get_carousels("pokemon")
     assert resp.game == "pokemon"
     assert resp.source == "curated"
-    assert resp.carousels == []
+    assert resp.carousels, "priced game must have a non-empty curated pool"
+    ids = {c.id for c in resp.carousels}
+    # A representative spread of the ported web shelves must be present.
+    assert {"grails", "steals5", "rainbow", "blue-chips"} <= ids
+
+
+@pytest.mark.asyncio
+async def test_catalog_only_game_has_empty_curated_pool(monkeypatch) -> None:
+    # Catalog-only games (no price feed; the catalog rail can't filter by
+    # rarity) get NO curated shelves — they'd just reorder the same cards. They
+    # lean on the clients' structural anchors instead.
+    monkeypatch.setattr(carousel_service, "configured", lambda: False)
+    for game in ("digimon", "onepiece", "lorcana"):
+        resp = await carousel_service.get_carousels(game)
+        assert resp.source == "curated"
+        assert resp.carousels == [], f"{game} should have no priced shelves"
+
+
+def test_curated_for_pool_shape() -> None:
+    # Priced games share one pool; catalog-only / unknown games get nothing.
+    pool = carousel_service._curated_for("pokemon")
+    assert carousel_service._curated_for("magic") == pool
+    assert carousel_service._curated_for("yugioh") == pool
+    assert carousel_service._curated_for("digimon") == []
+    assert carousel_service._curated_for("onepiece") == []
+    assert carousel_service._curated_for("sports") == []
+    # Every recipe validates and keeps the {label} placeholder convention so the
+    # clients interpolate their own game label.
+    assert all(r.source in {"value", "trending", "catalog"} for r in pool)
+    assert any("{label}" in r.subtitle for r in pool)
+    # Ids are unique (they key the client rails).
+    assert len({r.id for r in pool}) == len(pool)
 
 
 @pytest.mark.asyncio
