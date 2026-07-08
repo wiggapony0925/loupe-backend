@@ -81,16 +81,23 @@ async def search_live(
     dependencies=[Depends(catalog_read_limit)],
 )
 async def get_trending(
-    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|all)$"),
+    tcg: str = Query("all", pattern="^(pokemon|magic|yugioh|digimon|onepiece|all)$"),
+    sort: str = Query("trending", pattern="^(trending|value)$"),
+    max_price: float | None = Query(None, ge=0),
     limit: int = Query(24, ge=1, le=100),
 ) -> dict[str, Any]:
-    """Mixed trending feed across the three live catalogs.
+    """A discovery shelf across the live catalogs — the same server-shaped feed
+    the web storefront uses (`/v1/public/trending`), so mobile and web render
+    identical rails.
 
-    Cached for 15 minutes. Falls back to a small hardcoded set of
-    well-known cards if every upstream is unreachable, so the endpoint
-    never returns a 5xx.
+    ``sort=trending`` is the movement feed; ``sort=value`` ("most valuable")
+    draws from a dedicated high-priced source and is deduped against trending;
+    ``max_price`` applies the "steals under $X" cut. Every card is guaranteed a
+    price + art. Cached ~15 min; never returns 5xx.
     """
-    return await trending_service.get_trending(tcg=tcg, limit=limit)
+    return await trending_service.get_shelf(
+        tcg=tcg, sort=sort, max_price=max_price, limit=limit
+    )
 
 
 @router.get(

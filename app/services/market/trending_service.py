@@ -592,4 +592,71 @@ async def get_most_valuable(
     return envelope
 
 
-__all__ = ["get_most_valuable", "get_trending"]
+# ── Discovery shelf (the one carousel contract) ────────────────────────────
+#
+# Single source of truth for a marketplace shelf, shared by BOTH the mobile
+# endpoint (`/v1/cards/trending`) and the web storefront (`/v1/public/trending`)
+# so the two clients render *identical* rails. Everything the shopping UI needs
+# — priced-only, art-only, sorted, and price-ceiling — happens here.
+
+#: Catalog-only games have no price feed yet, so there is no priced shelf; we
+#: return empty rather than let the trending source fall back to the global
+#: (Magic-dominated) leaderboard under a mismatched "Trending in …" rail.
+_CATALOG_ONLY_SOURCE = {"digimon": "digimoncard", "onepiece": "apitcg-onepiece"}
+
+
+async def get_shelf(
+    tcg: str = "all",
+    sort: str = "trending",
+    max_price: float | None = None,
+    limit: int = DEFAULT_LIMIT,
+) -> dict[str, Any]:
+    """A discovery shelf: priced + arted cards, sorted server-side, price-capped.
+
+    Parameters
+    ----------
+    tcg:
+        ``pokemon`` | ``magic`` | ``yugioh`` | ``digimon`` | ``onepiece`` | ``all``.
+    sort:
+        ``"trending"`` draws the movement feed (``get_trending``); ``"value"``
+        ("most valuable") draws the *dedicated* high-priced source
+        (``get_most_valuable``, sorted price-desc) — a genuinely different pool,
+        so the "Trending now" and "Most valuable" rails are distinct rather than
+        two views of the same list.
+    max_price:
+        Drop cards over this USD price (the "steals under $X" cut).
+    limit:
+        Max cards returned, 1–100.
+
+    Every returned card is guaranteed a real price *and* art, so the UI never
+    renders a ``"—"`` priceless tile or a bare image. Never raises.
+    """
+    tcg = (tcg or "all").lower()
+    limit = max(1, min(MAX_LIMIT, int(limit)))
+
+    if tcg in _CATALOG_ONLY_SOURCE:
+        return {"cards": [], "total": 0, "source": _CATALOG_ONLY_SOURCE[tcg]}
+
+    if sort == "value":
+        body = await get_most_valuable(tcg=tcg, limit=MAX_LIMIT)
+    else:
+        body = await get_trending(tcg=tcg, limit=MAX_LIMIT)
+
+    # Only cards we can actually price — an unpriced ("—") tile reads as broken
+    # in a shopping rail, and it's exactly what the detail page *does* price.
+    cards = [c for c in (body.get("cards") or []) if _price_of(c) is not None]
+
+    if max_price is not None:
+        cards = [c for c in cards if (_price_of(c) or 0.0) <= max_price]
+    if sort == "value":
+        cards.sort(key=lambda c: _price_of(c) or 0.0, reverse=True)
+
+    return {
+        "cards": cards[:limit],
+        "total": len(cards),
+        "source": body.get("source"),
+        "updated_at": body.get("updated_at"),
+    }
+
+
+__all__ = ["get_most_valuable", "get_shelf", "get_trending"]
