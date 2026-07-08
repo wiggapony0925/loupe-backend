@@ -200,6 +200,9 @@ class Settings(BaseSettings):
     tcgplayer_private_key: str | None = None
     # PriceCharting — https://www.pricecharting.com/api-documentation
     pricecharting_token: str | None = None
+    # Legendary-tier bulk CSV download URL (from the Subscriptions page).
+    # Account-specific, so it's config not a guess; unset ⇒ stay on the API path.
+    pricecharting_csv_url: str | None = None
     # GoCollect (stub) — https://gocollect.com
     gocollect_api_key: str | None = None
     # JustTCG — https://justtcg.com/api (aggregated TCG prices, free tier)

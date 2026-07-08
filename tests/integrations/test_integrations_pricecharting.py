@@ -7,7 +7,7 @@ ladder plus yearly sales volume and identifiers. These assert we keep all of it
 
 from __future__ import annotations
 
-from app.integrations.pricecharting import PriceChartingProvider
+from app.integrations.pricecharting import reduce_product
 
 # A rich product response (prices are integer pennies, per the API).
 _FULL = {
@@ -30,7 +30,7 @@ _FULL = {
 
 
 def test_reduce_extracts_full_grade_ladder():
-    mp = PriceChartingProvider._reduce(_FULL)
+    mp = reduce_product(_FULL)
     assert mp is not None
     # Backward-compatible low/mid/high shape is preserved.
     assert mp.low == 300.0  # loose
@@ -57,7 +57,7 @@ def test_reduce_extracts_full_grade_ladder():
 def test_reduce_raw_only_tier_still_works():
     """A limited tier that only returns the loose price yields just UNGRADED —
     the richer grades light up automatically when the tier provides them."""
-    mp = PriceChartingProvider._reduce(
+    mp = reduce_product(
         {"status": "success", "product-name": "X", "loose-price": 500}
     )
     assert mp is not None
@@ -66,7 +66,7 @@ def test_reduce_raw_only_tier_still_works():
 
 
 def test_reduce_none_when_no_prices():
-    assert PriceChartingProvider._reduce({"status": "success"}) is None
+    assert reduce_product({"status": "success"}) is None
     # Zero/garbage prices are dropped, not surfaced as $0.00 grades.
-    mp = PriceChartingProvider._reduce({"loose-price": 0, "graded-price": "n/a"})
+    mp = reduce_product({"loose-price": 0, "graded-price": "n/a"})
     assert mp is None
