@@ -26,6 +26,52 @@ def _token() -> str | None:
     return s.pricecharting_token or s.pricecharting_api_key or None
 
 
+# PriceCharting reuses its video-game price columns for trading cards; each
+# column maps to a specific graded market (see the Prices API "Description of
+# Keys"). We pull the WHOLE ladder out of the single call we already make so
+# card-detail can show real per-grade prices instead of a modeled estimate.
+# Ordered low → high grade; the "10" tiers are house-specific in the API.
+_CARD_GRADE_LABELS: tuple[tuple[str, str], ...] = (
+    ("loose-price", "UNGRADED"),  # raw / ungraded
+    ("cib-price", "PSA 7"),  # "Grade 7 or 7.5"
+    ("new-price", "PSA 8"),  # "Grade 8 or 8.5"
+    ("graded-price", "PSA 9"),  # "Grade 9"
+    ("box-only-price", "BGS 9.5"),  # "Grade 9.5" (PSA doesn't issue 9.5)
+    ("manual-only-price", "PSA 10"),  # explicitly "Graded 10 by PSA"
+    ("bgs-10-price", "BGS 10"),
+    ("condition-17-price", "CGC 10"),
+    ("condition-18-price", "SGC 10"),
+)
+
+
+def _cents_to_dollars(value: Any) -> float | None:
+    """PriceCharting encodes every price as an integer number of pennies."""
+    try:
+        return round(int(value) / 100.0, 2) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _card_grade_ladder(data: dict[str, Any]) -> dict[str, float]:
+    """The full per-grade price ladder present in a product response
+    (``grade label → USD``). Absent / zero grades are omitted, so a token whose
+    tier only returns the raw price yields ``{"UNGRADED": …}`` and richer tiers
+    light up the rest automatically."""
+    ladder: dict[str, float] = {}
+    for key, label in _CARD_GRADE_LABELS:
+        price = _cents_to_dollars(data.get(key))
+        if price is not None and price > 0:
+            ladder[label] = price
+    return ladder
+
+
 class PriceChartingProvider(BaseProvider):
     id = "pricecharting"
     name = "PriceCharting"
@@ -50,29 +96,38 @@ class PriceChartingProvider(BaseProvider):
 
     @staticmethod
     def _reduce(data: dict[str, Any]) -> MarketPrice | None:
-        # PriceCharting returns prices in cents.
-        def cents(key: str) -> float | None:
-            v = data.get(key)
-            try:
-                return round(int(v) / 100.0, 2) if v is not None else None
-            except (TypeError, ValueError):
-                return None
-
-        loose = cents("loose-price")
-        new = cents("new-price")
-        graded = cents("graded-price") or cents("manual-only-price")
-        if not any((loose, new, graded)):
+        loose = _cents_to_dollars(data.get("loose-price"))
+        new = _cents_to_dollars(data.get("new-price"))
+        graded = _cents_to_dollars(data.get("graded-price")) or _cents_to_dollars(
+            data.get("manual-only-price")
+        )
+        ladder = _card_grade_ladder(data)
+        if not any((loose, new, graded)) and not ladder:
             return None
+        # Keep the low/mid/high/market shape stable (valuation depends on it) and
+        # carry the *rest* of the response — the full grade ladder, yearly sales
+        # volume, PriceCharting id, release date — in extras so downstream can
+        # surface it without a second API call.
+        extras: dict[str, Any] = {
+            "product_name": data.get("product-name"),
+            "console": data.get("console-name"),
+        }
+        if ladder:
+            extras["grade_ladder"] = ladder
+        sales_volume = _int_or_none(data.get("sales-volume"))
+        if sales_volume is not None:
+            extras["sales_volume"] = sales_volume
+        if data.get("id"):
+            extras["pc_id"] = str(data.get("id"))
+        if data.get("release-date"):
+            extras["release_date"] = data.get("release-date")
         return MarketPrice(
             source="pricecharting",
             market=graded or loose or new,
             low=loose,
             mid=new,
             high=graded,
-            extras={
-                "product_name": data.get("product-name"),
-                "console": data.get("console-name"),
-            },
+            extras=extras,
         )
 
 

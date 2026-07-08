@@ -210,30 +210,36 @@ def _market_price_rows(
         price_kind = str(
             extras.get("price_kind") or ("market" if quote.market else "low")
         )
-        rows.append(
-            {
-                "source": source,
-                "label": _provider_label(source),
-                "kind": "market_price",
-                "price_kind": price_kind,
-                "price": {
-                    "amount": round(float(amount), 2),
-                    "currency": quote.currency or "USD",
-                },
-                "market": {
-                    "market": _money(quote.market, quote.currency),
-                    "low": _money(quote.low, quote.currency),
-                    "mid": _money(quote.mid, quote.currency),
-                    "high": _money(quote.high, quote.currency),
-                },
-                "url": _quote_url(source, extras),
-                "image_url": None,
-                "is_auction": False,
-                "updated_at": extras.get("as_of") or extras.get("updated_at"),
-                "subtitle": _market_subtitle(source, extras),
-                "search_url": _search_url(source, encoded_query),
-            }
-        )
+        row: dict[str, Any] = {
+            "source": source,
+            "label": _provider_label(source),
+            "kind": "market_price",
+            "price_kind": price_kind,
+            "price": {
+                "amount": round(float(amount), 2),
+                "currency": quote.currency or "USD",
+            },
+            "market": {
+                "market": _money(quote.market, quote.currency),
+                "low": _money(quote.low, quote.currency),
+                "mid": _money(quote.mid, quote.currency),
+                "high": _money(quote.high, quote.currency),
+            },
+            "url": _quote_url(source, extras),
+            "image_url": None,
+            "is_auction": False,
+            "updated_at": extras.get("as_of") or extras.get("updated_at"),
+            "subtitle": _market_subtitle(source, extras),
+            "search_url": _search_url(source, encoded_query),
+        }
+        # Pass through the richer PriceCharting payload (real per-grade ladder +
+        # yearly sales volume) when present, so card-detail can render a real
+        # price-by-grade row and a liquidity signal.
+        if extras.get("grade_ladder"):
+            row["grade_ladder"] = extras["grade_ladder"]
+        if extras.get("sales_volume") is not None:
+            row["sales_volume"] = extras["sales_volume"]
+        rows.append(row)
     return rows
 
 
