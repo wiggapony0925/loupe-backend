@@ -8,6 +8,7 @@ for the aggregate dashboards (summary / history / sparklines).
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, status
@@ -60,12 +61,12 @@ async def list_mine(
         max_length=120,
         description="Filter to a single set by exact name (case-sensitive).",
     ),
-    house: str | None = Query(
+    house: list[str] | None = Query(
         None,
-        max_length=16,
         description=(
-            "Filter by grading house slug (e.g. `loupe`, `psa`, `bgs`). "
-            "Case-insensitive — normalised to lower."
+            "Filter by grading house slug(s) (e.g. `loupe`, `psa`, `bgs`). "
+            "Repeatable for multi-select (`?house=psa&house=bgs`); "
+            "case-insensitive."
         ),
     ),
     min_grade: float | None = Query(
@@ -73,6 +74,25 @@ async def list_mine(
         ge=0,
         le=10,
         description="Minimum grade (inclusive). Rows below this are dropped.",
+    ),
+    max_grade: float | None = Query(
+        None,
+        ge=0,
+        le=10,
+        description="Maximum grade (inclusive). Rows above this are dropped.",
+    ),
+    min_value: Decimal | None = Query(
+        None, ge=0, description="Minimum estimated value USD (inclusive)."
+    ),
+    max_value: Decimal | None = Query(
+        None, ge=0, description="Maximum estimated value USD (inclusive)."
+    ),
+    tags: list[str] | None = Query(
+        None,
+        description=(
+            "Filter to holdings tagged with ANY of these tags "
+            "(repeatable, case-insensitive)."
+        ),
     ),
     sort: str = Query(
         "recent",
@@ -89,8 +109,13 @@ async def list_mine(
         cursor=cursor,
         q=q,
         set_name=set_name,
-        house=house,
+        house=None,
+        houses=house,
         min_grade=min_grade,
+        max_grade=max_grade,
+        min_value=min_value,
+        max_value=max_value,
+        tags=tags,
         sort=sort,
     )
 
