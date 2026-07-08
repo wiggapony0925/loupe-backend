@@ -1,0 +1,225 @@
+{%- macro movers_table(rows, is_gain) -%}
+<table class="data-table movers">
+  <thead>
+    <tr>
+      <th class="thumb"></th><th>Card</th><th>Set</th>
+      <th class="num">Value</th><th class="num">Change</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    {% set art = thumb(r.card_id) %}
+    <tr>
+      <td class="thumb">{% if art %}<img src="{{ art }}" alt="">{% endif %}</td>
+      <td class="card-name">{{ r.name }}</td>
+      <td class="set">{{ r.set_name or "—" }}</td>
+      <td class="num">{{ r.value_close_usd | money }}</td>
+      <td class="num {{ 'up' if is_gain else 'down' }}">{{ r.delta_usd | money }} ({{ r.delta_pct | pct }})</td>
+    </tr>
+    {% else %}
+    <tr><td class="thumb"></td><td>—</td><td>—</td><td class="num">—</td><td class="num">—</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{%- endmacro -%}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Loupe statement — {{ period_label }}</title>
+</head>
+<body>
+  {# Running header / footer elements — pulled into the @page margin boxes. #}
+  <div class="run run-brand">◆ LOUPE · Portfolio Statement</div>
+  <div class="run run-period">{{ period_label }}</div>
+  <div class="run run-generated">Generated {{ generated_at }}</div>
+  <div class="run run-email">{{ user_email }}</div>
+
+  {# ─── Cover ─────────────────────────────────────────────────────────── #}
+  <section class="page cover">
+    <div class="band">
+      <div class="band-left">
+        <div class="band-brand">◆ LOUPE</div>
+        <div class="band-title">Portfolio Statement</div>
+        <div class="band-sub">{{ period_label }}</div>
+      </div>
+      <div class="band-right">
+        <div class="k">Statement Period</div>
+        <div class="v">{{ period_start_short }} – {{ period_end_long }}</div>
+      </div>
+    </div>
+
+    <div class="hero">
+      <div class="hero-left">
+        <div class="eyebrow">Closing value</div>
+        <div class="hero-value">{{ closing_value_usd | money }}</div>
+        <div class="hero-sub">over {{ period_label }}</div>
+      </div>
+      <div class="chip {{ 'up' if up else 'down' }}">
+        {{ '▲' if up else '▼' }} {{ delta_usd | money }}
+        <span class="chip-pct">({{ delta_pct | pct }})</span>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi">
+        <div class="kpi-label">Opening value</div>
+        <div class="kpi-value">{{ opening_value_usd | money }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Unrealized P/L</div>
+        <div class="kpi-value {{ pnl_class }}">{{ unrealized_pnl_usd | money }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Cards in vault</div>
+        <div class="kpi-value">{{ "{:,}".format(card_count) }}</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Avg grade</div>
+        <div class="kpi-value">{{ ("%.1f" % avg_grade) if avg_grade else "—" }}</div>
+      </div>
+    </div>
+
+    <div class="eyebrow spaced">Account information</div>
+    <table class="account">
+      <tr>
+        <td class="lbl">Account holder</td><td class="val">{{ user_email }}</td>
+        <td class="lbl">Statement date</td><td class="val">{{ statement_date }}</td>
+      </tr>
+      <tr>
+        <td class="lbl">Statement period</td><td class="val">{{ period_start_long }} – {{ period_end_long }}</td>
+        <td class="lbl">Vault holdings</td><td class="val">{{ "{:,}".format(card_count) }} cards</td>
+      </tr>
+    </table>
+
+    <div class="eyebrow spaced">Account summary</div>
+    <table class="summary">
+      <tr><td class="lbl">Opening value</td><td class="val">{{ opening_value_usd | money }}</td></tr>
+      <tr><td class="lbl">Closing value</td><td class="val">{{ closing_value_usd | money }}</td></tr>
+      <tr><td class="lbl">Period change</td><td class="val">{{ delta_usd | money }} ({{ delta_pct | pct }})</td></tr>
+      <tr><td class="lbl">Cards in vault</td><td class="val">{{ "{:,}".format(card_count) }}</td></tr>
+      <tr><td class="lbl">Average grade</td><td class="val">{{ ("%.2f" % avg_grade) if avg_grade else "—" }}</td></tr>
+      <tr><td class="lbl">Total cost basis</td><td class="val">{{ total_cost_usd | money }}</td></tr>
+      <tr><td class="lbl">Unrealized P/L</td><td class="val">{{ unrealized_pnl_usd | money }} ({{ unrealized_pnl_pct | pct }})</td></tr>
+    </table>
+  </section>
+
+  {# ─── Performance ───────────────────────────────────────────────────── #}
+  <section class="page">
+    <div class="eyebrow">Performance</div>
+    <h2 class="section">Performance</h2>
+    {% if area_svg %}
+      <p class="dim">Daily value across the period.</p>
+      <div class="chart">{{ area_svg | safe }}</div>
+    {% else %}
+      <div class="empty">
+        Not enough price history was available during this period to render a
+        chart. As your scanner accumulates daily prices the next statement will
+        include a full value curve.
+      </div>
+    {% endif %}
+  </section>
+
+  {# ─── Allocation ────────────────────────────────────────────────────── #}
+  <section class="page">
+    <div class="eyebrow">Composition</div>
+    <h2 class="section">Allocation</h2>
+    {% if legend %}
+      <p class="dim">By trading-card game (closing value).</p>
+      <div class="alloc">
+        <div class="donut">{{ donut_svg | safe }}</div>
+        <ul class="legend">
+          {% for item in legend %}
+          <li>
+            <span class="sw" style="background: {{ item.color }}"></span>
+            <span class="name">{{ item.name }}</span>
+            <span class="val">{{ item.value | money }}</span>
+            <span class="pct">{{ item.pct }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <h3 class="subhead">Grade distribution</h3>
+      {% if bar_svg %}
+        <div class="chart">{{ bar_svg | safe }}</div>
+      {% else %}
+        <div class="empty">No graded cards in this period yet.</div>
+      {% endif %}
+    {% else %}
+      <div class="empty">No cards in vault yet — nothing to allocate.</div>
+    {% endif %}
+  </section>
+
+  {# ─── Top movers ────────────────────────────────────────────────────── #}
+  <section class="page">
+    <div class="eyebrow">Markets</div>
+    <h2 class="section">Top movers</h2>
+    {% if top_gainers or top_losers %}
+      <div class="rowhead">Gainers</div>
+      {{ movers_table(top_gainers, true) }}
+      <div class="rowhead">Losers</div>
+      {{ movers_table(top_losers, false) }}
+    {% else %}
+      <div class="empty">No measurable price movement during this window.</div>
+    {% endif %}
+  </section>
+
+  {# ─── Showcase gallery (only when we hydrated artwork) ──────────────── #}
+  {% if gallery %}
+  <section class="page">
+    <div class="eyebrow">Showcase</div>
+    <h2 class="section">Top holdings</h2>
+    <p class="dim">Your most valuable cards at period close.</p>
+    <div class="gallery">
+      {% for h in gallery %}
+      <div class="g-card">
+        <img class="g-art" src="{{ h.art }}" alt="">
+        <div class="g-meta">
+          <div class="g-name">{{ h.name }}</div>
+          <div class="g-grade">Grade {{ "%.1f" % h.grade }}</div>
+          <div>
+            <span class="g-value">{{ h.value_close_usd | money }}</span>
+            <span class="g-delta {{ 'up' if h.delta_pct >= 0 else 'down' }}">{{ h.delta_pct | pct }}</span>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# ─── Holdings ──────────────────────────────────────────────────────── #}
+  <section class="page">
+    <div class="eyebrow">Positions</div>
+    <h2 class="section">Holdings</h2>
+    {% if holdings %}
+      <table class="data-table holdings">
+        <thead>
+          <tr>
+            <th>Card</th><th>Set</th><th class="num">Grade</th>
+            <th class="num">Opening</th><th class="num">Closing</th><th class="num">Chg %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in holdings %}
+          <tr>
+            <td class="card-name">{{ h.name }}</td>
+            <td class="set">{{ h.set_name or "—" }}</td>
+            <td class="num">{{ "%.1f" % h.grade }}</td>
+            <td class="num">{{ h.value_open_usd | money }}</td>
+            <td class="num">{{ h.value_close_usd | money }}</td>
+            <td class="num {{ 'up' if h.delta_pct >= 0 else 'down' }}">{{ h.delta_pct | pct }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="empty">
+        Your vault is empty for this period. Scan a card to start building a
+        statement.
+      </div>
+    {% endif %}
+  </section>
+</body>
+</html>

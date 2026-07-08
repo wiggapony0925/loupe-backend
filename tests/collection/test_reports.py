@@ -165,6 +165,123 @@ async def test_empty_vault_still_renders_pdf(client, auth_headers):
     assert body["file_size_bytes"] > 1000  # cover/copy alone is well over 1 KB
 
 
+# ─── HTML/SCSS/WeasyPrint renderer ───────────────────────────────────
+
+
+def _mini_snapshot():
+    """A small but fully-populated snapshot for exercising the renderer."""
+    from datetime import date, timedelta
+
+    from app.services.analytics.reports.aggregator import (
+        HoldingRow,
+        MoverRow,
+        ReportSnapshot,
+        SeriesPoint,
+    )
+
+    start = date(2026, 1, 1)
+    series = [
+        SeriesPoint(date=start + timedelta(days=i), value_usd=1000.0 + i * 25)
+        for i in range(10)
+    ]
+    holdings = [
+        HoldingRow(
+            card_id="c1",
+            name="Charizard",
+            set_name="Base Set",
+            grade=10.0,
+            value_close_usd=900.0,
+            value_open_usd=800.0,
+            delta_pct=12.5,
+        ),
+        HoldingRow(
+            card_id="c2",
+            name="Pikachu",
+            set_name="Jungle",
+            grade=9.0,
+            value_close_usd=120.0,
+            value_open_usd=140.0,
+            delta_pct=-14.3,
+        ),
+    ]
+    return ReportSnapshot(
+        user_email="renders@example.com",
+        period_label="January 2026",
+        period_start=start,
+        period_end=date(2026, 1, 31),
+        card_count=2,
+        opening_value_usd=940.0,
+        closing_value_usd=1020.0,
+        delta_usd=80.0,
+        delta_pct=8.51,
+        total_cost_usd=700.0,
+        unrealized_pnl_usd=320.0,
+        unrealized_pnl_pct=45.7,
+        avg_grade=9.5,
+        series=series,
+        holdings=holdings,
+        top_gainers=[
+            MoverRow(
+                card_id="c1",
+                name="Charizard",
+                set_name="Base Set",
+                value_close_usd=900.0,
+                delta_usd=100.0,
+                delta_pct=12.5,
+            )
+        ],
+        top_losers=[
+            MoverRow(
+                card_id="c2",
+                name="Pikachu",
+                set_name="Jungle",
+                value_close_usd=120.0,
+                delta_usd=-20.0,
+                delta_pct=-14.3,
+            )
+        ],
+        grade_buckets=[
+            ("10", 1),
+            ("9-9.5", 1),
+            ("8-8.5", 0),
+            ("7-7.5", 0),
+            ("6 & below", 0),
+        ],
+        tcg_breakdown=[("pokemon", 1020.0)],
+    )
+
+
+def test_html_renderer_produces_multipage_pdf():
+    """The WeasyPrint HTML path renders a real, chart-laden PDF.
+
+    Skipped where WeasyPrint's native libs (Pango) aren't installed — the
+    orchestrator still falls back to ReportLab there (covered separately).
+    """
+    pytest.importorskip("weasyprint")
+    from app.services.analytics.reports import html_builder
+
+    # render_statement_pdf has no internal fallback — a %PDF- result proves the
+    # WeasyPrint HTML path itself ran (it would raise otherwise).
+    pdf = html_builder.render_statement_pdf(_mini_snapshot())
+    assert pdf.startswith(b"%PDF-")
+    # Six charted/table sections dwarf the cover-only fallback.
+    assert len(pdf) > 8000
+
+
+def test_render_pdf_falls_back_when_html_path_raises(monkeypatch):
+    """If the HTML renderer blows up, render_pdf still yields a valid PDF."""
+    from app.services.analytics.reports import html_builder, pdf_builder
+
+    def _boom(_snap):
+        raise RuntimeError("pango missing")
+
+    monkeypatch.setattr(html_builder, "render_statement_pdf", _boom)
+
+    pdf = pdf_builder.render_pdf(_mini_snapshot())
+    assert pdf.startswith(b"%PDF-")
+    assert len(pdf) > 1000  # the ReportLab cover fallback
+
+
 # ─── auto-close scheduler ────────────────────────────────────────────
 
 
