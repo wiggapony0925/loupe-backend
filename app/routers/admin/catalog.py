@@ -46,6 +46,25 @@ async def sync_mirror(
     return {**stats, "status": await pokemon_mirror_service.mirror_status()}
 
 
+@router.post("/mirror/sync-tcg", summary="Sync the Magic / Yu-Gi-Oh mirror")
+async def sync_mirror_tcg(
+    tcg: str = Query(..., pattern="^(magic|yugioh)$"),
+    max_cards: int = Query(
+        0,
+        ge=0,
+        description="Cap cards this call (0 = the full catalog). Both fit one call.",
+    ),
+) -> dict[str, Any]:
+    """Populate/refresh the Magic (Scryfall bulk) or Yu-Gi-Oh (YGOPRODeck dump)
+    mirror. Both catalogs ship prices, so no separate price-refresh is needed."""
+    cap = max_cards or None
+    if tcg == "magic":
+        stats = await pokemon_mirror_service.sync_magic_from_bulk(max_cards=cap)
+    else:
+        stats = await pokemon_mirror_service.sync_yugioh_from_dump(max_cards=cap)
+    return {**stats, "ready": await pokemon_mirror_service.mirror_ready(tcg)}
+
+
 @router.post("/mirror/refresh-prices", summary="Refresh embedded prices per set")
 async def refresh_mirror_prices(
     sets: int = Query(10, ge=1, le=60, description="Stale sets to refresh now."),

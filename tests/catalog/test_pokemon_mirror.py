@@ -121,10 +121,9 @@ def live_api_must_not_be_called(monkeypatch):
 
 async def _synced(patched_dump) -> dict[str, Any]:
     stats = await mirror.sync_pokemon_from_dump()
-    mirror.reset_ready_cache()
     # Readiness normally needs a real catalog's worth of rows; the fixture
-    # catalog is 5 cards, so drop the floor for the tests.
-    mirror._ready_cache = None
+    # catalog is 5 cards, so the floor is dropped to 1 (see _tiny_ready_floor).
+    mirror.reset_ready_cache()
     return stats
 
 

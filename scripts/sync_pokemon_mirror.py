@@ -16,9 +16,13 @@ Against production (Cloud SQL Auth Proxy, DEPLOY.md §1):
         .venv/bin/python scripts/sync_pokemon_mirror.py
 
 Flags:
-    --force            re-sync every set even if counts match
-    --max-sets N       stop after N sets (newest first)
+    --tcg WHICH        pokemon | magic | yugioh | all   (default: pokemon)
+    --force            re-sync every set even if counts match (pokemon only)
+    --max-sets N       stop after N sets (newest first, pokemon only)
     --prices N         after identity sync, refresh prices for N stalest sets
+
+Magic (Scryfall bulk) and Yu-Gi-Oh (YGOPRODeck dump) each sync their whole
+catalog in one pass and ship prices, so they take no --force/--max-sets/--prices.
 """
 
 from __future__ import annotations
@@ -34,6 +38,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--tcg", choices=["pokemon", "magic", "yugioh", "all"], default="pokemon"
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--max-sets", type=int, default=None)
     parser.add_argument("--prices", type=int, default=0)
@@ -41,21 +48,35 @@ async def main() -> int:
 
     from app.services.catalog import pokemon_mirror_service as mirror
 
-    t0 = time.monotonic()
-    stats = await mirror.sync_pokemon_from_dump(
-        force=args.force, max_sets=args.max_sets
-    )
-    print(f"identity sync ({time.monotonic() - t0:.1f}s): {stats}")
+    which = {"pokemon", "magic", "yugioh"} if args.tcg == "all" else {args.tcg}
+    rc = 0
 
-    if args.prices:
-        set_ids = await mirror.stale_price_set_ids(limit=args.prices)
-        print(f"refreshing prices for {len(set_ids)} sets…")
-        for done, sid in enumerate(set_ids, start=1):
-            n = await mirror.refresh_set_prices(sid)
-            print(f"  [{done}/{len(set_ids)}] {sid}: {n} cards priced")
+    if "pokemon" in which:
+        t0 = time.monotonic()
+        stats = await mirror.sync_pokemon_from_dump(
+            force=args.force, max_sets=args.max_sets
+        )
+        print(f"pokemon identity sync ({time.monotonic() - t0:.1f}s): {stats}")
+        if args.prices:
+            set_ids = await mirror.stale_price_set_ids(limit=args.prices)
+            print(f"refreshing prices for {len(set_ids)} sets…")
+            for done, sid in enumerate(set_ids, start=1):
+                n = await mirror.refresh_set_prices(sid)
+                print(f"  [{done}/{len(set_ids)}] {sid}: {n} cards priced")
+        rc |= 0 if stats.get("errors", 0) == 0 else 1
 
-    print("status:", await mirror.mirror_status())
-    return 0 if stats.get("errors", 0) == 0 else 1
+    if "magic" in which:
+        t0 = time.monotonic()
+        stats = await mirror.sync_magic_from_bulk()
+        print(f"magic sync ({time.monotonic() - t0:.1f}s): {stats}")
+
+    if "yugioh" in which:
+        t0 = time.monotonic()
+        stats = await mirror.sync_yugioh_from_dump()
+        print(f"yugioh sync ({time.monotonic() - t0:.1f}s): {stats}")
+
+    print("pokemon status:", await mirror.mirror_status())
+    return rc
 
 
 if __name__ == "__main__":

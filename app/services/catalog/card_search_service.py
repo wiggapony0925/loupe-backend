@@ -1065,6 +1065,13 @@ def _build_scryfall_relaxed_query(q: str) -> str | None:
 
 
 async def _search_scryfall(q: str, limit: int) -> list[dict[str, Any]]:
+    # Mirror first — complete local catalog, ~ms, immune to Scryfall latency
+    # and cold-start. Empty mirror ⇒ None ⇒ fall through to the live path.
+    mirror = await pokemon_mirror_service.search_mirror(
+        "magic", q, page=1, page_size=max(limit * 5, 60)
+    )
+    if mirror is not None:
+        return _rank([_from_scryfall(p) for p in mirror["payloads"]], q, limit)
     items: list[dict[str, Any]] = []
     err: Exception | None = None
     try:
@@ -1091,6 +1098,13 @@ async def _search_scryfall(q: str, limit: int) -> list[dict[str, Any]]:
 
 
 async def _search_ygoprodeck(q: str, limit: int) -> list[dict[str, Any]]:
+    # Mirror first — see _search_scryfall. YGOPRODeck is the slowest live
+    # upstream (~1.9s), so the local hit is the biggest speed win.
+    mirror = await pokemon_mirror_service.search_mirror(
+        "yugioh", q, page=1, page_size=max(limit * 5, 60)
+    )
+    if mirror is not None:
+        return _rank([_from_yugioh(p) for p in mirror["payloads"]], q, limit)
     raw = await ygoprodeck.search_cards(q)
     items = [_from_yugioh(c) for c in (raw.get("data") or [])]
     return _rank(items, q, limit)
@@ -1348,31 +1362,52 @@ async def search_cards_paged(
                     total = int(raw.get("totalCount") or len(items))
             body = {"results": items, "total": total, "source": "pokemontcg"}
         elif tcg == "magic":
-            # Scryfall pages are a fixed 175 — map our (page, page_size)
-            # window onto its pages and slice.
-            start = (page - 1) * page_size
-            sc_page = start // _SCRYFALL_PAGE_SIZE + 1
-            offset = start % _SCRYFALL_PAGE_SIZE
-            raw = await scryfall.search_cards(q, page=sc_page)
-            pool = [_from_scryfall(c) for c in (raw.get("data") or [])]
-            if offset + page_size > len(pool) and raw.get("has_more"):
-                raw2 = await scryfall.search_cards(q, page=sc_page + 1)
-                pool += [_from_scryfall(c) for c in (raw2.get("data") or [])]
-            body = {
-                "results": pool[offset : offset + page_size],
-                "total": int(raw.get("total_cards") or len(pool)),
-                "source": "scryfall",
-            }
+            # Mirror first: true local pagination over the complete catalog.
+            mirror = await pokemon_mirror_service.search_mirror(
+                "magic", q, page=page, page_size=page_size
+            )
+            if mirror is not None:
+                body = {
+                    "results": [_from_scryfall(p) for p in mirror["payloads"]],
+                    "total": mirror["total"],
+                    "source": "scryfall",
+                }
+            else:
+                # Scryfall pages are a fixed 175 — map our (page, page_size)
+                # window onto its pages and slice.
+                start = (page - 1) * page_size
+                sc_page = start // _SCRYFALL_PAGE_SIZE + 1
+                offset = start % _SCRYFALL_PAGE_SIZE
+                raw = await scryfall.search_cards(q, page=sc_page)
+                pool = [_from_scryfall(c) for c in (raw.get("data") or [])]
+                if offset + page_size > len(pool) and raw.get("has_more"):
+                    raw2 = await scryfall.search_cards(q, page=sc_page + 1)
+                    pool += [_from_scryfall(c) for c in (raw2.get("data") or [])]
+                body = {
+                    "results": pool[offset : offset + page_size],
+                    "total": int(raw.get("total_cards") or len(pool)),
+                    "source": "scryfall",
+                }
         elif tcg == "yugioh":
-            # YGOPRODeck returns every match in one payload — slice locally.
-            raw = await ygoprodeck.search_cards(q)
-            pool = [_from_yugioh(c) for c in (raw.get("data") or [])]
-            start = (page - 1) * page_size
-            body = {
-                "results": pool[start : start + page_size],
-                "total": len(pool),
-                "source": "ygoprodeck",
-            }
+            # Mirror first: true local pagination (was a full live payload sliced).
+            mirror = await pokemon_mirror_service.search_mirror(
+                "yugioh", q, page=page, page_size=page_size
+            )
+            if mirror is not None:
+                body = {
+                    "results": [_from_yugioh(p) for p in mirror["payloads"]],
+                    "total": mirror["total"],
+                    "source": "ygoprodeck",
+                }
+            else:
+                raw = await ygoprodeck.search_cards(q)
+                pool = [_from_yugioh(c) for c in (raw.get("data") or [])]
+                start = (page - 1) * page_size
+                body = {
+                    "results": pool[start : start + page_size],
+                    "total": len(pool),
+                    "source": "ygoprodeck",
+                }
         elif tcg in ("digimon", "onepiece"):
             catalog = await (
                 digimon_catalog() if tcg == "digimon" else onepiece_catalog()

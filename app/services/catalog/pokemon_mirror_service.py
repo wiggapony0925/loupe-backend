@@ -52,8 +52,9 @@ _bg_tasks: set[asyncio.Task[Any]] = set()
 #: In-process single-flight guard for per-set price refreshes.
 _price_refresh_inflight: set[str] = set()
 
-#: (checked_at_monotonic, ready) — readiness is polled at most once a minute.
-_ready_cache: tuple[float, bool] | None = None
+#: tcg → (checked_at_monotonic, ready) — readiness is polled at most once a
+#: minute, per TCG (the mirror is shared across pokemon/magic/yugioh).
+_ready_cache: dict[str, tuple[float, bool]] = {}
 
 
 def _now() -> datetime:
@@ -66,10 +67,13 @@ def _sessionmaker():
     return get_sessionmaker()
 
 
-def reset_ready_cache() -> None:
-    """Test helper — force the next :func:`mirror_ready` to re-query."""
-    global _ready_cache
-    _ready_cache = None
+def reset_ready_cache(tcg: str | None = None) -> None:
+    """Force the next :func:`mirror_ready` to re-query — after a sync, or in
+    tests. ``None`` clears every TCG."""
+    if tcg is None:
+        _ready_cache.clear()
+    else:
+        _ready_cache.pop(tcg, None)
 
 
 # --------------------------------------------------------------------- shape
@@ -149,7 +153,85 @@ def _columns_from_payload(card: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ── Magic (Scryfall) + Yu-Gi-Oh (YGOPRODeck) column extractors ───────────
+# The mirror stores the RAW upstream payload; `_from_scryfall` / `_from_yugioh`
+# in card_search_service render mirror rows identically to live. Unlike the
+# Pokémon dump, both of these carry prices, so no background price refresh is
+# needed — `sort_price` is pulled straight from the payload here.
+
+
+def _price_float(value: Any) -> float | None:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(v, 2) if v > 0 else None
+
+
+def _columns_from_scryfall(card: dict[str, Any]) -> dict[str, Any]:
+    upstream_id = str(card.get("id") or "")
+    name = str(card.get("name") or "")
+    number = card.get("collector_number")
+    prices = card.get("prices") or {}
+    usd = prices.get("usd") or prices.get("usd_foil") or prices.get("usd_etched")
+    return {
+        "id": f"scryfall:{upstream_id}",
+        "source": "scryfall",
+        "tcg": "magic",
+        "upstream_id": upstream_id,
+        "set_id": str(card.get("set") or "")[:64],  # Scryfall set CODE (short)
+        "set_name": (card.get("set_name") or None),
+        "name": name[:200],
+        "name_lower": name.lower()[:200],
+        "number": str(number)[:40] if number is not None else None,
+        "bare_number": _bare_number(number),
+        "number_int": _number_int(number),
+        "rarity": (card.get("rarity") or None),
+        "release_date": card.get("released_at"),
+        "sort_price": _price_float(usd),
+        "payload": card,
+        "synced_at": _now(),
+    }
+
+
+def _columns_from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
+    upstream_id = str(card.get("id") or "")
+    name = str(card.get("name") or "")
+    sets = card.get("card_sets") or []
+    first_set = sets[0] if isinstance(sets, list) and sets else {}
+    set_code = str(first_set.get("set_code") or "ygoprodeck")
+    prices = card.get("card_prices") or []
+    first_price = prices[0] if isinstance(prices, list) and prices else {}
+    return {
+        "id": f"ygoprodeck:{upstream_id}",
+        "source": "ygoprodeck",
+        "tcg": "yugioh",
+        "upstream_id": upstream_id,
+        "set_id": set_code[:64],
+        "set_name": (first_set.get("set_name") or None),
+        "name": name[:200],
+        "name_lower": name.lower()[:200],
+        "number": set_code[:40] or None,
+        "bare_number": _bare_number(set_code),
+        "number_int": _number_int(set_code),
+        "rarity": (first_set.get("set_rarity") or None),
+        "release_date": None,  # the YGO dump carries no per-card release date
+        "sort_price": _price_float(first_price.get("tcgplayer_price")),
+        "payload": card,
+        "synced_at": _now(),
+    }
+
+
 # ---------------------------------------------------------------------- sync
+
+#: Scryfall's bulk-data index → pick the `default_cards` entry (English-complete,
+#: ~90k cards, one printing each). `all_cards` (every language, ~450k) is the
+#: later language-coverage upgrade.
+_MAGIC_BULK_URL = "https://api.scryfall.com/bulk-data"
+#: YGOPRODeck returns the entire card DB (~13k) in one response.
+_YGO_DUMP_URL = "https://db.ygoprodeck.com/api/v7/cardinfo.php"
+#: Rows per upsert transaction during a full-catalog sync.
+_UPSERT_BATCH = 1_000
 
 
 async def _fetch_dump(path: str) -> Any:
@@ -161,6 +243,108 @@ async def _fetch_dump(path: str) -> Any:
         headers={"Accept": "application/json"},
         timeout_s=30.0,
     )
+
+
+async def _fetch_json(url: str, *, timeout_s: float = 60.0) -> Any:
+    """GET an arbitrary catalog JSON (Scryfall bulk / YGOPRODeck dump)."""
+    return await request_json(
+        integration="catalog_dump",
+        method="GET",
+        url=url,
+        headers={"Accept": "application/json"},
+        timeout_s=timeout_s,
+    )
+
+
+async def _upsert_cards(rows: list[dict[str, Any]]) -> int:
+    """Insert-or-update mirror card rows (any TCG), batched + resumable.
+
+    Keyed on the unified ``id`` (``<source>:<upstream_id>``). Each batch commits
+    independently so an interrupted sync resumes cleanly on the next run.
+    """
+    from app.models.catalog_mirror import CatalogMirrorCard
+
+    if not rows:
+        return 0
+    maker = _sessionmaker()
+    written = 0
+    for start in range(0, len(rows), _UPSERT_BATCH):
+        chunk = rows[start : start + _UPSERT_BATCH]
+        ids = [r["id"] for r in chunk]
+        async with maker() as session:
+            existing = {
+                obj.id: obj
+                for obj in (
+                    await session.execute(
+                        select(CatalogMirrorCard).where(CatalogMirrorCard.id.in_(ids))
+                    )
+                ).scalars()
+            }
+            for r in chunk:
+                obj = existing.get(r["id"])
+                if obj is None:
+                    session.add(CatalogMirrorCard(**r))
+                else:
+                    for key, value in r.items():
+                        setattr(obj, key, value)
+                written += 1
+            await session.commit()
+    return written
+
+
+async def sync_yugioh_from_dump(*, max_cards: int | None = None) -> dict[str, Any]:
+    """Mirror the full Yu-Gi-Oh catalog from YGOPRODeck (one request, prices
+    included). Returns counters for the admin surface."""
+    raw = await _fetch_json(_YGO_DUMP_URL, timeout_s=60.0)
+    cards = raw.get("data") if isinstance(raw, dict) else None
+    if not isinstance(cards, list) or not cards:
+        raise RuntimeError("ygoprodeck dump unavailable or empty")
+    if max_cards is not None:
+        cards = cards[:max_cards]
+    rows = [
+        _columns_from_yugioh(c)
+        for c in cards
+        if isinstance(c, dict) and c.get("id") and c.get("name")
+    ]
+    written = await _upsert_cards(rows)
+    reset_ready_cache("yugioh")
+    stats = {"tcg": "yugioh", "cards_total": len(cards), "cards_synced": written}
+    logger.info("yugioh mirror sync: %s", stats)
+    return stats
+
+
+async def sync_magic_from_bulk(*, max_cards: int | None = None) -> dict[str, Any]:
+    """Mirror the full Magic catalog from Scryfall's `default_cards` bulk export
+    (English-complete, prices included). Returns counters for the admin surface."""
+    index = await _fetch_json(_MAGIC_BULK_URL, timeout_s=30.0)
+    entries = index.get("data") if isinstance(index, dict) else None
+    default = next(
+        (
+            e
+            for e in (entries or [])
+            if isinstance(e, dict) and e.get("type") == "default_cards"
+        ),
+        None,
+    )
+    if not default or not default.get("download_uri"):
+        raise RuntimeError("scryfall default_cards bulk export not found")
+    cards = await _fetch_json(str(default["download_uri"]), timeout_s=180.0)
+    if not isinstance(cards, list) or not cards:
+        raise RuntimeError("scryfall bulk export unavailable or empty")
+    if max_cards is not None:
+        cards = cards[:max_cards]
+    rows = [
+        _columns_from_scryfall(c)
+        for c in cards
+        # Skip non-card objects (tokens/art series carry object!="card" but the
+        # bulk file is card-only; still guard on id+name defensively).
+        if isinstance(c, dict) and c.get("id") and c.get("name")
+    ]
+    written = await _upsert_cards(rows)
+    reset_ready_cache("magic")
+    stats = {"tcg": "magic", "cards_total": len(cards), "cards_synced": written}
+    logger.info("magic mirror sync: %s", stats)
+    return stats
 
 
 async def sync_pokemon_from_dump(
@@ -481,12 +665,12 @@ def maybe_refresh_set_prices(set_ids: list[str]) -> None:
 # --------------------------------------------------------------------- reads
 
 
-async def mirror_ready() -> bool:
-    """True once the mirror holds a real catalog (cached for 60s)."""
-    global _ready_cache
+async def mirror_ready(tcg: str = TCG) -> bool:
+    """True once the mirror holds a real catalog for *tcg* (cached 60s)."""
     now = time.monotonic()
-    if _ready_cache is not None and now - _ready_cache[0] < 60:
-        return _ready_cache[1]
+    cached = _ready_cache.get(tcg)
+    if cached is not None and now - cached[0] < 60:
+        return cached[1]
     try:
         from app.models.catalog_mirror import CatalogMirrorCard
 
@@ -496,14 +680,14 @@ async def mirror_ready() -> bool:
                 await session.execute(
                     select(func.count())
                     .select_from(CatalogMirrorCard)
-                    .where(CatalogMirrorCard.tcg == TCG)
+                    .where(CatalogMirrorCard.tcg == tcg)
                 )
             ).scalar_one()
         ready = int(n) >= _READY_MIN_CARDS
     except Exception as exc:  # pragma: no cover - e.g. table not migrated yet
-        logger.debug("mirror_ready check failed: %s", exc)
+        logger.debug("mirror_ready check failed (%s): %s", tcg, exc)
         ready = False
-    _ready_cache = (now, ready)
+    _ready_cache[tcg] = (now, ready)
     return ready
 
 
@@ -563,16 +747,17 @@ def _token_filters(C, q: str) -> list[Any]:
     return [C.name_lower.like(f"%{tok}%") for tok in tokens]
 
 
-async def search_pokemon(
-    q: str, *, page: int = 1, page_size: int = 60
+async def search_mirror(
+    tcg: str, q: str, *, page: int = 1, page_size: int = 60
 ) -> dict[str, Any] | None:
-    """Substring search over the full mirror with real pagination.
+    """Substring search over the *tcg* mirror with real pagination.
 
     All name tokens must match (AND); when that yields nothing, degrade to
     ANY-token (OR) like the live "relaxed" query. Newest printings first —
-    the same ordering the live paged search used. ``None`` = mirror not ready.
+    the same ordering the live paged search used. ``None`` = mirror not ready
+    for this TCG (caller falls back to the live upstream).
     """
-    if not await mirror_ready():
+    if not await mirror_ready(tcg):
         return None
     from app.models.catalog_mirror import CatalogMirrorCard
 
@@ -591,8 +776,8 @@ async def search_pokemon(
     maker = _sessionmaker()
     async with maker() as session:
         for clause in (
-            [C.tcg == TCG, *filters],
-            [C.tcg == TCG, or_(*filters)] if len(filters) > 1 else None,
+            [C.tcg == tcg, *filters],
+            [C.tcg == tcg, or_(*filters)] if len(filters) > 1 else None,
         ):
             if clause is None:
                 continue
@@ -612,9 +797,19 @@ async def search_pokemon(
                     .limit(page_size)
                 )
             ).all()
-            maybe_refresh_set_prices([r[1] for r in rows])
+            # Embedded-price refresh is a Pokémon-only concern (the dump ships
+            # priceless); Magic/YGO payloads already carry prices.
+            if tcg == TCG:
+                maybe_refresh_set_prices([r[1] for r in rows])
             return {"payloads": [r[0] for r in rows], "total": int(total)}
     return {"payloads": [], "total": 0}
+
+
+async def search_pokemon(
+    q: str, *, page: int = 1, page_size: int = 60
+) -> dict[str, Any] | None:
+    """Back-compat thin wrapper — Pokémon search over the shared mirror."""
+    return await search_mirror(TCG, q, page=page, page_size=page_size)
 
 
 async def precise_pokemon(
