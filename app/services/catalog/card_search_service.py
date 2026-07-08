@@ -1294,8 +1294,14 @@ async def search_cards(q: str, tcg: str, limit: int) -> dict[str, Any]:
 _SCRYFALL_PAGE_SIZE = 175  # fixed by Scryfall's API
 
 
+async def available_languages(tcg: str | None = None) -> list[str]:
+    """ISO languages the catalog actually has (for the client language picker to
+    offer only real options). English first; empty until the mirror is synced."""
+    return await pokemon_mirror_service.mirror_languages(tcg)
+
+
 async def search_cards_paged(
-    q: str, tcg: str, page: int, page_size: int
+    q: str, tcg: str, page: int, page_size: int, langs: list[str] | None = None
 ) -> dict[str, Any]:
     """Deep search with TRUE upstream pagination — the full-results page.
 
@@ -1321,7 +1327,10 @@ async def search_cards_paged(
             "page_size": page_size,
         }
 
-    cache_key = f"loupe:cards:search-paged:{tcg}:{q.lower()}:{page}:{page_size}"
+    lang_key = ",".join(langs) if langs else "all"
+    cache_key = (
+        f"loupe:cards:search-paged:{tcg}:{lang_key}:{q.lower()}:{page}:{page_size}"
+    )
     cached = await _cache_get(cache_key)
     if cached is not None:
         return cached
@@ -1330,8 +1339,8 @@ async def search_cards_paged(
         if tcg == "pokemon":
             # Mirror first: true pagination over the complete local catalog
             # (newest printings first, same as the live orderBy), no upstream.
-            mirror = await pokemon_mirror_service.search_pokemon(
-                q, page=page, page_size=page_size
+            mirror = await pokemon_mirror_service.search_mirror(
+                "pokemon", q, page=page, page_size=page_size, langs=langs
             )
             if mirror is not None:
                 body = {
@@ -1364,7 +1373,7 @@ async def search_cards_paged(
         elif tcg == "magic":
             # Mirror first: true local pagination over the complete catalog.
             mirror = await pokemon_mirror_service.search_mirror(
-                "magic", q, page=page, page_size=page_size
+                "magic", q, page=page, page_size=page_size, langs=langs
             )
             if mirror is not None:
                 body = {
@@ -1391,7 +1400,7 @@ async def search_cards_paged(
         elif tcg == "yugioh":
             # Mirror first: true local pagination (was a full live payload sliced).
             mirror = await pokemon_mirror_service.search_mirror(
-                "yugioh", q, page=page, page_size=page_size
+                "yugioh", q, page=page, page_size=page_size, langs=langs
             )
             if mirror is not None:
                 body = {

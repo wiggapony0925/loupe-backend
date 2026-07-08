@@ -146,6 +146,7 @@ def _columns_from_payload(card: dict[str, Any]) -> dict[str, Any]:
         "bare_number": _bare_number(number),
         "number_int": _number_int(number),
         "rarity": (card.get("rarity") or None),
+        "language": "en",  # pokemontcg.io is an English-only catalog
         "release_date": set_obj.get("releaseDate"),
         "sort_price": _sort_price(card),
         "payload": card,
@@ -187,6 +188,7 @@ def _columns_from_scryfall(card: dict[str, Any]) -> dict[str, Any]:
         "bare_number": _bare_number(number),
         "number_int": _number_int(number),
         "rarity": (card.get("rarity") or None),
+        "language": str(card.get("lang") or "en")[:8],  # Scryfall tags lang/printing
         "release_date": card.get("released_at"),
         "sort_price": _price_float(usd),
         "payload": card,
@@ -215,6 +217,7 @@ def _columns_from_yugioh(card: dict[str, Any]) -> dict[str, Any]:
         "bare_number": _bare_number(set_code),
         "number_int": _number_int(set_code),
         "rarity": (first_set.get("set_rarity") or None),
+        "language": "en",  # YGOPRODeck serves the English card database
         "release_date": None,  # the YGO dump carries no per-card release date
         "sort_price": _price_float(first_price.get("tcgplayer_price")),
         "payload": card,
@@ -748,14 +751,20 @@ def _token_filters(C, q: str) -> list[Any]:
 
 
 async def search_mirror(
-    tcg: str, q: str, *, page: int = 1, page_size: int = 60
+    tcg: str,
+    q: str,
+    *,
+    page: int = 1,
+    page_size: int = 60,
+    langs: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Substring search over the *tcg* mirror with real pagination.
 
     All name tokens must match (AND); when that yields nothing, degrade to
-    ANY-token (OR) like the live "relaxed" query. Newest printings first —
-    the same ordering the live paged search used. ``None`` = mirror not ready
-    for this TCG (caller falls back to the live upstream).
+    ANY-token (OR) like the live "relaxed" query. English printings sort first
+    (they carry USD prices), then newest. ``langs`` restricts to those ISO
+    languages (``None`` = no language filter). ``None`` return = mirror not
+    ready for this TCG (caller falls back to the live upstream).
     """
     if not await mirror_ready(tcg):
         return None
@@ -766,7 +775,10 @@ async def search_mirror(
     if not filters:
         return {"payloads": [], "total": 0}
 
+    lang_clause = [C.language.in_(langs)] if langs else []
     order = (
+        # English first when languages are mixed — keeps a USD app useful.
+        case((C.language == "en", 0), else_=1),
         _null_last(C.release_date),
         C.release_date.desc(),
         C.set_id,
@@ -776,8 +788,8 @@ async def search_mirror(
     maker = _sessionmaker()
     async with maker() as session:
         for clause in (
-            [C.tcg == tcg, *filters],
-            [C.tcg == tcg, or_(*filters)] if len(filters) > 1 else None,
+            [C.tcg == tcg, *lang_clause, *filters],
+            [C.tcg == tcg, *lang_clause, or_(*filters)] if len(filters) > 1 else None,
         ):
             if clause is None:
                 continue
@@ -810,6 +822,27 @@ async def search_pokemon(
 ) -> dict[str, Any] | None:
     """Back-compat thin wrapper — Pokémon search over the shared mirror."""
     return await search_mirror(TCG, q, page=page, page_size=page_size)
+
+
+async def mirror_languages(tcg: str | None = None) -> list[str]:
+    """Distinct ISO languages present in the mirror (for the client picker to
+    offer only real options). Empty when the mirror isn't populated. English
+    is always listed first."""
+    try:
+        from app.models.catalog_mirror import CatalogMirrorCard
+
+        maker = _sessionmaker()
+        async with maker() as session:
+            stmt = select(CatalogMirrorCard.language).distinct()
+            if tcg is not None:
+                stmt = stmt.where(CatalogMirrorCard.tcg == tcg)
+            langs = {row[0] for row in (await session.execute(stmt)).all() if row[0]}
+    except Exception as exc:  # pragma: no cover - table not migrated yet
+        logger.debug("mirror_languages failed (%s): %s", tcg, exc)
+        return []
+    ordered = ["en"] if "en" in langs else []
+    ordered += sorted(langs - {"en"})
+    return ordered
 
 
 async def precise_pokemon(
