@@ -72,6 +72,57 @@ async def test_add_is_idempotent(client, db_session, created_user, auth_headers)
 
 
 @pytest.mark.asyncio
+async def test_pin_by_composite_upstream_id_materializes(
+    client, db_session, created_user, auth_headers
+):
+    """Heart a catalog card by its composite upstream id (browse/search view).
+
+    The backend resolves + materializes it, so the client never has to know the
+    local UUID — and the row comes back with `upstream_id` so the client can
+    match its "is pinned?" state by the id it *does* have.
+    """
+    from app.services.catalog import card_resolver_service
+
+    card = await make_card(db_session)
+    await card_resolver_service.link_external_ref(
+        db_session, card_id=card.id, source="pokemontcg", external_id="base1-4"
+    )
+    await db_session.commit()
+    composite = "pokemontcg:base1-4"
+
+    # POST with the composite id — not a UUID.
+    resp = await client.post(
+        "/v1/watchlist", json={"card_id": composite}, headers=auth_headers
+    )
+    data = assert_envelope_ok(resp, expected_status=201)
+    assert data["card_id"] == str(card.id)  # resolved to the local card
+    assert data["upstream_id"] == composite
+
+    # List surfaces the composite id for client-side matching.
+    rows = assert_envelope_ok(await client.get("/v1/watchlist", headers=auth_headers))
+    assert len(rows) == 1
+    assert rows[0]["upstream_id"] == composite
+
+    # DELETE by the composite id works too.
+    resp = await client.delete(f"/v1/watchlist/{composite}", headers=auth_headers)
+    assert resp.status_code == 204
+    assert (
+        assert_envelope_ok(await client.get("/v1/watchlist", headers=auth_headers))
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_pin_unresolvable_id_returns_422(client, auth_headers):
+    resp = await client.post(
+        "/v1/watchlist",
+        json={"card_id": "pokemontcg:does-not-exist"},
+        headers=auth_headers,
+    )
+    assert_envelope_error(resp, expected_status=422)
+
+
+@pytest.mark.asyncio
 async def test_delete_unknown_card_returns_404(client, auth_headers):
     resp = await client.delete(f"/v1/watchlist/{uuid.uuid4()}", headers=auth_headers)
     assert_envelope_error(resp, expected_status=404)

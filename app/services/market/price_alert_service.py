@@ -26,10 +26,14 @@ from app.models.enums import PriceAlertCondition
 from app.models.price_alert import PriceAlert
 from app.models.user import User
 from app.schemas.price_alert import PriceAlertCreate, PriceAlertRead
+from app.services.catalog import card_resolver_service
 
 
-def _to_read(row: PriceAlert, card: Card | None) -> PriceAlertRead:
+def _to_read(
+    row: PriceAlert, card: Card | None, upstream_id: str | None = None
+) -> PriceAlertRead:
     out = PriceAlertRead.model_validate(row)
+    out.upstream_id = upstream_id
     if card is not None:
         out.card_name = card.name
         out.card_image_url = card.image_url
@@ -48,30 +52,29 @@ async def list_for_user(
     if not include_triggered:
         stmt = stmt.where(PriceAlert.triggered_at.is_(None))
     rows = (await db.execute(stmt)).all()
-    return [_to_read(a, c) for (a, c) in rows]
+    upstream = await card_resolver_service.upstream_ids_for(
+        db, [a.card_id for (a, _c) in rows]
+    )
+    return [_to_read(a, c, upstream.get(a.card_id)) for (a, c) in rows]
 
 
 class CardNotResolvable(Exception):
-    """Raised when an alert's ``upstream_id`` can't be materialized locally."""
+    """Raised when an alert's card ref can't be resolved/materialized locally."""
 
 
 async def create(
     db: AsyncSession, user: User, payload: PriceAlertCreate
 ) -> PriceAlertRead:
-    # Web sends an upstream ``<source>:<id>`` rather than a local UUID, so
-    # materialize a local Card for it first (idempotent — repeat alerts on the
-    # same card reuse the row). Mobile keeps passing a resolved ``card_id``.
-    card_id = payload.card_id
-    card: Card | None = None
+    # The client passes whatever id the card view has — a local UUID or a
+    # composite upstream id (`pokemontcg:base1-4`). Resolve + materialize it
+    # here (idempotent — repeat alerts on the same card reuse the Card row) so
+    # the mobile / web never need a pre-resolve round-trip.
+    ref = payload.card_ref
+    card_id = await card_resolver_service.ensure_local_card_id(db, ref)
     if card_id is None:
-        from app.services.catalog import card_resolver_service
-
-        card = await card_resolver_service.ensure_local_card(
-            db, upstream_id=payload.upstream_id or ""
-        )
-        if card is None:
-            raise CardNotResolvable(payload.upstream_id or "")
-        card_id = card.id
+        raise CardNotResolvable(ref)
+    upstream_id = ref if ":" in ref else await _preferred_ref(db, card_id)
+    card: Card | None = None
 
     row = PriceAlert(
         user_id=user.id,
@@ -93,7 +96,11 @@ async def create(
     # the alert would sit silent until the next live-price observation.
     await _maybe_fire_on_create(db, row, card)
 
-    return _to_read(row, card)
+    return _to_read(row, card, upstream_id)
+
+
+async def _preferred_ref(db: AsyncSession, card_id: uuid.UUID) -> str | None:
+    return (await card_resolver_service.upstream_ids_for(db, [card_id])).get(card_id)
 
 
 async def _last_known_price(card: Card | None) -> Decimal | None:
