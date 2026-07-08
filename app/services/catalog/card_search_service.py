@@ -54,7 +54,7 @@ from app.schemas.unified_card import (
     UnifiedPricingSummary,
     UnifiedSet,
 )
-from app.services.catalog import pokemon_mirror_service
+from app.services.catalog import game_registry, pokemon_mirror_service
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 
@@ -95,7 +95,9 @@ PARTIAL_RESULT_TTL = 20
 LASTGOOD_RESULT_TTL = 6 * 60 * 60
 
 #: Providers we *don't* have an upstream for yet — returned gracefully.
-UNSUPPORTED_TCGS = {"lorcana", "sports"}
+#: Derived from the canonical game registry so it can't drift from the labels /
+#: source map / storefront tags.
+UNSUPPORTED_TCGS = game_registry.UNSUPPORTED_KEYS
 
 
 # --------------------------------------------------------------------- shape
@@ -109,16 +111,7 @@ def _empty(tcg: str, error: str | None = None) -> dict[str, Any]:
 
 
 def _source_for(tcg: str) -> str:
-    return {
-        "pokemon": "pokemontcg",
-        "magic": "scryfall",
-        "yugioh": "ygoprodeck",
-        "digimon": "digimoncard",
-        "all": "mixed",
-        "onepiece": "apitcg-onepiece",
-        "lorcana": "lorcana",
-        "sports": "sports",
-    }.get(tcg, tcg)
+    return game_registry.source_for(tcg)
 
 
 def _cap(limit: int | None) -> int:

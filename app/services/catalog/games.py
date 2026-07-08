@@ -7,8 +7,9 @@ though it now has a cached catalog). Serving one canonical list fixes that and
 lets us flip a game live everywhere from the backend — no client release.
 
 ``status`` is derived from the *real* catalog capability
-(``card_search_service.UNSUPPORTED_TCGS``): a game is ``soon`` until it has a
-working provider, then ``live`` automatically. The app-only actions
+(``game_registry.GAMES`` — the one source of truth also behind
+``card_search_service``): a game is ``soon`` until it has a working provider,
+then ``live`` automatically. The app-only actions
 (Scan, Grade, Scanner) are intentionally NOT here — they're client features,
 always present, so each client appends them to its own nav.
 """
@@ -17,17 +18,11 @@ from __future__ import annotations
 
 from typing import Any
 
-#: (key, label) in canonical render order; "all" leads the game rail.
-_GAMES: list[tuple[str, str]] = [
-    ("all", "All Cards"),
-    ("pokemon", "Pokémon"),
-    ("magic", "Magic"),
-    ("yugioh", "Yu-Gi-Oh!"),
-    ("onepiece", "One Piece"),
-    ("lorcana", "Lorcana"),
-    ("digimon", "Digimon"),
-    ("sports", "Sports"),
-]
+from app.services.catalog import game_registry
+
+#: "All Cards" leads the game rail — a cross-provider pseudo-game that isn't a
+#: registry member (it has no single source), so it's prepended here.
+_ALL_TAG = {"key": "all", "label": "All Cards", "kind": "game", "status": "live"}
 
 #: Content tabs that sit beside the games (routes to their own pages).
 _SECTIONS: list[tuple[str, str]] = [
@@ -36,28 +31,27 @@ _SECTIONS: list[tuple[str, str]] = [
 ]
 
 
-def _game_status(key: str) -> str:
-    """``live`` for "all" and any data-backed game; ``soon`` while a game still
-    has no catalog provider (i.e. it's in ``UNSUPPORTED_TCGS``)."""
-    if key == "all":
-        return "live"
-    # Lazy import keeps this module import-order-safe (card_search_service is a
-    # heavy module) — we only need the constant set.
-    from app.services.catalog.card_search_service import UNSUPPORTED_TCGS
-
-    return "soon" if key in UNSUPPORTED_TCGS else "live"
-
-
 def catalog_tags() -> dict[str, Any]:
-    """Canonical marketplace/search tags for both clients."""
+    """Canonical marketplace/search tags for both clients. Games + their
+    ``live``/``soon`` status come straight off the game registry, so flipping a
+    game live (``supported=True``) updates every client from one place."""
+    game_tags = [
+        {
+            "key": g.key,
+            "label": g.label,
+            "kind": "game",
+            "status": "live" if g.supported else "soon",
+        }
+        for g in game_registry.GAMES
+    ]
     return {
         "tags": [
-            {"key": k, "label": lbl, "kind": "game", "status": _game_status(k)}
-            for k, lbl in _GAMES
-        ]
-        + [
-            {"key": k, "label": lbl, "kind": "section", "status": "live"}
-            for k, lbl in _SECTIONS
+            _ALL_TAG,
+            *game_tags,
+            *(
+                {"key": k, "label": lbl, "kind": "section", "status": "live"}
+                for k, lbl in _SECTIONS
+            ),
         ]
     }
 
