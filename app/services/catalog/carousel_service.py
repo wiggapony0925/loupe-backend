@@ -7,8 +7,9 @@ which the web then renders through the normal rail engine. Crucially the model
 never sees or returns card data: it only emits carousel *definitions* over a
 fixed vocabulary, so one cheap call a day produces creative merchandising while
 the actual cards keep coming from our cached catalog. Results are cached per
-game per day; when no model is configured (or it errors) the endpoint returns an
-empty "curated" set and the web falls back to its built-in strategy pool.
+game per day; when no model is configured (or it errors) the endpoint returns
+the built-in **curated pool** (``_curated_for``) — the single source of truth
+both the web and mobile render, so the clients no longer each hardcode their own.
 """
 
 from __future__ import annotations
@@ -34,6 +35,118 @@ GAME_LABELS: dict[str, str] = {
     "onepiece": "One Piece",
     "digimon": "Digimon",
 }
+
+# ──────────────────────────────────────────────────────────────────────────
+# Curated shelf pool — the canonical, always-on merchandising the endpoint
+# serves. This is the SINGLE SOURCE OF TRUTH both the web and mobile render
+# (they used to each hardcode their own copy). The AI layer below only *adds*
+# to / replaces this when a model is configured; with no model, this pool is
+# what ships. Titles keep the ``{label}`` placeholder — each client
+# interpolates it with its own game label (web "Magic" vs long forms, etc.),
+# exactly as the web strategy pool did before it moved here.
+# ──────────────────────────────────────────────────────────────────────────
+_CURATED_POOL: list[CarouselRecipe] = [
+    CarouselRecipe(
+        id="grails",
+        title="Grails & chase cards",
+        subtitle="The trophy {label} cards serious collectors hunt.",
+        source="value",
+        priceMin=250,
+        sort="price_desc",
+    ),
+    CarouselRecipe(
+        id="rainbow",
+        title="Rainbow & secret rares",
+        subtitle="The flashiest pulls in {label}.",
+        source="value",
+        rarityPattern="secret|rainbow|illustration|special",
+        sort="price_desc",
+    ),
+    CarouselRecipe(
+        id="premium",
+        title="Premium tier · $150+",
+        subtitle="Heavy hitters at live market value.",
+        source="value",
+        priceMin=150,
+        sort="price_desc",
+    ),
+    CarouselRecipe(
+        id="midrange",
+        title="Collector picks · $25–$150",
+        subtitle="Standouts that won't break the bank.",
+        source="value",
+        priceMin=25,
+        priceMax=150,
+        sort="price_desc",
+    ),
+    CarouselRecipe(
+        id="holo-hits",
+        title="Holo & ultra-rare hits",
+        subtitle="Shiny {label} cards worth chasing.",
+        source="value",
+        rarityPattern="holo|ultra|ex|gx|\\bv\\b|vmax|vstar",
+        sort="price_desc",
+    ),
+    CarouselRecipe(
+        id="under25",
+        title="Great finds under $25",
+        subtitle="Quality {label} pickups, priced live.",
+        source="value",
+        priceMax=25,
+        sort="price_desc",
+    ),
+    CarouselRecipe(
+        id="steals5",
+        title="Steals under $5",
+        subtitle="Affordable {label} singles.",
+        source="value",
+        priceMax=5,
+        sort="price_desc",
+    ),
+    CarouselRecipe(
+        id="budget-binder",
+        title="Budget binder fillers",
+        subtitle="Round out the collection for less.",
+        source="value",
+        priceMax=10,
+        sort="price_asc",
+    ),
+    CarouselRecipe(
+        id="blue-chips",
+        title="Blue-chip singles",
+        subtitle="Established, high-value {label} cards.",
+        source="value",
+        priceMin=75,
+        priceMax=400,
+        sort="price_desc",
+    ),
+]
+
+#: Games whose catalog has no price feed yet (mirrors
+#: ``trending_service._CATALOG_ONLY_SOURCE``). Value/price shelves are
+#: meaningless for them, and the ``catalog`` rail kind can't filter by rarity,
+#: so a "themed" shelf would just reorder the same cards — the exact
+#: same-cards-in-every-carousel trap. They therefore get NO curated pool and
+#: lean on the clients' structural anchors (explore/sets/sealed). See
+#: ``[[supported-tcgs]]`` — add prices to light up their value shelves.
+_CATALOG_ONLY_GAMES: frozenset[str] = frozenset({"onepiece", "digimon"})
+#: Games that actually have a priced discovery pool.
+_PRICED_GAMES: frozenset[str] = frozenset(GAME_LABELS) - _CATALOG_ONLY_GAMES
+
+
+def _curated_for(game: str) -> list[CarouselRecipe]:
+    """The always-on curated shelf pool for a game.
+
+    Priced games (Pokémon/Magic/Yu-Gi-Oh!) get the value/rarity merchandising
+    pool; catalog-only or unknown games get an empty list (their structural
+    anchors carry the storefront). This is what makes ``/v1/public/carousels``
+    the single source of truth instead of an empty placeholder the clients had
+    to paper over.
+    """
+    if game not in _PRICED_GAMES:
+        return []
+    return list(_CURATED_POOL)
+
 
 _AI_TTL = 24 * 60 * 60  # AI result is good for a day
 _FALLBACK_TTL = 60 * 60  # retry the model within the hour once a key is set
@@ -71,8 +184,13 @@ def configured() -> bool:
     return bool(s.openai_api_key or s.anthropic_api_key)
 
 
+#: Bump when the curated pool or recipe shape changes so a deploy invalidates
+#: any still-cached placeholders instead of serving them until TTL.
+_CACHE_VERSION = "v2"
+
+
 def _cache_key(game: str) -> str:
-    return f"loupe:carousels:{game}:{date.today().isoformat()}"
+    return f"loupe:carousels:{_CACHE_VERSION}:{game}:{date.today().isoformat()}"
 
 
 async def _cache_get(game: str) -> CarouselResponse | None:
@@ -233,9 +351,10 @@ async def get_carousels(game: str) -> CarouselResponse:
     """Return a game's shelves WITHOUT ever blocking the request on the model.
 
     A cache miss returns the curated set instantly and kicks AI generation in the
-    background, so the *next* load serves the AI version. The web's own curated
-    strategy pool fills in when ``carousels`` is empty, so the storefront is never
-    bare — and a slow/at-fault model can never spike request latency.
+    background, so the *next* load serves the AI version. The curated set is the
+    canonical merchandising pool (``_curated_for``) — the single source of truth
+    both clients render — so the storefront is never bare, and a slow/at-fault
+    model can never spike request latency.
     """
     label = GAME_LABELS.get(game, game.title())
     cached = await _cache_get(game)
@@ -246,10 +365,12 @@ async def get_carousels(game: str) -> CarouselResponse:
             _spawn_generation(game, label)
         return cached
 
-    # Cold miss: cache a curated placeholder so concurrent requests don't all
-    # spawn, return it immediately, and generate AI off the request path.
-    placeholder = CarouselResponse(game=game, source="curated", carousels=[])
-    await _cache_set(placeholder, _FALLBACK_TTL)
+    # Cold miss: cache the curated pool so concurrent requests don't all spawn,
+    # return it immediately, and generate AI off the request path.
+    curated = CarouselResponse(
+        game=game, source="curated", carousels=_curated_for(game)
+    )
+    await _cache_set(curated, _FALLBACK_TTL)
     if configured():
         _spawn_generation(game, label)
-    return placeholder
+    return curated
