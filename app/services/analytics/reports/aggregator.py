@@ -97,9 +97,26 @@ def _value_on(
     history: list[tuple[date, float]],
     on: date,
 ) -> float:
-    """Return the card's estimated USD value as of *on* using last-known-price."""
-    if not history:
-        return float(estimated_value_usd or 0)
+    """The card's value as of *on*, in the canonical grade-aware basis.
+
+    The magnitude is always anchored to ``estimated_value_usd`` (the
+    grade-aware ``holding_value_usd`` basis the vault/summary/history endpoints
+    use); the raw ``price_history`` is consulted **only** for the relative
+    *shape* — i.e. the value is scaled by ``price(on) / price(latest)``. This
+    keeps the statement's close total equal to the live collection total (raw
+    catalog prices are grade-agnostic and would systematically overstate slabs,
+    so they must never set the absolute level — see
+    ``portfolio_service.holding_value_usd``).
+    """
+    base = float(estimated_value_usd or 0)
+    if not history or base == 0:
+        return base
+    # Anchor = latest recorded price (represents "now", where value == base).
+    anchor = history[-1][1]
+    if anchor <= 0:
+        return base
+    # Price on-or-before `on`; extrapolate the earliest known point backward
+    # when the window opens before any recorded price.
     last: float | None = None
     for d, p in history:
         if d <= on:
@@ -108,7 +125,7 @@ def _value_on(
             break
     if last is None:
         last = history[0][1]
-    return float(last)
+    return base * (last / anchor)
 
 
 async def build_snapshot(

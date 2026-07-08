@@ -38,6 +38,9 @@ def _stub_pokemon_card(idx: int) -> dict[str, Any]:
             "small": f"https://example.test/poke/{idx}-small.png",
             "large": f"https://example.test/poke/{idx}-large.png",
         },
+        # A real price so the card survives the shelf's priced-only filter —
+        # `/v1/cards/trending` now drops "—" tiles (matching the web storefront).
+        "cardmarket": {"prices": {"averageSellPrice": 10.0 + idx}},
     }
 
 
@@ -55,6 +58,7 @@ def _stub_scryfall_card(idx: int) -> dict[str, Any]:
             "large": f"https://example.test/sf/{idx}-large.jpg",
             "art_crop": f"https://example.test/sf/{idx}-art.jpg",
         },
+        "prices": {"usd": f"{20.0 + idx:.2f}"},
     }
 
 
@@ -71,6 +75,7 @@ def _stub_yugi_card(idx: int) -> dict[str, Any]:
                 "image_url_cropped": f"https://example.test/ygo/{idx}-art.jpg",
             }
         ],
+        "card_prices": [{"tcgplayer_price": f"{30.0 + idx:.2f}"}],
     }
 
 
@@ -181,10 +186,11 @@ async def test_trending_fallback_on_all_providers_down(client, monkeypatch):
     resp = await client.get("/v1/cards/trending?limit=3")
     assert resp.status_code == 200, resp.text
     body = resp.json()["data"]
+    # All upstreams down → the resilience path yields only unpriced fallback
+    # stubs, which the shelf filters out (no "—" tiles in a shopping rail). The
+    # endpoint still degrades to 200 with an empty rail rather than a 5xx.
     assert body["source"] == "fallback"
-    assert len(body["cards"]) == 3
-    for c in body["cards"]:
-        assert "id" in c and "name" in c
+    assert body["cards"] == []
 
 
 def test_rotate_daily_is_deterministic_permutation():
@@ -251,10 +257,77 @@ def test_priced_arted_drops_unpriced_and_sorts_desc():
     ]  # priciest first, unpriced/art-less gone
 
 
+def _priced(id_: str, name: str, price: float) -> dict[str, Any]:
+    return {
+        "id": id_,
+        "name": name,
+        "tcg": "pokemon",
+        "image_url": f"https://example.test/{id_}.png",
+        "pricing_summary": {"market": {"amount": price, "currency": "USD"}},
+    }
+
+
+@pytest.mark.asyncio
+async def test_trending_shelf_value_differs_priced_and_capped(client, monkeypatch):
+    """The mobile endpoint honours `sort` + `max_price` and only ships priced
+    cards — so `value` ≠ `trending`, no "—" tiles, and the "steals" cut works."""
+
+    async def fake_trending(tcg: str = "all", limit: int = 24) -> dict[str, Any]:
+        return {
+            "cards": [
+                _priced("t1", "Trend One", 8.0),
+                _priced("t2", "Trend Two", 40.0),
+            ],
+            "source": "live",
+        }
+
+    async def fake_valuable(tcg: str = "all", limit: int = 24) -> dict[str, Any]:
+        return {
+            "cards": [
+                _priced("v1", "Value One", 500.0),
+                _priced("v2", "Value Two", 5.0),
+            ],
+            "source": "live",
+        }
+
+    monkeypatch.setattr(trending_service, "get_trending", fake_trending)
+    monkeypatch.setattr(trending_service, "get_most_valuable", fake_valuable)
+
+    trending = (await client.get("/v1/cards/trending?sort=trending")).json()["data"]
+    value = (await client.get("/v1/cards/trending?sort=value")).json()["data"]
+
+    trending_ids = [c["id"] for c in trending["cards"]]
+    value_ids = [c["id"] for c in value["cards"]]
+    # Distinct sources → the two rails are not the same cards.
+    assert set(trending_ids).isdisjoint(value_ids)
+    # `value` draws the most-valuable pool, priciest first.
+    assert value_ids == ["v1", "v2"]
+    # Every card on either rail is priced (no "—" tile that the detail prices).
+    for c in trending["cards"] + value["cards"]:
+        assert (c.get("pricing_summary") or {}).get("market", {}).get(
+            "amount"
+        ) is not None
+    # The "steals under $X" cut is applied server-side.
+    cheap = (await client.get("/v1/cards/trending?sort=value&max_price=10")).json()[
+        "data"
+    ]
+    assert [c["id"] for c in cheap["cards"]] == ["v2"]
+
+
 @pytest.mark.asyncio
 async def test_trending_rejects_invalid_tcg(client):
-    resp = await client.get("/v1/cards/trending?tcg=onepiece")
+    # lorcana has no trending feed and isn't in the endpoint's tcg set.
+    resp = await client.get("/v1/cards/trending?tcg=lorcana")
     assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_trending_catalog_only_game_is_empty(client):
+    # One Piece / Digimon have no price feed → an empty priced rail (200), not
+    # a 422 and not a mismatched Magic-dominated fallback.
+    resp = await client.get("/v1/cards/trending?tcg=onepiece&sort=value")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["cards"] == []
 
 
 @pytest.mark.asyncio

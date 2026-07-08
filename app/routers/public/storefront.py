@@ -276,33 +276,13 @@ async def public_trending(
     renders a "—" priceless tile or a bare image.
     """
     _cache(response)
-    # Catalog-only games (Digimon, One Piece) have no price feed yet, so there is
-    # no trending / most-valuable rail. Return empty rather than letting the
-    # trending source fall back to the global (Magic-dominated) leaderboard,
-    # which would surface non-matching cards under a "Trending in …" rail.
-    if tcg in ("digimon", "onepiece"):
-        src = {"digimon": "digimoncard", "onepiece": "apitcg-onepiece"}[tcg]
-        return {"cards": [], "total": 0, "source": src}
-    if sort == "value":
-        body = await trending_service.get_most_valuable(tcg=tcg, limit=100)
-    else:
-        body = await trending_service.get_trending(tcg=tcg, limit=100)
-
-    # Only show cards we can actually price — a card with no market value reads
-    # as broken in a shopping rail. `_market_amount` returns None when unpriced.
-    cards = [c for c in (body.get("cards") or []) if _market_amount(c) is not None]
-
-    if max_price is not None:
-        cards = [c for c in cards if (_market_amount(c) or 0.0) <= max_price]
-    if sort == "value":
-        cards = _apply_sort(cards, "price_desc")
-
-    return {
-        "cards": cards[:limit],
-        "total": len(cards),
-        "source": body.get("source"),
-        "updated_at": body.get("updated_at"),
-    }
+    # Single source of truth shared with the mobile `/v1/cards/trending`
+    # endpoint: priced-only, art-only, sorted, trending≠valuable deduped, and
+    # the catalog-only-game empty-rail guard all live in `get_shelf`, so the two
+    # clients can never diverge.
+    return await trending_service.get_shelf(
+        tcg=tcg, sort=sort, max_price=max_price, limit=limit
+    )
 
 
 __all__ = ["router"]

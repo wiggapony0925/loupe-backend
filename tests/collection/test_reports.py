@@ -9,6 +9,34 @@ import pytest
 from tests.conftest import assert_envelope_error, assert_envelope_ok
 
 
+def test_value_on_anchors_to_estimated_value_not_raw_price():
+    """The statement values each holding on the grade-aware canonical basis.
+
+    History supplies only the *shape* (a ratio); the raw catalog price — which
+    is grade-agnostic and systematically overstates slabs — must never set the
+    absolute level. So the latest bucket resolves to `estimated_value_usd`
+    exactly (matching the vault/summary/history totals), and earlier buckets
+    scale by the historical price ratio.
+    """
+    from decimal import Decimal
+
+    from app.services.analytics.reports.aggregator import _value_on
+
+    est = Decimal("100")
+    history = [(date(2024, 1, 1), 200.0), (date(2024, 6, 1), 400.0)]
+
+    # On/after the latest recorded price → exactly the canonical estimate,
+    # NOT the raw $400 catalog price.
+    assert _value_on(est, history, date(2024, 6, 1)) == pytest.approx(100.0)
+    assert _value_on(est, history, date(2024, 12, 31)) == pytest.approx(100.0)
+    # At an earlier date the value scales by the price ratio (200/400 = 0.5).
+    assert _value_on(est, history, date(2024, 1, 1)) == pytest.approx(50.0)
+    # No history → flat at the canonical estimate.
+    assert _value_on(est, [], date(2024, 6, 1)) == pytest.approx(100.0)
+    # No estimate → zero (can't fabricate a value).
+    assert _value_on(None, history, date(2024, 6, 1)) == pytest.approx(0.0)
+
+
 @pytest.mark.asyncio
 async def test_resolve_period_helpers():
     from app.models.enums import ReportPeriodEnum
