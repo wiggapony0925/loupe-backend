@@ -40,6 +40,9 @@ class UserSettingsRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     currency: str = "USD"
+    # Active portfolio (collection) id; null = the "All" view. Shared across
+    # mobile + web like `currency`, so the scope follows the user.
+    active_collection_id: str | None = None
     theme: str = "system"
     live_sync_enabled: bool = True
     push_notifications_enabled: bool = True
@@ -55,6 +58,10 @@ class UserSettingsUpdate(BaseModel):
     currency: str | None = Field(
         default=None, min_length=2, max_length=6, pattern=r"^[A-Za-z]+$"
     )
+    # Active portfolio id. Send an explicit `null` to clear back to the "All"
+    # view; omit the field to leave the scope unchanged (the router keys off
+    # whether it was set, so null is meaningful here).
+    active_collection_id: str | None = Field(default=None, max_length=64)
     theme: str | None = Field(default=None, pattern="^(system|light|dark)$")
     live_sync_enabled: bool | None = None
     push_notifications_enabled: bool | None = None

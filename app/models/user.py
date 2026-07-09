@@ -137,6 +137,12 @@ class UserSettings(Base):
     # ISO-4217 fiat codes plus crypto tickers (BTC, USDC, MATIC…) — the
     # clients share one display-currency catalog with 2-6 char codes.
     currency: Mapped[str] = mapped_column(String(6), default="USD", nullable=False)
+    # Active portfolio (collection) the user is viewing — scopes the dashboard,
+    # analytics and vault. NULL = the "All" view (everything owned). Stored on
+    # the profile like `currency` so the choice follows the user across mobile
+    # and web. Not an FK: a stale id just falls back to All, and this survives a
+    # collection being deleted without a cascade dance.
+    active_collection_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     theme: Mapped[str] = mapped_column(String(16), default="system", nullable=False)
     live_sync_enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
     push_notifications_enabled: Mapped[bool] = mapped_column(

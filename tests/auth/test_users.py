@@ -43,3 +43,36 @@ async def test_patch_settings(client, auth_headers):
     )
     body = assert_envelope_ok(resp)
     assert body["currency"] == "EUR"
+
+
+@pytest.mark.asyncio
+async def test_active_collection_roundtrip(client, auth_headers):
+    # Defaults to the "All" view (null).
+    body = assert_envelope_ok(await client.get("/v1/me/settings", headers=auth_headers))
+    assert body["active_collection_id"] is None
+
+    # Set a specific portfolio — persists so mobile + web follow.
+    body = assert_envelope_ok(
+        await client.patch(
+            "/v1/me/settings",
+            headers=auth_headers,
+            json={"active_collection_id": "col_umbreon"},
+        )
+    )
+    assert body["active_collection_id"] == "col_umbreon"
+
+    # Explicit null clears back to "All"; omitting the field leaves it unchanged.
+    body = assert_envelope_ok(
+        await client.patch(
+            "/v1/me/settings", headers=auth_headers, json={"currency": "USD"}
+        )
+    )
+    assert body["active_collection_id"] == "col_umbreon"  # untouched
+    body = assert_envelope_ok(
+        await client.patch(
+            "/v1/me/settings",
+            headers=auth_headers,
+            json={"active_collection_id": None},
+        )
+    )
+    assert body["active_collection_id"] is None

@@ -374,6 +374,10 @@ async def update_settings(
     settings = await _ensure_settings(db, user)
     if patch.currency is not None:
         settings.currency = patch.currency
+    # `None` is meaningful here (clear back to the "All" view), so key off
+    # whether the field was explicitly sent rather than on `is not None`.
+    if "active_collection_id" in patch.model_fields_set:
+        settings.active_collection_id = patch.active_collection_id
     if patch.theme is not None:
         settings.theme = patch.theme
     if patch.live_sync_enabled is not None:
