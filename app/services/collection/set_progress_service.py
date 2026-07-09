@@ -303,7 +303,9 @@ async def set_checklist(
             key = _num_key(mc.bare_number or mc.number)
             cards.append(
                 {
-                    "id": f"{mc.source}:{mc.id}",
+                    # ``mc.id`` is already the composite "<source>:<upstream_id>"
+                    # (e.g. "pokemontcg:base1-4") the card-detail route expects.
+                    "id": mc.id,
                     "name": mc.name,
                     "number": mc.number,
                     "imageUrl": img,
