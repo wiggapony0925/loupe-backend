@@ -567,6 +567,9 @@
   "/v1/sets/progress": [
     "GET"
   ],
+  "/v1/sets/{set_id}/checklist": [
+    "GET"
+  ],
   "/v1/waitlist": [
     "POST"
   ],

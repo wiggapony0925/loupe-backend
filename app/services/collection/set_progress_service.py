@@ -12,6 +12,7 @@ for that set, which is the most honest upper bound we can produce.
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -168,9 +169,80 @@ async def list_progress(
     return [s.to_dict() for s in out]
 
 
-def _bare(number: str | None) -> str:
-    """Collector number reduced to bare digits ("058/102" → "58")."""
-    return "".join(ch for ch in str(number or "") if ch.isdigit())
+def _num_key(number: str | None) -> str:
+    """Canonical collector-number key for owned/missing matching.
+
+    Takes the numerator only and drops leading zeros so both sides of the join
+    line up regardless of how each stored it: "058/102" → "58", "4/102" → "4"
+    (NOT "4102" — stripping all non-digits would fold the denominator in),
+    "TG12/TG30" → "12". Empty when there's no number.
+    """
+    head = str(number or "").split("/")[0]
+    return "".join(ch for ch in head if ch.isdigit()).lstrip("0")
+
+
+def _norm_set_name(name: str | None) -> str:
+    """Set name reduced for fuzzy matching ("Base Set" → "base")."""
+    s = re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
+    if s.endswith(" set"):
+        s = s[: -len(" set")].strip()
+    return s
+
+
+async def _resolve_mirror_set_id(db: AsyncSession, cs: CardSet) -> str | None:
+    """Best-effort bridge from a local ``CardSet`` to its catalog-mirror id.
+
+    The mirror keys on the provider's own set id and stores the provider's set
+    name, neither of which our local rows always carry verbatim — so we cascade
+    from the most precise key to the fuzziest:
+
+    1. ``code`` == mirror id — modern sets store the pokemontcg id in ``code``
+       ("sv3pt5", "cel25c"): exact and unambiguous.
+    2. exact (case-insensitive) name — "151", "Obsidian Flames".
+    3. normalized name disambiguated by card total — rescues legacy sets the
+       provider names differently ("Base Set"/102 → mirror "Base"/102, never
+       "Base Set 2"/130).
+    """
+    if cs.code:
+        hit = (
+            await db.execute(
+                select(CatalogMirrorSet.id)
+                .where(func.lower(CatalogMirrorSet.id) == cs.code.lower())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if hit:
+            return hit
+
+    if cs.name:
+        hit = (
+            await db.execute(
+                select(CatalogMirrorSet.id)
+                .where(func.lower(CatalogMirrorSet.name) == cs.name.lower())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if hit:
+            return hit
+
+    norm = _norm_set_name(cs.name)
+    if not norm:
+        return None
+    # Small table (~200 pokemon sets) — normalize + total-match in Python
+    # rather than fight cross-dialect string functions.
+    candidates = (
+        await db.execute(
+            select(CatalogMirrorSet.id, CatalogMirrorSet.name, CatalogMirrorSet.total)
+        )
+    ).all()
+    matches = [c for c in candidates if _norm_set_name(c[1]) == norm]
+    if not matches:
+        return None
+    if cs.total_cards is not None:
+        exact = [c for c in matches if c[2] == cs.total_cards]
+        if exact:
+            return str(exact[0][0])
+    return str(matches[0][0])
 
 
 async def set_checklist(
@@ -179,10 +251,10 @@ async def set_checklist(
     """The full card checklist for one set — every card, flagged owned/missing.
 
     Backs the "tap a set → have + still-missing" sheet. The complete set list
-    comes from the catalog mirror (the local ``Card`` table only holds cards
-    someone has already viewed/owned, so it can't show what you're missing).
-    A card is "owned" when the user holds a copy with the same collector number
-    in this set.
+    comes from the catalog mirror when we can bridge to it (Pokémon). For sets
+    with no mirror coverage (Magic/Yu-Gi-Oh, or an unmatched set) we fall back
+    to the local ``Card`` table so at least every owned card still renders —
+    an honest partial list beats an empty one.
     """
     cs = (
         await db.execute(select(CardSet).where(CardSet.id == set_id))
@@ -190,9 +262,11 @@ async def set_checklist(
     if cs is None:
         raise HTTPException(status_code=404, detail="Set not found")
 
+    # The user's owned cards in this set — both bare collector number (to match
+    # mirror rows) and local card id (to match local rows).
     owned_rows = (
         await db.execute(
-            select(Card.number)
+            select(Card.id, Card.number)
             .select_from(GradedCard)
             .join(Card, Card.id == GradedCard.card_id)
             .where(
@@ -202,17 +276,11 @@ async def set_checklist(
             )
         )
     ).all()
-    owned_bare = {_bare(r[0]) for r in owned_rows if r[0]}
-
-    mirror_set_id = (
-        await db.execute(
-            select(CatalogMirrorSet.id)
-            .where(func.lower(CatalogMirrorSet.name) == (cs.name or "").lower())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    owned_keys = {_num_key(r[1]) for r in owned_rows if _num_key(r[1])}
+    owned_ids = {r[0] for r in owned_rows}
 
     cards: list[dict[str, Any]] = []
+    mirror_set_id = await _resolve_mirror_set_id(db, cs)
     if mirror_set_id is not None:
         rows = (
             (
@@ -220,7 +288,8 @@ async def set_checklist(
                     select(CatalogMirrorCard)
                     .where(CatalogMirrorCard.set_id == mirror_set_id)
                     .order_by(
-                        CatalogMirrorCard.bare_number.nulls_last(),
+                        CatalogMirrorCard.number_int.nulls_last(),
+                        CatalogMirrorCard.bare_number,
                         CatalogMirrorCard.name,
                     )
                 )
@@ -231,21 +300,46 @@ async def set_checklist(
         for mc in rows:
             payload = mc.payload or {}
             img = (payload.get("images") or {}).get("small") or payload.get("image")
+            key = _num_key(mc.bare_number or mc.number)
             cards.append(
                 {
                     "id": f"{mc.source}:{mc.id}",
                     "name": mc.name,
                     "number": mc.number,
                     "imageUrl": img,
-                    "owned": bool(mc.bare_number and mc.bare_number in owned_bare),
+                    "owned": bool(key and key in owned_keys),
+                }
+            )
+    else:
+        # No mirror coverage — build from whatever we've indexed locally.
+        local = (
+            (
+                await db.execute(
+                    select(Card)
+                    .where(Card.set_id == set_id)
+                    .order_by(Card.number.nulls_last(), Card.name)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for c in local:
+            cards.append(
+                {
+                    "id": str(c.id),
+                    "name": c.name,
+                    "number": c.number,
+                    "imageUrl": c.image_url,
+                    "owned": c.id in owned_ids,
                 }
             )
 
     owned_count = sum(1 for c in cards if c["owned"])
+    total = len(cards) or int(cs.total_cards or 0)
     return {
         "setId": str(cs.id),
         "setName": cs.name,
-        "total": len(cards) or int(cs.total_cards or 0),
+        "total": total,
         "owned": owned_count,
         "cards": cards,
     }

@@ -9,9 +9,10 @@ for every set the signed-in user owns at least one card from.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_user
@@ -47,6 +48,26 @@ async def get_progress(
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
     return await set_progress_service.list_progress(db, user)
+
+
+@router.get(
+    "/{set_id}/checklist",
+    summary="Full card checklist for one set (owned + still-missing)",
+    description=(
+        "The complete card list for a set — every card flagged `owned` or not "
+        "— so the client can render a 'you have these / still missing these' "
+        "sheet. Shape: `{setId, setName, total, owned, cards: [{id, name, "
+        "number, imageUrl, owned}]}`. The full list comes from the catalog "
+        "mirror; `owned` is true when the signed-in user holds a copy with the "
+        "same collector number in this set."
+    ),
+)
+async def get_set_checklist(
+    set_id: uuid.UUID = Path(..., description="CardSet id"),
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    return await set_progress_service.set_checklist(db, user, set_id)
 
 
 __all__ = ["router"]
