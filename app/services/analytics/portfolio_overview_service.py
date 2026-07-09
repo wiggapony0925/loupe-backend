@@ -135,6 +135,7 @@ async def build_overview(
             if c is not None and getattr(c, "set", None) is not None
             else None
         )
+        set_logo = s.image_url if s is not None else None
         year = c.year if c is not None and c.year is not None else None
         holdings.append(
             {
@@ -143,6 +144,7 @@ async def build_overview(
                 "cardName": c.name if c is not None else None,
                 "cardImageUrl": c.image_url if c is not None else None,
                 "setName": set_name,
+                "setLogoUrl": set_logo,
                 "valueUsd": value,
                 "grade": grade,
                 "year": year,
@@ -190,9 +192,11 @@ async def build_overview(
                 weighted_sum += i["changePct1y"] * i["valueUsd"]
                 weight += i["valueUsd"]
         change_pct = round(weighted_sum / weight, 2) if weight > 0 else None
+        logo = next((i["setLogoUrl"] for i in items if i.get("setLogoUrl")), None)
         set_indexes.append(
             {
                 "setName": name,
+                "setLogoUrl": logo,
                 "count": len(items),
                 "totalValueUsd": round(sub_total, 2),
                 "sharePct": round((sub_total / total_value) * 100, 2)
