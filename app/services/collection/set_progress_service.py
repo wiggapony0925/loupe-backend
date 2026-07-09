@@ -12,14 +12,17 @@ for that set, which is the most honest upper bound we can produce.
 
 from __future__ import annotations
 
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import Card, CardSet
+from app.models.catalog_mirror import CatalogMirrorCard, CatalogMirrorSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.services.collection.portfolio_service import current_market_value
@@ -165,4 +168,87 @@ async def list_progress(
     return [s.to_dict() for s in out]
 
 
-__all__ = ["SetProgress", "list_progress"]
+def _bare(number: str | None) -> str:
+    """Collector number reduced to bare digits ("058/102" → "58")."""
+    return "".join(ch for ch in str(number or "") if ch.isdigit())
+
+
+async def set_checklist(
+    db: AsyncSession, user: User, set_id: uuid.UUID
+) -> dict[str, Any]:
+    """The full card checklist for one set — every card, flagged owned/missing.
+
+    Backs the "tap a set → have + still-missing" sheet. The complete set list
+    comes from the catalog mirror (the local ``Card`` table only holds cards
+    someone has already viewed/owned, so it can't show what you're missing).
+    A card is "owned" when the user holds a copy with the same collector number
+    in this set.
+    """
+    cs = (
+        await db.execute(select(CardSet).where(CardSet.id == set_id))
+    ).scalar_one_or_none()
+    if cs is None:
+        raise HTTPException(status_code=404, detail="Set not found")
+
+    owned_rows = (
+        await db.execute(
+            select(Card.number)
+            .select_from(GradedCard)
+            .join(Card, Card.id == GradedCard.card_id)
+            .where(
+                GradedCard.user_id == user.id,
+                GradedCard.deleted_at.is_(None),
+                Card.set_id == set_id,
+            )
+        )
+    ).all()
+    owned_bare = {_bare(r[0]) for r in owned_rows if r[0]}
+
+    mirror_set_id = (
+        await db.execute(
+            select(CatalogMirrorSet.id)
+            .where(func.lower(CatalogMirrorSet.name) == (cs.name or "").lower())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    cards: list[dict[str, Any]] = []
+    if mirror_set_id is not None:
+        rows = (
+            (
+                await db.execute(
+                    select(CatalogMirrorCard)
+                    .where(CatalogMirrorCard.set_id == mirror_set_id)
+                    .order_by(
+                        CatalogMirrorCard.bare_number.nulls_last(),
+                        CatalogMirrorCard.name,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for mc in rows:
+            payload = mc.payload or {}
+            img = (payload.get("images") or {}).get("small") or payload.get("image")
+            cards.append(
+                {
+                    "id": f"{mc.source}:{mc.id}",
+                    "name": mc.name,
+                    "number": mc.number,
+                    "imageUrl": img,
+                    "owned": bool(mc.bare_number and mc.bare_number in owned_bare),
+                }
+            )
+
+    owned_count = sum(1 for c in cards if c["owned"])
+    return {
+        "setId": str(cs.id),
+        "setName": cs.name,
+        "total": len(cards) or int(cs.total_cards or 0),
+        "owned": owned_count,
+        "cards": cards,
+    }
+
+
+__all__ = ["SetProgress", "list_progress", "set_checklist"]

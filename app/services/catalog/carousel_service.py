@@ -16,14 +16,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from datetime import date
+from typing import Any
 
 from pydantic import ValidationError
 
 from app.config import get_settings
 from app.platform.redis_client import get_redis
-from app.schemas.carousel import CarouselRecipe, CarouselResponse
+from app.schemas.carousel import (
+    CarouselRecipe,
+    CarouselResponse,
+    ResolvedCarousels,
+    ResolvedRail,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger("services.carousel")
@@ -374,3 +381,197 @@ async def get_carousels(game: str) -> CarouselResponse:
     if configured():
         _spawn_generation(game, label)
     return curated
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Resolved carousels — compile each recipe into ACTUAL CARDS server-side.
+#
+# The recipe endpoint above leaves the compilation (price band / rarity / sort /
+# limit → cards) to each client, which drifts: a recipe that can't be filled
+# from the thin priced shelf shows an empty rail on one client and self-hides on
+# another. Resolving here makes the backend the single source of truth — it runs
+# the recipe against the shelf/catalog, DROPS any rail too thin to show, and
+# returns ready-to-render rails so web and mobile paint the exact same carousels.
+# ──────────────────────────────────────────────────────────────────────────
+
+_RESOLVED_TTL = 15 * 60  # resolved payload is heavier to build; prices drift slowly
+_MIN_RAIL = 4  # a rail with fewer cards than this is dropped (matches client minItems)
+
+
+def _interp(text: str, label: str) -> str:
+    return text.replace("{label}", label)
+
+
+def _price_of(card: dict[str, Any]) -> float | None:
+    ps = card.get("pricing_summary")
+    if isinstance(ps, dict):
+        market = ps.get("market")
+        if isinstance(market, dict) and market.get("amount") is not None:
+            try:
+                return float(market["amount"])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _apply_lens(
+    cards: list[dict[str, Any]], recipe: CarouselRecipe
+) -> list[dict[str, Any]]:
+    """Server-side mirror of the web `cardFilters` lens: price band, rarity
+    pattern, sort, limit — applied to a fetched shelf."""
+    out = list(cards)
+
+    lo, hi = recipe.priceMin, recipe.priceMax
+    if lo is not None or hi is not None:
+        kept: list[dict[str, Any]] = []
+        for c in out:
+            p = _price_of(c)
+            if p is None:
+                continue  # a price-band rail only makes sense for priced cards
+            if lo is not None and p < lo:
+                continue
+            if hi is not None and p > hi:
+                continue
+            kept.append(c)
+        out = kept
+
+    if recipe.rarityPattern:
+        try:
+            rx = re.compile(recipe.rarityPattern, re.IGNORECASE)
+            out = [c for c in out if c.get("rarity") and rx.search(str(c["rarity"]))]
+        except re.error:
+            pass  # tolerate a bad pattern rather than drop the whole rail
+
+    sort = recipe.sort or "price_desc"
+    if sort in ("price_desc", "price_asc"):
+        out.sort(key=lambda c: _price_of(c) or 0.0, reverse=(sort == "price_desc"))
+    elif sort == "name":
+        out.sort(key=lambda c: str(c.get("name") or ""))
+
+    return out[: (recipe.limit or 20)]
+
+
+async def _shelf_cards(
+    game: str, sort: str, max_price: float | None = None, limit: int = 48
+) -> list[dict[str, Any]]:
+    from app.services.market import trending_service
+
+    body = await trending_service.get_shelf(
+        tcg=game, sort=sort, max_price=max_price, limit=limit
+    )
+    cards = body.get("cards")
+    return list(cards) if isinstance(cards, list) else []
+
+
+async def _catalog_cards(game: str, limit: int = 24) -> list[dict[str, Any]]:
+    from app.services.catalog import catalog_browse_service
+
+    body = await catalog_browse_service.browse_catalog(
+        game=game, page=1, page_size=limit, sort="name"
+    )
+    cards = body.get("cards")
+    return list(cards) if isinstance(cards, list) else []
+
+
+async def _resolve_recipe(game: str, recipe: CarouselRecipe) -> list[dict[str, Any]]:
+    if recipe.source == "catalog":
+        return await _catalog_cards(game, limit=recipe.limit or 20)
+    sort = "trending" if recipe.source == "trending" else "value"
+    cards = await _shelf_cards(game, sort=sort, max_price=recipe.priceMax, limit=48)
+    return _apply_lens(cards, recipe)
+
+
+def _resolved_cache_key(game: str) -> str:
+    return (
+        f"loupe:carousels:resolved:{_CACHE_VERSION}:{game}:{date.today().isoformat()}"
+    )
+
+
+async def _resolved_cache_get(game: str) -> ResolvedCarousels | None:
+    try:
+        raw = await (await get_redis()).get(_resolved_cache_key(game))
+        if raw:
+            return ResolvedCarousels.model_validate_json(raw)
+    except Exception as exc:  # pragma: no cover - cache best effort
+        logger.debug("resolved carousel cache_get failed: %s", exc)
+    return None
+
+
+async def _resolved_cache_set(resolved: ResolvedCarousels) -> None:
+    try:
+        await (await get_redis()).setex(
+            _resolved_cache_key(resolved.game),
+            _RESOLVED_TTL,
+            resolved.model_dump_json(),
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.debug("resolved carousel cache_set failed: %s", exc)
+
+
+async def resolve_carousels(game: str) -> ResolvedCarousels:
+    """Resolve a game's recipe pool into ready-to-render rails (with cards).
+
+    Builds a momentum anchor + the curated/AI recipe rails + a catalog "explore"
+    rail, resolving each to real cards and DROPPING any rail below ``_MIN_RAIL``
+    so a client never renders an empty shelf. This is the single source of truth
+    both web and mobile render — identical carousels, zero client-side filtering.
+    """
+    game = (game or "").lower()
+    cached = await _resolved_cache_get(game)
+    if cached is not None:
+        return cached
+
+    label = GAME_LABELS.get(game, game.title())
+    base = await get_carousels(game)
+    rails: list[ResolvedRail] = []
+    seen: set[str] = set()
+
+    # 1. Momentum anchor — real trending; dropped when the feed is thin/empty.
+    anchor = await _shelf_cards(game, sort="trending", limit=24)
+    if len(anchor) >= _MIN_RAIL:
+        rails.append(
+            ResolvedRail(
+                id="trending",
+                kind="cards",
+                title=f"Trending in {label}",
+                subtitle=f"The {label} cards moving most across marketplaces.",
+                cards=anchor,
+            )
+        )
+        seen.add("trending")
+
+    # 2. The curated/AI recipe pool, resolved and de-duped by id.
+    for recipe in base.carousels:
+        if recipe.id in seen:
+            continue
+        seen.add(recipe.id)
+        cards = await _resolve_recipe(game, recipe)
+        if len(cards) >= (recipe.minItems or _MIN_RAIL):
+            rails.append(
+                ResolvedRail(
+                    id=recipe.id,
+                    kind="catalog" if recipe.source == "catalog" else "cards",
+                    title=_interp(recipe.title, label),
+                    subtitle=_interp(recipe.subtitle, label),
+                    cards=cards,
+                )
+            )
+
+    # 3. Explore anchor — a broad catalog rail that fills for every game
+    #    (including catalog-only ones whose priced pool is empty).
+    if "explore" not in seen:
+        explore = await _catalog_cards(game, limit=24)
+        if len(explore) >= _MIN_RAIL:
+            rails.append(
+                ResolvedRail(
+                    id="explore",
+                    kind="catalog",
+                    title=f"Explore {label}",
+                    subtitle=f"A look across the {label} catalog — open any card for details.",
+                    cards=explore,
+                )
+            )
+
+    resolved = ResolvedCarousels(game=game, source=base.source, rails=rails)
+    await _resolved_cache_set(resolved)
+    return resolved

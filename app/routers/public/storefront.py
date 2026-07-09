@@ -273,6 +273,26 @@ async def public_carousels(
 
 
 @router.get(
+    "/carousels/resolved",
+    summary="Marketplace carousels already resolved into cards (both clients render this)",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def public_carousels_resolved(
+    response: Response,
+    game: str = Query(
+        "pokemon",
+        pattern=game_registry.tcg_pattern(supported_only=True, allow_all=False),
+    ),
+) -> dict[str, Any]:
+    """A game's discovery carousels **already resolved into cards** — the recipe
+    pool run against the shelf/catalog server-side, with empty rails dropped. Web
+    and mobile render this identically (no client-side filtering), so the
+    marketplace shows the exact same carousels everywhere."""
+    _cache(response)
+    return (await carousel_service.resolve_carousels(game)).model_dump()
+
+
+@router.get(
     "/trending",
     summary="Public trending (server-side sort / price ceiling)",
     dependencies=[Depends(catalog_read_limit)],
