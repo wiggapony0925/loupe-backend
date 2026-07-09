@@ -8,6 +8,7 @@ authenticated round-trip. Replaces the previous client-side fan-out
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -37,12 +38,20 @@ async def get_home_feed(
     db: AsyncSession = Depends(get_db),
     top_movers_limit: int = Query(5, ge=1, le=20, alias="topMovers"),
     recent_scans_limit: int = Query(6, ge=1, le=20, alias="recentScans"),
+    collection_id: uuid.UUID | None = Query(
+        None,
+        description=(
+            "Scope both rails to a single collection (omit for the whole "
+            "vault) — the same active-collection seam the dashboard uses."
+        ),
+    ),
 ) -> dict[str, Any]:
     return await home_service.build_feed(
         db,
         user,
         top_movers_limit=top_movers_limit,
         recent_scans_limit=recent_scans_limit,
+        collection_id=collection_id,
     )
 
 
