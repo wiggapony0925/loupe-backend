@@ -35,7 +35,7 @@ from app.services.catalog.card_fingerprint_service import FingerprintResult
 from app.tasks import scan_processor
 from app.utils.time import utcnow
 from tests.conftest import assert_envelope_ok
-from tests.factories import make_card
+from tests.factories import make_card, make_card_set
 
 # ----------------------------------------------------------------- vault list
 
@@ -122,7 +122,14 @@ async def test_set_progress_counts_distinct_cards_only(
     client, auth_headers, db_session, created_user
 ):
     """Owning 3 Charizards still counts as 1 toward Base Set completion."""
-    card = await make_card(db_session)
+    # Give the set a KNOWN size — sets with an unknown total (total_cards
+    # NULL) are deliberately hidden from progress so we never fabricate a
+    # bogus 100% for a set we can't size (see #29). A real Pokémon set
+    # carries a total, so this keeps the distinct-count assertion honest.
+    cset = await make_card_set(db_session)
+    cset.total_cards = 102
+    await db_session.commit()
+    card = await make_card(db_session, set_id=cset.id)
     db_session.add_all(
         [
             GradedCard(
