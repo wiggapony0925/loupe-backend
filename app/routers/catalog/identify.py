@@ -15,6 +15,7 @@ Three public surfaces:
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import uuid
 
@@ -42,6 +43,15 @@ from app.utils.logger import get_logger
 logger = get_logger("routers.cards.identify")
 
 router = APIRouter(prefix="/cards", tags=["cards"])
+
+# Hard wall-clock ceiling for one identify. The pipeline is internally
+# timeout-guarded stage by stage, but a cold instance + a slow upstream can
+# still stack past Cloud Run's 60s request timeout — which surfaces to the app
+# as a 504, a client retry, and a ~2-minute "couldn't reach the scanner" hang.
+# This backstop guarantees we always answer WELL under 60s: on expiry we return
+# a clean, empty no-match (HTTP 200) so the scanner shows "couldn't read this
+# card — try again" in seconds instead of timing out.
+IDENTIFY_DEADLINE_S = 22.0
 
 # Identify is polled continuously while the scanner is open. Raised to
 # 120/min so the client can stream frames roughly twice as fast (≈700ms
@@ -91,16 +101,44 @@ async def identify_card(
 
     identifier = CardIdentifier()
     try:
-        outcome = await identifier.identify(
-            db,
-            image_bytes=raw,
-            tcg_hint=tcg,
-            user_id=user.id if user else None,
-        )
+        async with asyncio.timeout(IDENTIFY_DEADLINE_S):
+            outcome = await identifier.identify(
+                db,
+                image_bytes=raw,
+                tcg_hint=tcg,
+                user_id=user.id if user else None,
+            )
     except ValueError as exc:
         # Pillow raises on truly malformed images; everything else is
         # already swallowed inside the pipeline.
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TimeoutError:
+        # Cold instance + slow upstream stacked past the deadline. Answer with
+        # a clean no-match (200) rather than letting Cloud Run 504 → the app
+        # retry → a multi-minute hang. The client renders "couldn't read this
+        # card — try again" immediately.
+        logger.warning(
+            "identify exceeded %.0fs deadline (hint=%s, bytes=%d); "
+            "returning empty no-match",
+            IDENTIFY_DEADLINE_S,
+            tcg,
+            len(raw),
+        )
+        return IdentifyResponse(
+            identification_id=uuid.uuid4(),
+            candidates=[],
+            accuracy_score=0.0,
+            primary_source="none",
+            tcg_inferred=tcg or "",
+            parsed=IdentifyParsed(),
+            ocr_provider="timeout",
+            ocr_confidence=0.0,
+            ocr_full_text="",
+            latency_ms=int(IDENTIFY_DEADLINE_S * 1000),
+            cost_usd=0.0,
+            fallback_required=False,
+            fallback_reason="identify_timeout",
+        )
 
     top = outcome.candidates[0] if outcome.candidates else None
     logger.info(
