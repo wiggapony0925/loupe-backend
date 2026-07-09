@@ -15,7 +15,9 @@ from app.models.user import User
 from app.schemas.collection import (
     CollectionCreate,
     CollectionItemAdd,
+    CollectionMerge,
     CollectionRead,
+    CollectionSummary,
     CollectionUpdate,
 )
 from app.schemas.grade import GradedCardRead
@@ -30,6 +32,20 @@ async def list_mine(
 ) -> list[CollectionRead]:
     rows = await collection_service.list_for_user(db, user)
     return [CollectionRead.model_validate(r) for r in rows]
+
+
+@router.get(
+    "/overview",
+    response_model=list[CollectionSummary],
+    summary="Portfolio switcher (All + collections, with counts & value)",
+)
+async def overview(
+    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+) -> list[CollectionSummary]:
+    """Everything the dashboard's portfolio dropdown renders: the synthetic
+    **All** entry (undeletable) plus each collection with a live card count and
+    total value. Backend-owned — the client just displays it."""
+    return await collection_service.overview(db, user)
 
 
 @router.post(
@@ -108,6 +124,22 @@ async def remove_item(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await collection_service.remove_item(db, user, collection_id, graded_card_id)
+
+
+@router.post(
+    "/{collection_id}/merge",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Merge another collection into this one",
+)
+async def merge(
+    collection_id: uuid.UUID,
+    payload: CollectionMerge,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Fold ``source_id`` into ``collection_id``: its items move over (de-duped)
+    and the emptied source is deleted. Holdings are untouched."""
+    await collection_service.merge(db, user, collection_id, payload.source_id)
 
 
 __all__ = ["router"]

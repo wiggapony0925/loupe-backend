@@ -21,10 +21,12 @@ from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
 from app.models.grade import GradedCard
 from app.models.user import User
+from app.models.watchlist import WatchlistItem
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
 from app.schemas.ownership import CardHolding, CardOwnership
 from app.services import entitlement_service
 from app.services.catalog import card_resolver_service
+from app.services.collection import collection_service
 from app.utils.time import utcnow
 
 
@@ -65,6 +67,18 @@ SORT_OPTIONS: dict[str, Any] = {
     ),
     "grade_desc": (GradedCard.grade.desc, GradedCard.id.desc),
     "grade_asc": (GradedCard.grade.asc, GradedCard.id.asc),
+    # Product name A→Z / Z→A (case-insensitive, over the joined Card).
+    "name_asc": (
+        lambda: func.lower(Card.name).asc().nulls_last(),
+        GradedCard.id.asc,
+    ),
+    "name_desc": (
+        lambda: func.lower(Card.name).desc().nulls_last(),
+        GradedCard.id.desc,
+    ),
+    # Card (collector) number — lexical on the printed number string.
+    "number_asc": (lambda: Card.number.asc().nulls_last(), GradedCard.id.asc),
+    "number_desc": (lambda: Card.number.desc().nulls_last(), GradedCard.id.desc),
 }
 
 
@@ -84,6 +98,10 @@ async def list_for_user(
     min_value: Decimal | None = None,
     max_value: Decimal | None = None,
     tags: list[str] | None = None,
+    graded_only: bool = False,
+    raw_only: bool = False,
+    watchlist: bool = False,
+    collection_id: uuid.UUID | None = None,
 ) -> list[GradedCardRead]:
     if sort not in SORT_OPTIONS:
         raise HTTPException(
@@ -106,6 +124,23 @@ async def list_for_user(
     )
     if house_slugs:
         base_where.append(GradedCard.house.in_(house_slugs))
+    # Graded vs raw: "loupe" is our placeholder house for a raw/ungraded copy,
+    # so slabbed cards are simply house != loupe (see GradedCard.is_graded).
+    if graded_only:
+        base_where.append(GradedCard.house != "loupe")
+    if raw_only:
+        base_where.append(GradedCard.house == "loupe")
+    # Watchlist-only: restrict to cards the user has starred.
+    if watchlist:
+        base_where.append(
+            GradedCard.card_id.in_(
+                select(WatchlistItem.card_id).where(WatchlistItem.user_id == user.id)
+            )
+        )
+    # Active-collection scope — the same seam the dashboard/analytics/PDF use.
+    scope = collection_service.holdings_scope(collection_id, user)
+    if scope is not None:
+        base_where.append(scope)
     if min_grade is not None:
         base_where.append(GradedCard.grade >= min_grade)
     if max_grade is not None:

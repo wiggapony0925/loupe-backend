@@ -94,11 +94,30 @@ async def list_mine(
             "(repeatable, case-insensitive)."
         ),
     ),
+    graded_only: bool = Query(
+        False,
+        description="Show only slabbed/graded cards (house ≠ loupe).",
+    ),
+    raw_only: bool = Query(
+        False, description="Show only raw/ungraded cards (house = loupe)."
+    ),
+    watchlist: bool = Query(
+        False, description="Show only cards on the user's watchlist."
+    ),
+    collection_id: uuid.UUID | None = Query(
+        None,
+        description=(
+            "Scope to a single collection (omit for the whole vault). The "
+            "active collection scopes the dashboard, analytics, and statement "
+            "PDF identically."
+        ),
+    ),
     sort: str = Query(
         "recent",
         description=(
             "Result ordering. One of: `recent` (default), `oldest`, "
-            "`value_desc`, `value_asc`, `grade_desc`, `grade_asc`."
+            "`value_desc`, `value_asc`, `grade_desc`, `grade_asc`, "
+            "`name_asc`, `name_desc`, `number_asc`, `number_desc`."
         ),
     ),
 ) -> list[GradedCardRead]:
@@ -116,6 +135,10 @@ async def list_mine(
         min_value=min_value,
         max_value=max_value,
         tags=tags,
+        graded_only=graded_only,
+        raw_only=raw_only,
+        watchlist=watchlist,
+        collection_id=collection_id,
         sort=sort,
     )
 
@@ -151,9 +174,11 @@ async def create(
     ),
 )
 async def get_summary(
-    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+    collection_id: uuid.UUID | None = Query(None),
 ) -> dict[str, Any]:
-    return await portfolio_service.summary(db, user)
+    return await portfolio_service.summary(db, user, collection_id)
 
 
 @router.get(
@@ -170,8 +195,9 @@ async def get_history(
     range: Literal["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"] = Query("1Y"),
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
+    collection_id: uuid.UUID | None = Query(None),
 ) -> dict[str, Any]:
-    result = await portfolio_service.history(db, user, range)
+    result = await portfolio_service.history(db, user, range, collection_id)
     return result.to_dict()
 
 
@@ -186,9 +212,11 @@ async def get_history(
     ),
 )
 async def get_sparklines(
-    user: User = Depends(require_user), db: AsyncSession = Depends(get_db)
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+    collection_id: uuid.UUID | None = Query(None),
 ) -> list[dict[str, Any]]:
-    return await portfolio_service.sparklines(db, user)
+    return await portfolio_service.sparklines(db, user, collection_id=collection_id)
 
 
 @router.get("/{grade_id}", response_model=GradedCardRead, summary="Get one graded card")
