@@ -24,12 +24,13 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
+from app.models.catalog_mirror import CatalogMirrorSet
 from app.models.enums import TcgEnum
 from app.models.fingerprint import Fingerprint
 from app.services.catalog import (
@@ -478,14 +479,30 @@ async def _get_or_create_set(
                 )
             except (TypeError, ValueError):
                 release_date = None
+    total_cards = (
+        (set_block or {}).get("total_cards") if isinstance(set_block, dict) else None
+    )
+    if total_cards is None and name:
+        # Upstream card payloads routinely omit the set total, which left
+        # CardSet.total_cards NULL — and set-progress then fell back to
+        # "indexed card count" (the ~10% artifact). Backfill the real published
+        # total from the catalog mirror at materialize time so it never recurs.
+        total_cards = (
+            await db.execute(
+                select(CatalogMirrorSet.total)
+                .where(
+                    func.lower(CatalogMirrorSet.name) == name.lower(),
+                    CatalogMirrorSet.total.isnot(None),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
     new_set = CardSet(
         tcg=tcg_enum,
         name=name or (code or "Unknown Set"),
         code=code,
         release_date=release_date,
-        total_cards=(set_block or {}).get("total_cards")
-        if isinstance(set_block, dict)
-        else None,
+        total_cards=total_cards,
     )
     db.add(new_set)
     await db.flush()
