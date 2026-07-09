@@ -121,8 +121,17 @@ async def list_progress(
         if cs is None:
             continue
         owned = len(owned_by_set[sid])
-        total = cs.total_cards or fallback_totals.get(sid, owned)
-        percent = (owned / total * 100.0) if total > 0 else 0.0
+        # Real set size: prefer the authoritative `total_cards`; otherwise the
+        # count of locally-indexed cards — but ONLY when it EXCEEDS what the
+        # user owns. For non-mirrored games (e.g. Magic) the only indexed cards
+        # are the user's own copies, so that count == owned; trusting it would
+        # fabricate a bogus 100% completion for a set whose real size we don't
+        # know. Skip such sets rather than lie about completion (better a
+        # missing rail than a wrong "100% complete").
+        total = cs.total_cards or fallback_totals.get(sid, 0)
+        if total <= 0 or (cs.total_cards is None and total <= owned):
+            continue
+        percent = owned / total * 100.0
 
         # Step 3: a small sample of missing cards in the set, so the UI
         # can render "you're missing Charizard, Pikachu, …" without an

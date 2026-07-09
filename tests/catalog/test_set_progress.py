@@ -103,3 +103,40 @@ async def test_progress_falls_back_to_indexed_card_count(
     assert row["owned"] == 1
     assert row["total"] == 3
     assert row["percent"] == pytest.approx(33.33)
+
+
+@pytest.mark.asyncio
+async def test_progress_skips_unknown_total_instead_of_faking_100(
+    client, auth_headers, db_session, created_user
+):
+    """A set with NO authoritative `total_cards` whose only indexed cards are
+    the user's own copies (the Magic case — the catalog isn't mirrored, so the
+    only local `cards` rows are what the user owns) must NOT be reported at
+    100% completion. We can't know the real set size, so it's skipped."""
+    cset = CardSet(tcg=TcgEnum.magic, name="Unknown Total Set", code="UTS")
+    db_session.add(cset)
+    await db_session.flush()
+    # Only the owned cards exist locally → fallback total == owned.
+    cards = [
+        Card(set_id=cset.id, tcg=TcgEnum.magic, name=f"M{i}", number=str(i))
+        for i in range(1, 3)
+    ]
+    db_session.add_all(cards)
+    await db_session.flush()
+    for c in cards:
+        db_session.add(
+            GradedCard(
+                user_id=created_user.id,
+                card_id=c.id,
+                grade=Decimal("9.0"),
+                house=GradeHouseEnum.loupe,
+                estimated_value_usd=Decimal("5.00"),
+            )
+        )
+    await db_session.commit()
+
+    body = assert_envelope_ok(
+        await client.get("/v1/sets/progress", headers=auth_headers)
+    )
+    # No bogus "100% complete" row — the unknown-total set is skipped.
+    assert body == []
