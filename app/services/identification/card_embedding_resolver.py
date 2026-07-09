@@ -58,9 +58,7 @@ async def resolve_by_embedding(
         LIMIT 1
     """
     try:
-        row = (
-            await db.execute(text(sql), {"vec": literal, "tcg": tcg_hint})
-        ).first()
+        row = (await db.execute(text(sql), {"vec": literal, "tcg": tcg_hint})).first()
     except Exception as exc:  # pragma: no cover - infra-dependent
         logger.warning("embedding resolve failed (%s)", exc)
         return None
