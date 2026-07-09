@@ -70,6 +70,12 @@ logger = get_logger("services.identification")
 
 _T = TypeVar("_T")
 
+# Wall-clock ceiling for the whole upstream catalog-search phase of one
+# identify (Pass 1 precise + Pass 2 name searches combined). Each provider call
+# is separately capped, but on a genuine miss they stack; this keeps the total
+# bounded so identify never rides Cloud Run's 60s request timeout into a 504.
+_UPSTREAM_TOTAL_BUDGET_S = 9.0
+
 
 @dataclass(frozen=True, slots=True)
 class CandidateOut:
@@ -536,41 +542,60 @@ class CardIdentifier:
                 if key and key not in seen:
                     seen[key] = result
 
-        # Pass 1 — field-aware precise lookup. When OCR gave us a collector
-        # number, pin it so the exact printing surfaces even if a name-only
-        # search would bury it under promos (e.g. Base Set Pikachu #58 never
-        # appears in the top 10 of a plain "Pikachu" search). One upstream
-        # call; degrades to [] on failure so we still keep the fuzzy hits.
-        if parsed.card_number:
-            precise = await self._catalog_lookup(
-                "precise",
-                card_search_service.search_cards_precise(
-                    tcg=tcg,
-                    name=titles[0],
-                    number=parsed.card_number,
-                    set_code=parsed.set_code,
-                    limit=10,
-                ),
-                [],
-            )
-            _merge(precise)
+        # Everything below hits the network. Each call is already capped at
+        # PER_PROVIDER_TIMEOUT, but on a genuine miss they STACK — a precise
+        # pass plus a name search (x2 retry) for each of up to 3 titles can
+        # ride 30s+ under a slow upstream, which is exactly how identify used
+        # to blow past Cloud Run's 60s request ceiling and 504. Cap the whole
+        # upstream phase with one wall-clock budget: on expiry we return
+        # whatever matched so far (usually nothing → a fast, clean no-match)
+        # instead of hanging the scan.
+        try:
+            async with asyncio.timeout(_UPSTREAM_TOTAL_BUDGET_S):
+                # Pass 1 — field-aware precise lookup. When OCR gave us a
+                # collector number, pin it so the exact printing surfaces even
+                # if a name-only search would bury it under promos (e.g. Base
+                # Set Pikachu #58 never appears in the top 10 of a plain
+                # "Pikachu" search). One upstream call; degrades to [] on
+                # failure so we still keep the fuzzy hits.
+                if parsed.card_number:
+                    precise = await self._catalog_lookup(
+                        "precise",
+                        card_search_service.search_cards_precise(
+                            tcg=tcg,
+                            name=titles[0],
+                            number=parsed.card_number,
+                            set_code=parsed.set_code,
+                            limit=10,
+                        ),
+                        [],
+                    )
+                    _merge(precise)
 
-        # Pass 2 — name-only fuzzy search for carousel breadth. Try the top
-        # title; only fall through to runner-ups if nothing has matched yet.
-        # Retry an empty response ONCE, but only for pure name searches
-        # (no collector number): the upstream intermittently returns an
-        # empty-but-successful page for a valid name (a documented flake —
-        # see the public-browse retry-on-empty). When we have a number we've
-        # already run a precise lookup, so a second name search would just
-        # double latency on a genuine miss.
-        retry_empty = not parsed.card_number
-        for title in titles:
-            body = await self._search_name_once(title, tcg)
-            if retry_empty and not body.get("results"):
-                body = await self._search_name_once(title, tcg)
-            _merge(body.get("results", []))
-            if seen:
-                break  # don't blow upstream budget on backups when we found hits
+                # Pass 2 — name-only fuzzy search for carousel breadth. Try the
+                # top title; only fall through to runner-ups if nothing has
+                # matched yet. Retry an empty response ONCE, but only for pure
+                # name searches (no collector number): the upstream
+                # intermittently returns an empty-but-successful page for a
+                # valid name (a documented flake — see the public-browse
+                # retry-on-empty). When we have a number we've already run a
+                # precise lookup, so a second name search would just double
+                # latency on a genuine miss.
+                retry_empty = not parsed.card_number
+                for title in titles:
+                    body = await self._search_name_once(title, tcg)
+                    if retry_empty and not body.get("results"):
+                        body = await self._search_name_once(title, tcg)
+                    _merge(body.get("results", []))
+                    if seen:
+                        break  # found hits — don't spend budget on backups
+        except TimeoutError:
+            logger.info(
+                "identify upstream search hit the %.1fs total budget; "
+                "returning %d partial hit(s)",
+                _UPSTREAM_TOTAL_BUDGET_S,
+                len(seen),
+            )
         return list(seen.values())
 
     async def _search_name_once(self, title: str, tcg: str) -> dict[str, Any]:
