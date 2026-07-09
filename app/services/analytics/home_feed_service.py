@@ -15,6 +15,7 @@ and is already cached aggressively at the edge.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
+from app.services.collection import collection_service
 from app.services.collection.portfolio_service import _extract_price_history, _value_on
 
 
@@ -58,22 +60,26 @@ async def top_movers(
     user: User,
     enrich_limit: int = 12,
     limit: int = 5,
+    collection_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
     """Top |change_pct_1y| movers across the user's distinct owned cards.
 
     ``enrich_limit`` caps how many distinct cards we score per request
     (cheap upper bound on price_history extraction); ``limit`` caps the
-    rows returned to the client.
+    rows returned to the client. ``collection_id`` scopes the movers to a
+    single collection via the same ``holdings_scope`` seam the dashboard uses.
     """
-    rows = (
-        await db.execute(
-            select(GradedCard, Card, CardSet)
-            .outerjoin(Card, Card.id == GradedCard.card_id)
-            .outerjoin(CardSet, CardSet.id == Card.set_id)
-            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
-            .order_by(GradedCard.graded_at.desc().nulls_last())
-        )
-    ).all()
+    scope = collection_service.holdings_scope(collection_id, user)
+    stmt = (
+        select(GradedCard, Card, CardSet)
+        .outerjoin(Card, Card.id == GradedCard.card_id)
+        .outerjoin(CardSet, CardSet.id == Card.set_id)
+        .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+        .order_by(GradedCard.graded_at.desc().nulls_last())
+    )
+    if scope is not None:
+        stmt = stmt.where(scope)
+    rows = (await db.execute(stmt)).all()
 
     seen: set[str] = set()
     scored: list[dict[str, Any]] = []
@@ -116,18 +122,21 @@ async def recent_scans(
     db: AsyncSession,
     user: User,
     limit: int = 6,
+    collection_id: uuid.UUID | None = None,
 ) -> list[dict[str, Any]]:
-    """Most recently graded cards in scan-time order."""
-    rows = (
-        await db.execute(
-            select(GradedCard, Card, CardSet)
-            .outerjoin(Card, Card.id == GradedCard.card_id)
-            .outerjoin(CardSet, CardSet.id == Card.set_id)
-            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
-            .order_by(GradedCard.graded_at.desc().nulls_last(), GradedCard.id.desc())
-            .limit(limit)
-        )
-    ).all()
+    """Most recently graded cards in scan-time order (optionally scoped)."""
+    scope = collection_service.holdings_scope(collection_id, user)
+    stmt = (
+        select(GradedCard, Card, CardSet)
+        .outerjoin(Card, Card.id == GradedCard.card_id)
+        .outerjoin(CardSet, CardSet.id == Card.set_id)
+        .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+        .order_by(GradedCard.graded_at.desc().nulls_last(), GradedCard.id.desc())
+        .limit(limit)
+    )
+    if scope is not None:
+        stmt = stmt.where(scope)
+    rows = (await db.execute(stmt)).all()
     out: list[dict[str, Any]] = []
     for g, c, s in rows:
         out.append(
@@ -161,9 +170,14 @@ async def build_feed(
     *,
     top_movers_limit: int = 5,
     recent_scans_limit: int = 6,
+    collection_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
-    movers = await top_movers(db, user, limit=top_movers_limit)
-    recent = await recent_scans(db, user, limit=recent_scans_limit)
+    movers = await top_movers(
+        db, user, limit=top_movers_limit, collection_id=collection_id
+    )
+    recent = await recent_scans(
+        db, user, limit=recent_scans_limit, collection_id=collection_id
+    )
     return {"topMovers": movers, "recentScans": recent}
 
 
