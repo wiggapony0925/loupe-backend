@@ -9,7 +9,7 @@ copy, and filters, but the cards still come from our own cached data.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -39,3 +39,30 @@ class CarouselResponse(BaseModel):
     game: str
     source: Literal["ai", "curated"]
     carousels: list[CarouselRecipe]
+
+
+class ResolvedRail(BaseModel):
+    """A carousel *already resolved into cards* server-side.
+
+    Unlike ``CarouselRecipe`` (a filter definition the client must compile),
+    this carries the final title/subtitle (``{label}`` already interpolated) and
+    the actual card dicts — so web and mobile render the SAME rail with zero
+    client-side filtering. ``cards`` are the wire card shape emitted by the
+    shelf/browse services (``pricing_summary``, ``images``, etc.).
+    """
+
+    id: str
+    title: str
+    subtitle: str
+    #: "cards" = a priced discovery rail; "catalog" = a browse-the-catalog rail.
+    kind: Literal["cards", "catalog"] = "cards"
+    cards: list[dict[str, Any]]
+
+
+class ResolvedCarousels(BaseModel):
+    """The ordered, ready-to-render rails for a game — the single source of
+    truth both clients render. Empty rails are already dropped server-side."""
+
+    game: str
+    source: Literal["ai", "curated"]
+    rails: list[ResolvedRail]

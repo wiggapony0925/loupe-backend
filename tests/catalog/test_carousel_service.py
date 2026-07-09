@@ -7,8 +7,14 @@ import asyncio
 import pytest
 
 from app.platform.redis_client import close_redis
+from app.schemas.carousel import CarouselRecipe, CarouselResponse
 from app.services.catalog import carousel_service
-from app.services.catalog.carousel_service import _coerce
+from app.services.catalog.carousel_service import _apply_lens, _coerce
+
+
+def _card(name: str, price: float | None, rarity: str | None = None) -> dict:
+    ps = None if price is None else {"market": {"amount": price, "currency": "USD"}}
+    return {"id": name, "name": name, "rarity": rarity, "pricing_summary": ps}
 
 
 async def _reset() -> None:
@@ -83,6 +89,75 @@ async def test_result_is_cached(monkeypatch) -> None:
     second = await carousel_service.get_carousels("magic")
     assert second.source == first.source == "curated"
     assert second.game == "magic"
+
+
+def test_apply_lens_filters_and_sorts() -> None:
+    cards = [_card("a", 300), _card("b", 100), _card("c", None), _card("d", 5)]
+    # price band ≥ 250, drops priceless + cheap
+    out = _apply_lens(
+        cards, CarouselRecipe(id="g", title="G", subtitle="s", priceMin=250)
+    )
+    assert [c["id"] for c in out] == ["a"]
+    # cheapest-first with a cap
+    out = _apply_lens(
+        cards,
+        CarouselRecipe(id="s", title="S", subtitle="s", priceMax=150, sort="price_asc"),
+    )
+    assert [c["id"] for c in out] == ["d", "b"]
+
+
+def test_apply_lens_rarity_pattern() -> None:
+    cards = [_card("a", 10, "Secret Rare"), _card("b", 10, "Common"), _card("c", 10)]
+    out = _apply_lens(
+        cards,
+        CarouselRecipe(id="r", title="R", subtitle="s", rarityPattern="secret|rainbow"),
+    )
+    assert [c["id"] for c in out] == ["a"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_carousels_builds_and_drops_thin_rails(monkeypatch) -> None:
+    # The resolver runs recipes against the shelf/catalog server-side, keeps
+    # rails with ≥4 cards, drops thin ones, interpolates {label}, and appends an
+    # explore rail. Mock the data sources so it's deterministic + offline.
+    async def fake_get_carousels(game: str) -> CarouselResponse:
+        return CarouselResponse(
+            game=game,
+            source="curated",
+            carousels=[
+                # populated: 5 cards ≥ $150
+                CarouselRecipe(
+                    id="premium", title="Premium {label}", subtitle="s", priceMin=150
+                ),
+                # thin: nothing ≤ $5 → dropped
+                CarouselRecipe(id="steals5", title="Steals", subtitle="s", priceMax=5),
+            ],
+        )
+
+    async def fake_shelf(game, sort, max_price=None, limit=48):
+        if sort == "trending":
+            return [_card(f"t{i}", 500) for i in range(6)]  # anchor shows
+        return [_card(f"v{i}", 200) for i in range(5)]  # all $200
+
+    async def fake_catalog(game, limit=24):
+        return [_card(f"cat{i}", None) for i in range(limit)]
+
+    monkeypatch.setattr(carousel_service, "get_carousels", fake_get_carousels)
+    monkeypatch.setattr(carousel_service, "_shelf_cards", fake_shelf)
+    monkeypatch.setattr(carousel_service, "_catalog_cards", fake_catalog)
+    monkeypatch.setattr(carousel_service, "_resolved_cache_get", lambda g: _none())
+    monkeypatch.setattr(carousel_service, "_resolved_cache_set", lambda r: _none())
+
+    resolved = await carousel_service.resolve_carousels("pokemon")
+    ids = [r.id for r in resolved.rails]
+    assert ids == ["trending", "premium", "explore"]  # steals5 dropped (thin)
+    premium = next(r for r in resolved.rails if r.id == "premium")
+    assert premium.title == "Premium Pokémon"  # {label} interpolated
+    assert len(premium.cards) == 5
+
+
+async def _none() -> None:
+    return None
 
 
 def test_coerce_drops_invalid_and_dedupes() -> None:

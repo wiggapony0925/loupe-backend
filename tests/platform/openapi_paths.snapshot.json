@@ -480,6 +480,9 @@
   "/v1/public/carousels": [
     "GET"
   ],
+  "/v1/public/carousels/resolved": [
+    "GET"
+  ],
   "/v1/public/games": [
     "GET"
   ],
