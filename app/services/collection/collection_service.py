@@ -196,6 +196,109 @@ async def remove_item(
     await db.commit()
 
 
+async def _owned_grade_ids(
+    db: AsyncSession, user: User, ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """O(1) lookup set of holdings the user actually owns (filters fakes)."""
+    if not ids:
+        return set()
+    rows = (
+        await db.execute(
+            select(GradedCard.id).where(
+                GradedCard.user_id == user.id,
+                GradedCard.deleted_at.is_(None),
+                GradedCard.id.in_(ids),
+            )
+        )
+    ).scalars().all()
+    return set(rows)
+
+
+async def bulk_add_items(
+    db: AsyncSession,
+    user: User,
+    collection_id: uuid.UUID,
+    graded_card_ids: list[uuid.UUID],
+) -> int:
+    """Add many holdings to a collection in one round-trip. Idempotent.
+
+    Complexity: O(n) with n = len(ids), capped by the schema (≤200).
+    """
+    await get_owned(db, user, collection_id)
+    # De-dupe while preserving order — O(n).
+    unique: list[uuid.UUID] = list(dict.fromkeys(graded_card_ids))
+    owned = await _owned_grade_ids(db, user, unique)
+    if not owned:
+        return 0
+    existing = set(
+        (
+            await db.execute(
+                select(CollectionItem.graded_card_id).where(
+                    CollectionItem.collection_id == collection_id,
+                    CollectionItem.graded_card_id.in_(owned),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    to_add = [gid for gid in unique if gid in owned and gid not in existing]
+    for gid in to_add:
+        db.add(CollectionItem(collection_id=collection_id, graded_card_id=gid))
+    if to_add:
+        await db.commit()
+    return len(to_add)
+
+
+async def bulk_remove_items(
+    db: AsyncSession,
+    user: User,
+    collection_id: uuid.UUID,
+    graded_card_ids: list[uuid.UUID],
+) -> int:
+    """Remove many holdings from a collection. Missing memberships are no-ops."""
+    await get_owned(db, user, collection_id)
+    unique = list(dict.fromkeys(graded_card_ids))
+    rows = list(
+        (
+            await db.execute(
+                select(CollectionItem).where(
+                    CollectionItem.collection_id == collection_id,
+                    CollectionItem.graded_card_id.in_(unique),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        await db.delete(row)
+    if rows:
+        await db.commit()
+    return len(rows)
+
+
+async def transfer_items(
+    db: AsyncSession,
+    user: User,
+    target_id: uuid.UUID,
+    source_id: uuid.UUID,
+    graded_card_ids: list[uuid.UUID],
+) -> tuple[int, int]:
+    """Move holdings from ``source`` → ``target`` (add then remove).
+
+    Returns ``(added, removed)``. Holdings themselves are never deleted —
+    only the categorization changes.
+    """
+    if target_id == source_id:
+        raise HTTPException(
+            status_code=400, detail="Cannot transfer a collection into itself"
+        )
+    added = await bulk_add_items(db, user, target_id, graded_card_ids)
+    removed = await bulk_remove_items(db, user, source_id, graded_card_ids)
+    return added, removed
+
+
 async def overview(db: AsyncSession, user: User) -> list[CollectionSummary]:
     """The portfolio-switcher list: a synthetic **All** (everything owned,
     undeletable) followed by each custom collection, all with a live card count

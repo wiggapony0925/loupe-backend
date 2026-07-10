@@ -384,6 +384,15 @@
     "GET",
     "POST"
   ],
+  "/v1/collections/{collection_id}/items/bulk": [
+    "POST"
+  ],
+  "/v1/collections/{collection_id}/items/bulk-remove": [
+    "POST"
+  ],
+  "/v1/collections/{collection_id}/items/transfer": [
+    "POST"
+  ],
   "/v1/collections/{collection_id}/items/{graded_card_id}": [
     "DELETE"
   ],
@@ -396,6 +405,9 @@
   "/v1/grades": [
     "GET",
     "POST"
+  ],
+  "/v1/grades/filters": [
+    "GET"
   ],
   "/v1/grades/history": [
     "GET"

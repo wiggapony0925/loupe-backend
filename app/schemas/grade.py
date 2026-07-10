@@ -7,7 +7,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.enums import GradeHouseEnum, RawConditionEnum
 
@@ -207,6 +207,22 @@ class GradedCardCreate(BaseModel):
     def _validate_notes(cls, v: str | None) -> str | None:
         return _strip_control_chars(v)
 
+    @model_validator(mode="after")
+    def _normalize_raw_vs_graded(self) -> GradedCardCreate:
+        """Enforce TCG semantics: RAW (``house=loupe``) has no slab grade;
+        slabbed houses have no raw condition. Single place so web + mobile
+        can't diverge."""
+        if self.house == GradeHouseEnum.loupe:
+            # Ungraded / raw — grade is a placeholder; condition is the signal.
+            object.__setattr__(self, "grade", Decimal("0"))
+            if self.condition is None:
+                object.__setattr__(self, "condition", RawConditionEnum.nm)
+            object.__setattr__(self, "subgrades", None)
+        else:
+            # Third-party slab — condition is meaningless.
+            object.__setattr__(self, "condition", None)
+        return self
+
 
 class GradedCardUpdate(BaseModel):
     """Body for ``PATCH /v1/grades/{id}``.
@@ -267,6 +283,19 @@ class GradedCardUpdate(BaseModel):
             if not (0.0 <= f <= 10.0):
                 raise ValueError(f"subgrade {key}={f} must be in [0, 10]")
         return v
+
+    @model_validator(mode="after")
+    def _normalize_raw_vs_graded(self) -> GradedCardUpdate:
+        """Same RAW ↔ slab rules as create, applied only to fields present."""
+        if self.house == GradeHouseEnum.loupe:
+            object.__setattr__(self, "grade", Decimal("0"))
+            if self.condition is None:
+                object.__setattr__(self, "condition", RawConditionEnum.nm)
+            object.__setattr__(self, "subgrades", None)
+        elif self.house is not None:
+            # Switching to a slab house clears condition.
+            object.__setattr__(self, "condition", None)
+        return self
 
 
 __all__ = ["GradedCardCreate", "GradedCardRead", "GradedCardUpdate"]

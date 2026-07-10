@@ -55,11 +55,10 @@ async def list_mine(
             "even on 5k-card vaults where client-side filtering would stall."
         ),
     ),
-    set_name: str | None = Query(
+    sets: list[str] | None = Query(
         None,
         alias="set",
-        max_length=120,
-        description="Filter to a single set by exact name (case-sensitive).",
+        description="Filter to sets by exact name (repeatable).",
     ),
     house: list[str] | None = Query(
         None,
@@ -127,7 +126,8 @@ async def list_mine(
         limit=limit,
         cursor=cursor,
         q=q,
-        set_name=set_name,
+        set_name=None,
+        sets=sets,
         house=None,
         houses=house,
         min_grade=min_grade,
@@ -217,6 +217,52 @@ async def get_sparklines(
     collection_id: uuid.UUID | None = Query(None),
 ) -> list[dict[str, Any]]:
     return await portfolio_service.sparklines(db, user, collection_id=collection_id)
+
+
+@router.get(
+    "/filters",
+    summary="Get metadata and option labels for all filtering options",
+)
+async def get_filter_metadata(
+    user: User = Depends(require_user),
+) -> dict[str, Any]:
+    return {
+        "sorts": [
+            { "key": "recent", "label": "Newest" },
+            { "key": "oldest", "label": "Oldest" },
+            { "key": "value_desc", "label": "Value ↓" },
+            { "key": "value_asc", "label": "Value ↑" },
+            { "key": "grade_desc", "label": "Grade ↓" },
+            { "key": "grade_asc", "label": "Grade ↑" },
+        ],
+        "houses": [
+            { "key": "loupe", "label": "Loupe" },
+            { "key": "raw", "label": "Raw" },
+            { "key": "psa", "label": "PSA" },
+            { "key": "bgs", "label": "BGS" },
+            { "key": "cgc", "label": "CGC" },
+            { "key": "sgc", "label": "SGC" },
+        ],
+        "priceBands": [
+            { "label": "Any", "min": None, "max": None },
+            { "label": "< $25", "min": None, "max": 25 },
+            { "label": "$25–100", "min": 25, "max": 100 },
+            { "label": "$100–500", "min": 100, "max": 500 },
+            { "label": "$500+", "min": 500, "max": None },
+        ],
+        "minGrades": [1, 7, 8, 9, 9.5, 10],
+        "maxGrades": [10, 9.5, 9, 8],
+        "tcgs": [
+            { "key": "all", "label": "All" },
+            { "key": "pokemon", "label": "Pokémon" },
+            { "key": "magic", "label": "Magic" },
+            { "key": "yugioh", "label": "Yu-Gi-Oh!" },
+            { "key": "onepiece", "label": "One Piece" },
+            { "key": "digimon", "label": "Digimon" },
+            { "key": "lorcana", "label": "Lorcana" },
+            { "key": "sports", "label": "Sports" },
+        ],
+    }
 
 
 @router.get("/{grade_id}", response_model=GradedCardRead, summary="Get one graded card")

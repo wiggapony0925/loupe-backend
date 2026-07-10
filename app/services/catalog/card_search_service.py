@@ -2466,6 +2466,78 @@ def _onepiece_sets_from_catalog(
     return out
 
 
+async def _resolve_set_image(tcg: str, set_name: str, set_code: str | None = None) -> str | None:
+    """Resolve set images using official packaging patterns or TCGplayer groups."""
+    if tcg == "onepiece":
+        sc = str(set_code or "").split(":")[-1].upper() if set_code else ""
+        if not sc and set_name:
+            m = re.search(r"OP-?\d+", set_name, re.I)
+            if m:
+                sc = m.group(0).replace("-", "").upper()
+        if sc.startswith("OP") and len(sc) == 4:
+            return f"https://en.onepiece-cardgame.com/images/products/booster/{sc.lower()}/pack.png"
+        elif sc.startswith("EB") and len(sc) == 4:
+            return f"https://en.onepiece-cardgame.com/images/products/extra/{sc.lower()}/pack.png"
+        elif sc.startswith("ST") and len(sc) == 4:
+            return f"https://en.onepiece-cardgame.com/images/products/starter/{sc.lower()}/pack.png"
+
+    if tcg == "digimon":
+        sc = str(set_code or "").split(":")[-1].upper() if set_code else ""
+        if not sc and set_name:
+            m = re.search(r"BT-?\d+|EX-?\d+", set_name, re.I)
+            if m:
+                sc = m.group(0).replace("-", "").upper()
+        if (sc.startswith("BT") or sc.startswith("EX")) and len(sc) == 4:
+            if sc in ("BT01", "BT02", "BT03"):
+                return "https://world.digimoncard.com/images/products/booster/bt01-03/pack.png"
+            return f"https://world.digimoncard.com/images/products/booster/{sc.lower()}/pack.png"
+
+    category_map = {
+        "magic": 1,
+        "yugioh": 2,
+        "pokemon": 3,
+        "onepiece": 94,
+        "digimon": 88,
+    }
+    cat = category_map.get(tcg)
+    if not cat:
+        return None
+
+    try:
+        from app.services.catalog import sealed_image_resolver
+        from app.models.enums import SealedProductTypeEnum
+
+        async def _fetch():
+            await sealed_image_resolver._ensure_groups(cat)
+            gid = sealed_image_resolver._find_group(cat, set_name)
+            if gid is None:
+                return None
+            await sealed_image_resolver._ensure_products(cat, gid)
+            products = sealed_image_resolver._c.products.get((cat, gid), [])
+            for p_type in [
+                SealedProductTypeEnum.booster_box,
+                SealedProductTypeEnum.booster_pack,
+                SealedProductTypeEnum.etb,
+            ]:
+                match = sealed_image_resolver._pick_product(products, p_type)
+                if match and match.get("image"):
+                    return sealed_image_resolver._big(match["image"])
+            for p in products:
+                if p.get("image"):
+                    return sealed_image_resolver._big(p["image"])
+            return None
+
+        return await asyncio.wait_for(_fetch(), timeout=2.5)
+    except Exception:
+        return None
+
+
+async def _enrich_set_image(item: dict[str, Any]) -> None:
+    img = await _resolve_set_image(item["tcg"], item["name"], item.get("code"))
+    if img:
+        item["image_url"] = img
+
+
 async def list_sets(tcg: str) -> dict[str, Any]:
     """Live proxy of the upstream set lists."""
     tcg = (tcg or "all").lower()
@@ -2476,7 +2548,6 @@ async def list_sets(tcg: str) -> dict[str, Any]:
 
     try:
         if tcg == "pokemon":
-            # Mirror first — same payload shape as the live /sets endpoint.
             sets = await pokemon_mirror_service.list_pokemon_sets()
             if sets is None:
                 sets = await pokemon_tcg.list_sets()
@@ -2502,6 +2573,15 @@ async def list_sets(tcg: str) -> dict[str, Any]:
             sets = await scryfall.list_sets()
             items = [_scryfall_set(s) for s in sets]
             body = {"results": items, "total": len(items), "source": "scryfall"}
+
+        # Enrich sets with packaging image URLs in parallel (first 35 items)
+        tasks = []
+        for item in items[:35]:
+            if not item.get("image_url"):
+                tasks.append(_enrich_set_image(item))
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     except (httpx.HTTPError, CircuitOpenError) as exc:
         logger.warning("upstream list_sets failed (%s): %s", tcg, exc)
         return {

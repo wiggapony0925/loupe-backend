@@ -244,10 +244,14 @@ async def test_grades_list_contract(client, seeded_vault, vault_headers):
         "scan_job_id",
         "grade",
         "house",
+        "condition",
         "subgrades",
         "estimated_value_usd",
+        "purchase_price_usd",
+        "purchase_date",
         "fingerprint_hash",
         "notes",
+        "tags",
         "graded_at",
         "created_at",
         "updated_at",
@@ -268,6 +272,17 @@ async def test_grades_list_contract(client, seeded_vault, vault_headers):
         assert row["estimated_value_usd"] is None or isinstance(
             row["estimated_value_usd"], str
         )
+        assert row["purchase_price_usd"] is None or isinstance(
+            row["purchase_price_usd"], str
+        )
+        assert row["condition"] is None or row["condition"] in {
+            "nm",
+            "lp",
+            "mp",
+            "hp",
+            "dmg",
+        }
+        assert isinstance(row["tags"], list)
         assert row["house"] in {"psa", "cgc", "bgs", "sgc", "tag", "loupe"}
         assert row["card_name"] is not None
         assert row["card_image_url"] is not None

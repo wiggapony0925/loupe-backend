@@ -216,6 +216,32 @@ def auth_headers(created_user) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest_asyncio.fixture
+async def second_user(db_session):
+    """A distinct user for cross-tenant ownership tests."""
+    from app.models.user import User, UserSettings
+
+    user = User(
+        email=f"other+{uuid.uuid4().hex[:8]}@example.com",
+        display_name="Other",
+        apple_subject=f"apple-{uuid.uuid4().hex}",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(UserSettings(user_id=user.id))
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def second_user_headers(second_user) -> dict[str, str]:
+    from app.auth.jwt import issue_token
+
+    token, _ = issue_token(second_user.id, "access")
+    return {"Authorization": f"Bearer {token}"}
+
+
 # ----------------------------------------------------------------- helpers
 
 

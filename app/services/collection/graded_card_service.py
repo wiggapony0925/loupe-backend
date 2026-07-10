@@ -14,11 +14,12 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
+from app.models.enums import GradeHouseEnum, RawConditionEnum
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.models.watchlist import WatchlistItem
@@ -94,6 +95,7 @@ async def list_for_user(
     min_grade: float | None,
     sort: str,
     houses: list[str] | None = None,
+    sets: list[str] | None = None,
     max_grade: float | None = None,
     min_value: Decimal | None = None,
     max_value: Decimal | None = None,
@@ -123,7 +125,33 @@ async def list_for_user(
         else ([house.lower()] if house else [])
     )
     if house_slugs:
-        base_where.append(GradedCard.house.in_(house_slugs))
+        # Separate standard third-party/platform houses from custom virtual ones like "raw"
+        standard_houses = [h for h in house_slugs if h != "raw"]
+        preds = []
+        if standard_houses:
+            if "loupe" in standard_houses:
+                # Standard loupe graded: house == "loupe" and condition is None
+                others = [h for h in standard_houses if h != "loupe"]
+                if others:
+                    preds.append(
+                        or_(
+                            GradedCard.house.in_(others),
+                            and_(GradedCard.house == "loupe", GradedCard.condition.is_(None))
+                        )
+                    )
+                else:
+                    preds.append(and_(GradedCard.house == "loupe", GradedCard.condition.is_(None)))
+            else:
+                preds.append(GradedCard.house.in_(standard_houses))
+        
+        if "raw" in house_slugs:
+            preds.append(and_(GradedCard.house == "loupe", GradedCard.condition.is_not(None)))
+            
+        if len(preds) > 1:
+            base_where.append(or_(*preds))
+        elif len(preds) == 1:
+            base_where.append(preds[0])
+
     # Graded vs raw: "loupe" is our placeholder house for a raw/ungraded copy,
     # so slabbed cards are simply house != loupe (see GradedCard.is_graded).
     if graded_only:
@@ -157,6 +185,8 @@ async def list_for_user(
     join_where = list(base_where)
     if set_name is not None:
         join_where.append(CardSet.name == set_name)
+    if sets:
+        join_where.append(CardSet.name.in_(sets))
     if q:
         like = f"%{q.lower()}%"
         join_where.append(
@@ -297,15 +327,32 @@ async def update(
     payload: GradedCardUpdate,
 ) -> GradedCard:
     row = await _load_owned(db, user, grade_id)
-    if payload.grade is not None:
-        row.grade = payload.grade
+    fields = payload.model_fields_set
+
+    # House switch owns RAW ↔ slab normalization. The schema validator rewrites
+    # grade/condition/subgrades, but those derived fields are often NOT in
+    # ``model_fields_set`` (client only sent ``house``) — so we apply them
+    # whenever ``house`` is present rather than only when explicitly set.
     if payload.house is not None:
         row.house = payload.house
-    fields = payload.model_fields_set
-    if "condition" in fields:
-        row.condition = payload.condition
-    if "subgrades" in fields:
-        row.subgrades = payload.subgrades
+        if payload.house == GradeHouseEnum.loupe:
+            row.grade = payload.grade if payload.grade is not None else Decimal("0")
+            row.condition = payload.condition or RawConditionEnum.nm
+            row.subgrades = None
+        else:
+            if payload.grade is not None:
+                row.grade = payload.grade
+            row.condition = None
+            if "subgrades" in fields:
+                row.subgrades = payload.subgrades
+    else:
+        if payload.grade is not None:
+            row.grade = payload.grade
+        if "condition" in fields:
+            row.condition = payload.condition
+        if "subgrades" in fields:
+            row.subgrades = payload.subgrades
+
     if "notes" in fields:
         row.notes = payload.notes
     if "estimated_value_usd" in fields:

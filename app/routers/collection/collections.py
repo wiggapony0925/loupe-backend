@@ -15,6 +15,9 @@ from app.models.user import User
 from app.schemas.collection import (
     CollectionCreate,
     CollectionItemAdd,
+    CollectionItemsBulk,
+    CollectionItemsBulkResult,
+    CollectionItemsTransfer,
     CollectionMerge,
     CollectionRead,
     CollectionSummary,
@@ -112,6 +115,57 @@ async def add_item(
 ) -> dict[str, str]:
     await collection_service.add_item(db, user, collection_id, payload.graded_card_id)
     return {"status": "ok"}
+
+
+@router.post(
+    "/{collection_id}/items/bulk",
+    response_model=CollectionItemsBulkResult,
+    summary="Add many holdings to a collection (idempotent)",
+)
+async def bulk_add_items(
+    collection_id: uuid.UUID,
+    payload: CollectionItemsBulk,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> CollectionItemsBulkResult:
+    added = await collection_service.bulk_add_items(
+        db, user, collection_id, payload.graded_card_ids
+    )
+    return CollectionItemsBulkResult(added=added)
+
+
+@router.post(
+    "/{collection_id}/items/bulk-remove",
+    response_model=CollectionItemsBulkResult,
+    summary="Remove many holdings from a collection",
+)
+async def bulk_remove_items(
+    collection_id: uuid.UUID,
+    payload: CollectionItemsBulk,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> CollectionItemsBulkResult:
+    removed = await collection_service.bulk_remove_items(
+        db, user, collection_id, payload.graded_card_ids
+    )
+    return CollectionItemsBulkResult(removed=removed)
+
+
+@router.post(
+    "/{collection_id}/items/transfer",
+    response_model=CollectionItemsBulkResult,
+    summary="Move holdings from another collection into this one",
+)
+async def transfer_items(
+    collection_id: uuid.UUID,
+    payload: CollectionItemsTransfer,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> CollectionItemsBulkResult:
+    added, removed = await collection_service.transfer_items(
+        db, user, collection_id, payload.source_id, payload.graded_card_ids
+    )
+    return CollectionItemsBulkResult(added=added, removed=removed)
 
 
 @router.delete(
