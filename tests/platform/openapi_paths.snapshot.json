@@ -406,6 +406,9 @@
     "GET",
     "POST"
   ],
+  "/v1/grades/count": [
+    "GET"
+  ],
   "/v1/grades/filters": [
     "GET"
   ],

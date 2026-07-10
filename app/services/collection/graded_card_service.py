@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import Card, CardSet
@@ -83,6 +83,118 @@ SORT_OPTIONS: dict[str, Any] = {
 }
 
 
+def _vault_filter_clauses(
+    user: User,
+    *,
+    q: str | None,
+    set_name: str | None,
+    house: str | None,
+    houses: list[str] | None,
+    sets: list[str] | None,
+    min_grade: float | None,
+    max_grade: float | None,
+    min_value: Decimal | None,
+    max_value: Decimal | None,
+    tags: list[str] | None,
+    graded_only: bool,
+    raw_only: bool,
+    watchlist: bool,
+    collection_id: uuid.UUID | None,
+) -> tuple[list[Any], list[Any]]:
+    """Shared WHERE stacks for list/count queries."""
+    base_where: list[Any] = [
+        GradedCard.user_id == user.id,
+        GradedCard.deleted_at.is_(None),
+    ]
+    house_slugs = (
+        [h.lower() for h in houses if h]
+        if houses
+        else ([house.lower()] if house else [])
+    )
+    if house_slugs:
+        standard_houses = [h for h in house_slugs if h != "raw"]
+        preds: list[Any] = []
+        if standard_houses:
+            if "loupe" in standard_houses:
+                others = [h for h in standard_houses if h != "loupe"]
+                if others:
+                    preds.append(
+                        or_(
+                            GradedCard.house.in_(others),
+                            and_(GradedCard.house == "loupe", GradedCard.condition.is_(None)),
+                        )
+                    )
+                else:
+                    preds.append(
+                        and_(GradedCard.house == "loupe", GradedCard.condition.is_(None))
+                    )
+            else:
+                preds.append(GradedCard.house.in_(standard_houses))
+
+        if "raw" in house_slugs:
+            preds.append(
+                and_(GradedCard.house == "loupe", GradedCard.condition.is_not(None))
+            )
+
+        if len(preds) > 1:
+            base_where.append(or_(*preds))
+        elif len(preds) == 1:
+            base_where.append(preds[0])
+
+    if graded_only:
+        base_where.append(GradedCard.house != "loupe")
+    if raw_only:
+        base_where.append(GradedCard.house == "loupe")
+    if watchlist:
+        base_where.append(
+            GradedCard.card_id.in_(
+                select(WatchlistItem.card_id).where(WatchlistItem.user_id == user.id)
+            )
+        )
+    scope = collection_service.holdings_scope(collection_id, user)
+    if scope is not None:
+        base_where.append(scope)
+    if min_grade is not None:
+        base_where.append(GradedCard.grade >= min_grade)
+    if max_grade is not None:
+        base_where.append(GradedCard.grade <= max_grade)
+    if min_value is not None:
+        base_where.append(GradedCard.estimated_value_usd >= min_value)
+    if max_value is not None:
+        base_where.append(GradedCard.estimated_value_usd <= max_value)
+
+    join_where = list(base_where)
+    if set_name is not None:
+        join_where.append(CardSet.name == set_name)
+    if sets:
+        join_where.append(CardSet.name.in_(sets))
+    if q:
+        like = f"%{q.lower()}%"
+        join_where.append(
+            or_(
+                func.lower(Card.name).like(like),
+                func.lower(CardSet.name).like(like),
+            )
+        )
+
+    wanted_tags = {t.lower() for t in (tags or []) if t}
+    if wanted_tags:
+        # JSON array containment in SQL — avoids loading the whole vault into
+        # Python when a tag filter is active.
+        join_where.append(
+            or_(
+                *[
+                    func.lower(
+                        cast(func.coalesce(GradedCard.tags, "[]"), String)
+                    ).contains(f'"{tag}"')
+                    for tag in wanted_tags
+                ]
+            )
+        )
+
+    return base_where, join_where
+
+
 async def list_for_user(
     db: AsyncSession,
     user: User,
@@ -111,90 +223,23 @@ async def list_for_user(
             detail=f"sort must be one of {sorted(SORT_OPTIONS)}",
         )
 
-    # Base predicate — every filter below stacks on top so it applies
-    # uniformly to both the row query and the copy-count rollup.
-    base_where = [
-        GradedCard.user_id == user.id,
-        GradedCard.deleted_at.is_(None),
-    ]
-    # Grading-house filter: `houses` (multi-select) supersedes the legacy
-    # singular `house`.
-    house_slugs = (
-        [h.lower() for h in houses if h]
-        if houses
-        else ([house.lower()] if house else [])
+    base_where, join_where = _vault_filter_clauses(
+        user,
+        q=q,
+        set_name=set_name,
+        house=house,
+        houses=houses,
+        sets=sets,
+        min_grade=min_grade,
+        max_grade=max_grade,
+        min_value=min_value,
+        max_value=max_value,
+        tags=tags,
+        graded_only=graded_only,
+        raw_only=raw_only,
+        watchlist=watchlist,
+        collection_id=collection_id,
     )
-    if house_slugs:
-        # Separate standard third-party/platform houses from custom virtual ones like "raw"
-        standard_houses = [h for h in house_slugs if h != "raw"]
-        preds = []
-        if standard_houses:
-            if "loupe" in standard_houses:
-                # Standard loupe graded: house == "loupe" and condition is None
-                others = [h for h in standard_houses if h != "loupe"]
-                if others:
-                    preds.append(
-                        or_(
-                            GradedCard.house.in_(others),
-                            and_(GradedCard.house == "loupe", GradedCard.condition.is_(None))
-                        )
-                    )
-                else:
-                    preds.append(and_(GradedCard.house == "loupe", GradedCard.condition.is_(None)))
-            else:
-                preds.append(GradedCard.house.in_(standard_houses))
-        
-        if "raw" in house_slugs:
-            preds.append(and_(GradedCard.house == "loupe", GradedCard.condition.is_not(None)))
-            
-        if len(preds) > 1:
-            base_where.append(or_(*preds))
-        elif len(preds) == 1:
-            base_where.append(preds[0])
-
-    # Graded vs raw: "loupe" is our placeholder house for a raw/ungraded copy,
-    # so slabbed cards are simply house != loupe (see GradedCard.is_graded).
-    if graded_only:
-        base_where.append(GradedCard.house != "loupe")
-    if raw_only:
-        base_where.append(GradedCard.house == "loupe")
-    # Watchlist-only: restrict to cards the user has starred.
-    if watchlist:
-        base_where.append(
-            GradedCard.card_id.in_(
-                select(WatchlistItem.card_id).where(WatchlistItem.user_id == user.id)
-            )
-        )
-    # Active-collection scope — the same seam the dashboard/analytics/PDF use.
-    scope = collection_service.holdings_scope(collection_id, user)
-    if scope is not None:
-        base_where.append(scope)
-    if min_grade is not None:
-        base_where.append(GradedCard.grade >= min_grade)
-    if max_grade is not None:
-        base_where.append(GradedCard.grade <= max_grade)
-    # Value range filters over the grade-aware estimate; unpriced rows (NULL)
-    # never satisfy a value bound, which is the intuitive behaviour.
-    if min_value is not None:
-        base_where.append(GradedCard.estimated_value_usd >= min_value)
-    if max_value is not None:
-        base_where.append(GradedCard.estimated_value_usd <= max_value)
-
-    # Set & free-text filters touch joined Card/CardSet columns so they
-    # have to be applied to the SELECT, not the copy-count rollup.
-    join_where = list(base_where)
-    if set_name is not None:
-        join_where.append(CardSet.name == set_name)
-    if sets:
-        join_where.append(CardSet.name.in_(sets))
-    if q:
-        like = f"%{q.lower()}%"
-        join_where.append(
-            or_(
-                func.lower(Card.name).like(like),
-                func.lower(CardSet.name).like(like),
-            )
-        )
 
     order_factory, tie_factory = SORT_OPTIONS[sort]
     base_query = (
@@ -205,38 +250,74 @@ async def list_for_user(
         .order_by(order_factory(), tie_factory())
     )
 
-    # Tag filter (match ANY selected tag, case-insensitive). JSON-array
-    # containment isn't portable across Postgres (JSONB) and the SQLite test
-    # DB, so when a tag filter is active we fetch the ordered candidate set and
-    # filter + paginate in Python. Vaults are bounded, so this stays cheap; the
-    # common no-tags path keeps pure-SQL offset/limit.
-    wanted_tags = {t.lower() for t in (tags or []) if t}
-    rows: list[Any]
-    if wanted_tags:
-        candidates = (await db.execute(base_query)).all()
-        matched = [
-            (g, c, s)
-            for (g, c, s) in candidates
-            if wanted_tags & {str(t).lower() for t in (g.tags or [])}
-        ]
-        rows = matched[cursor : cursor + limit]
-    else:
-        rows = list((await db.execute(base_query.offset(cursor).limit(limit))).all())
-    # Per-card copy counts. Scope to *base* filters only — a sibling
-    # copy hidden by the search/set filter should still contribute to
-    # the "x3" badge for total ownership.
-    count_rows = (
-        await db.execute(
-            select(GradedCard.card_id, func.count(GradedCard.id))
-            .where(*base_where)
-            .group_by(GradedCard.card_id)
-        )
-    ).all()
-    copies_by_card = {cid: int(n) for (cid, n) in count_rows}
+    rows = list((await db.execute(base_query.offset(cursor).limit(limit))).all())
+
+    # Copy counts only for cards on this page — not the whole vault.
+    page_card_ids = {g.card_id for (g, _c, _s) in rows}
+    copies_by_card: dict[uuid.UUID, int] = {}
+    if page_card_ids:
+        count_rows = (
+            await db.execute(
+                select(GradedCard.card_id, func.count(GradedCard.id))
+                .where(*base_where, GradedCard.card_id.in_(page_card_ids))
+                .group_by(GradedCard.card_id)
+            )
+        ).all()
+        copies_by_card = {cid: int(n) for (cid, n) in count_rows}
+
     return [
         to_read(g, c, s, copies_owned=copies_by_card.get(g.card_id, 1))
         for (g, c, s) in rows
     ]
+
+
+async def count_for_user(
+    db: AsyncSession,
+    user: User,
+    *,
+    q: str | None,
+    set_name: str | None,
+    house: str | None,
+    houses: list[str] | None = None,
+    sets: list[str] | None = None,
+    min_grade: float | None = None,
+    max_grade: float | None = None,
+    min_value: Decimal | None = None,
+    max_value: Decimal | None = None,
+    tags: list[str] | None = None,
+    graded_only: bool = False,
+    raw_only: bool = False,
+    watchlist: bool = False,
+    collection_id: uuid.UUID | None = None,
+) -> int:
+    """Fast filtered row count for vault filter UI (no row payload)."""
+    _, join_where = _vault_filter_clauses(
+        user,
+        q=q,
+        set_name=set_name,
+        house=house,
+        houses=houses,
+        sets=sets,
+        min_grade=min_grade,
+        max_grade=max_grade,
+        min_value=min_value,
+        max_value=max_value,
+        tags=tags,
+        graded_only=graded_only,
+        raw_only=raw_only,
+        watchlist=watchlist,
+        collection_id=collection_id,
+    )
+    total = (
+        await db.execute(
+            select(func.count())
+            .select_from(GradedCard)
+            .outerjoin(Card, Card.id == GradedCard.card_id)
+            .outerjoin(CardSet, CardSet.id == Card.set_id)
+            .where(*join_where)
+        )
+    ).scalar()
+    return int(total or 0)
 
 
 async def create(db: AsyncSession, user: User, payload: GradedCardCreate) -> GradedCard:
@@ -496,6 +577,7 @@ async def get_card_ownership(
 
 __all__ = [
     "SORT_OPTIONS",
+    "count_for_user",
     "create",
     "get_card_ownership",
     "get_one",

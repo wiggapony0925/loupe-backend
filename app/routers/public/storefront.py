@@ -151,7 +151,7 @@ async def public_search(
             }
         # Typeahead (small page_size) and filtered/price-sorted views work on
         # a ranked pool — filters and price sorts need the whole set in hand.
-        fetch_limit = 20 if page_size <= 12 else 60
+        fetch_limit = 20 if page_size <= 12 else 120
         body = await card_search_service.search_cards(q=q, tcg=tcg, limit=fetch_limit)
         cards = list(body.get("results") or [])
         source = body.get("source")

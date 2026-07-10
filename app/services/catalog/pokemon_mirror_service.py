@@ -30,6 +30,7 @@ from sqlalchemy import case, func, or_, select
 
 from app.integrations._http import pokemon_tcg
 from app.integrations._http._resilient import request_json
+from app.services.catalog.search_query import parse_search_query
 from app.utils.logger import get_logger
 
 logger = get_logger("services.pokemon_mirror")
@@ -758,26 +759,20 @@ async def search_mirror(
     page_size: int = 60,
     langs: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Substring search over the *tcg* mirror with real pagination.
+    """Substring / number / fuzzy search over the *tcg* mirror.
 
-    All name tokens must match (AND); when that yields nothing, degrade to
-    ANY-token (OR) like the live "relaxed" query. English printings sort first
-    (they carry USD prices), then newest. ``langs`` restricts to those ISO
-    languages (``None`` = no language filter). ``None`` return = mirror not
-    ready for this TCG (caller falls back to the live upstream).
+    Understands collector numbers (``001/34``, ``charizard 4/102``) and falls
+    back to prefix + relevance ranking when a typo yields zero substring hits
+    (``charzard`` → Charizard).
     """
     if not await mirror_ready(tcg):
         return None
     from app.models.catalog_mirror import CatalogMirrorCard
 
     C = CatalogMirrorCard
-    filters = _token_filters(C, q)
-    if not filters:
-        return {"payloads": [], "total": 0}
-
+    parsed = parse_search_query(q)
     lang_clause = [C.language.in_(langs)] if langs else []
     order = (
-        # English first when languages are mixed — keeps a USD app useful.
         case((C.language == "en", 0), else_=1),
         _null_last(C.release_date),
         C.release_date.desc(),
@@ -786,34 +781,101 @@ async def search_mirror(
         C.number_int,
     )
     maker = _sessionmaker()
-    async with maker() as session:
-        for clause in (
-            [C.tcg == tcg, *lang_clause, *filters],
-            [C.tcg == tcg, *lang_clause, or_(*filters)] if len(filters) > 1 else None,
-        ):
-            if clause is None:
-                continue
+
+    async def _fetch(where: list[Any]) -> dict[str, Any] | None:
+        async with maker() as session:
             total = (
                 await session.execute(
-                    select(func.count()).select_from(C).where(*clause)
+                    select(func.count()).select_from(C).where(*where)
                 )
             ).scalar_one()
             if not total:
-                continue
+                return None
             rows = (
                 await session.execute(
                     select(C.payload, C.set_id)
-                    .where(*clause)
+                    .where(*where)
                     .order_by(*order)
                     .offset((page - 1) * page_size)
                     .limit(page_size)
                 )
             ).all()
-            # Embedded-price refresh is a Pokémon-only concern (the dump ships
-            # priceless); Magic/YGO payloads already carry prices.
             if tcg == TCG:
                 maybe_refresh_set_prices([r[1] for r in rows])
             return {"payloads": [r[0] for r in rows], "total": int(total)}
+
+    base = [C.tcg == tcg, *lang_clause]
+
+    # Collector-number path — ``001/34``, ``58/102``, or ``charizard 4/102``.
+    if parsed.has_number:
+        number_preds: list[Any] = [C.bare_number == parsed.number_bare]
+        if parsed.number_raw:
+            number_preds.append(C.number.ilike(f"%{parsed.number_raw}%"))
+        number_clause: list[Any] = [*base, or_(*number_preds)]
+        if parsed.name_tokens:
+            number_clause.extend(C.name_lower.like(f"%{tok}%") for tok in parsed.name_tokens)
+        hit = await _fetch(number_clause)
+        if hit:
+            return hit
+        # Number-only — every printing with that index.
+        if not parsed.name_tokens:
+            hit = await _fetch([*base, C.bare_number == parsed.number_bare])
+            if hit:
+                return hit
+
+    filters = _token_filters(C, parsed.name_text or q)
+    if filters:
+        for clause in (
+            [*base, *filters],
+            [*base, or_(*filters)] if len(filters) > 1 else None,
+        ):
+            if clause is None:
+                continue
+            hit = await _fetch(clause)
+            if hit:
+                return hit
+
+    # Typo fallback — prefix slice + relevance rank (charzard → Charizard).
+    if parsed.name_tokens:
+        from app.services.catalog.card_search_service import relevance_score
+
+        fuzzy: list[Any] = []
+        for tok in parsed.name_tokens:
+            if len(tok) >= 4:
+                fuzzy.append(C.name_lower.like(f"{tok[:4]}%"))
+                fuzzy.append(C.name_lower.like(f"%{tok[:4]}%"))
+            elif len(tok) >= 3:
+                fuzzy.append(C.name_lower.like(f"%{tok}%"))
+        if fuzzy:
+            async with maker() as session:
+                rows = (
+                    await session.execute(
+                        select(C.payload, C.set_id, C.name)
+                        .where(*base, or_(*fuzzy))
+                        .limit(max(page_size * 8, 120))
+                    )
+                ).all()
+            if rows:
+                ranked = sorted(
+                    rows,
+                    key=lambda r: relevance_score(str(r[2] or ""), parsed.rank_text),
+                    reverse=True,
+                )
+                kept = [
+                    r
+                    for r in ranked
+                    if relevance_score(str(r[2] or ""), parsed.rank_text) >= 0.58
+                ]
+                if kept:
+                    start = (page - 1) * page_size
+                    page_rows = kept[start : start + page_size]
+                    if tcg == TCG:
+                        maybe_refresh_set_prices([r[1] for r in page_rows])
+                    return {
+                        "payloads": [r[0] for r in page_rows],
+                        "total": len(kept),
+                    }
+
     return {"payloads": [], "total": 0}
 
 

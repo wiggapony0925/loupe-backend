@@ -57,6 +57,12 @@ from app.schemas.unified_card import (
     UnifiedSet,
 )
 from app.services.catalog import game_registry, pokemon_mirror_service
+from app.services.catalog.search_query import (
+    parse_search_query,
+    pokemon_lucene_query,
+    pokemon_relaxed_query,
+    scryfall_query,
+)
 from app.utils.logger import get_logger
 from app.utils.time import utcnow
 
@@ -827,20 +833,47 @@ async def digimon_catalog() -> list[dict[str, Any]]:
 def _filter_catalog(
     cards: list[dict[str, Any]], q: str, limit: int
 ) -> list[dict[str, Any]]:
-    """Substring-match a cached catalog by name / number / set — instant and
-    free (no upstream call), and always available even if the upstream is down
-    or the monthly budget is spent."""
-    needle = q.strip().lower()
-    if not needle:
+    """Match a cached catalog by name, number, set — with typo tolerance."""
+    parsed = parse_search_query(q)
+    if not parsed.raw:
         return cards[:limit]
-    hits = [
-        c
-        for c in cards
-        if needle in (c.get("name") or "").lower()
-        or needle in str(c.get("number") or "").lower()
-        or needle in (c.get("set_name") or "").lower()
-    ]
-    return hits[:limit]
+
+    hits: list[dict[str, Any]] = []
+    for c in cards:
+        name = str(c.get("name") or "")
+        num = str(c.get("number") or "")
+        set_name = str(c.get("set_name") or "")
+        if parsed.has_number:
+            bare = _bare_number(num)
+            num_ok = bare == parsed.number_bare or (
+                parsed.number_raw and parsed.number_raw in num
+            )
+            if not num_ok:
+                continue
+        if parsed.name_tokens:
+            token_hit = all(
+                tok in name.lower()
+                or tok in num.lower()
+                or tok in set_name.lower()
+                or (len(tok) >= 4 and tok[:4] in name.lower())
+                for tok in parsed.name_tokens
+            )
+            fuzzy_ok = relevance_score(name, parsed.rank_text) >= 0.58
+            if not token_hit and not fuzzy_ok:
+                continue
+        elif not parsed.has_number:
+            blob = f"{name} {num} {set_name}".lower()
+            if parsed.raw.lower() not in blob and relevance_score(name, parsed.rank_text) < 0.58:
+                continue
+        hits.append(c)
+
+    if not hits:
+        hits = [
+            c
+            for c in cards
+            if relevance_score(str(c.get("name") or ""), parsed.rank_text) >= 0.55
+        ]
+    return _rank(hits, parsed.rank_text, limit)
 
 
 def _find_in_catalog(
@@ -909,29 +942,12 @@ _POKEMON_SAFE_RE = re.compile(r"[^A-Za-z0-9\- ]+")
 
 
 def _build_pokemon_query(q: str) -> str:
-    cleaned = _POKEMON_SAFE_RE.sub(" ", q).strip().lower()
-    if not cleaned:
-        return f'name:"{q}"'
-    tokens = [t for t in cleaned.split() if t]
-    if not tokens:
-        return f'name:"{q}"'
-    return " ".join(f"name:{tok}*" for tok in tokens)
+    return pokemon_lucene_query(parse_search_query(q))
 
 
 def _build_pokemon_relaxed_query(q: str) -> str | None:
-    """Forgiving fallback: OR of substring wildcards across tokens.
-
-    The strict query ANDs prefix wildcards, so "green ninja" →
-    ``name:green* name:ninja*`` matches nothing (no card has both words).
-    This relaxed form — ``name:*green* OR name:*ninja*`` — surfaces partial
-    and run-together matches (e.g. **Greninja**, "Green's …"), which the
-    relevance scorer then ranks. Returns ``None`` when there's nothing to
-    relax (single empty token)."""
-    cleaned = _POKEMON_SAFE_RE.sub(" ", q).strip().lower()
-    tokens = [t for t in cleaned.split() if len(t) >= 2]
-    if not tokens:
-        return None
-    return " OR ".join(f"name:*{tok}*" for tok in tokens)
+    """Forgiving fallback: OR of substring wildcards across tokens."""
+    return pokemon_relaxed_query(parse_search_query(q))
 
 
 # ------------------------------------------------------------- relevance rank
@@ -996,8 +1012,11 @@ def relevance_score(name: str, query: str) -> float:
 
 def _rank(items: list[dict[str, Any]], q: str, limit: int) -> list[dict[str, Any]]:
     """Sort by relevance to ``q`` (stable), drop dupes by id, cap to ``limit``."""
+    rank_q = parse_search_query(q).rank_text
     scored = sorted(
-        items, key=lambda c: relevance_score(str(c.get("name", "")), q), reverse=True
+        items,
+        key=lambda c: relevance_score(str(c.get("name", "")), rank_q),
+        reverse=True,
     )
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
@@ -1014,19 +1033,17 @@ def _rank(items: list[dict[str, Any]], q: str, limit: int) -> list[dict[str, Any
 
 
 async def _search_pokemon(q: str, limit: int) -> list[dict[str, Any]]:
-    # Mirror first — complete catalog, ~ms latency, immune to upstream blips.
-    # Pull a wide pool and let the shared relevance ranker pick the top N,
-    # matching the live path's rank-after-fetch behavior.
+    parsed = parse_search_query(q)
+    rank_q = parsed.rank_text
     mirror = await pokemon_mirror_service.search_pokemon(
         q, page=1, page_size=max(limit * 5, 60)
     )
-    if mirror is not None:
-        return _rank([_from_pokemon(p) for p in mirror["payloads"]], q, limit)
+    if mirror is not None and mirror.get("payloads"):
+        return _rank([_from_pokemon(p) for p in mirror["payloads"]], rank_q, limit)
     raw = await pokemon_tcg.search_cards(
-        _build_pokemon_query(q), page=1, page_size=limit
+        _build_pokemon_query(q), page=1, page_size=max(limit, 30)
     )
     items = [_from_pokemon(c) for c in (raw.get("data") or [])]
-    # Too few exact-ish hits → widen with the forgiving OR-substring query.
     if len(items) < _RELAX_MIN:
         relaxed = _build_pokemon_relaxed_query(q)
         if relaxed:
@@ -1037,7 +1054,26 @@ async def _search_pokemon(q: str, limit: int) -> list[dict[str, Any]]:
                 items += [_from_pokemon(c) for c in (raw2.get("data") or [])]
             except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
                 logger.info("relaxed pokemon search failed (%s): %s", q, exc)
-    return _rank(items, q, limit)
+    # Number-only upstream fallback — ``58/102`` with no name tokens.
+    if not items and parsed.has_number and not parsed.name_tokens:
+        try:
+            raw3 = await pokemon_tcg.search_cards(
+                f"number:{parsed.number_bare}", page=1, page_size=max(limit, 30)
+            )
+            items = [_from_pokemon(c) for c in (raw3.get("data") or [])]
+        except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
+            logger.info("number-only pokemon search failed (%s): %s", q, exc)
+    ranked = _rank(items, rank_q, limit)
+    if ranked:
+        return ranked
+    # Mirror fuzzy path may have returned empty payloads dict — retry mirror
+    # explicitly (search_mirror now handles typos).
+    mirror2 = await pokemon_mirror_service.search_pokemon(
+        q, page=1, page_size=max(limit * 5, 60)
+    )
+    if mirror2 and mirror2.get("payloads"):
+        return _rank([_from_pokemon(p) for p in mirror2["payloads"]], rank_q, limit)
+    return ranked
 
 
 def _bare_number(number: str | None) -> str | None:
@@ -1131,25 +1167,26 @@ async def search_cards_precise(
 def _build_scryfall_relaxed_query(q: str) -> str | None:
     """`name:green or name:ninja` — OR the tokens so a multi-word query that
     ANDs to nothing still surfaces partial name matches."""
-    cleaned = _POKEMON_SAFE_RE.sub(" ", q).strip().lower()
-    tokens = [t for t in cleaned.split() if len(t) >= 2]
+    parsed = parse_search_query(q)
+    tokens = [t for t in parsed.name_tokens if len(t) >= 2]
     if len(tokens) < 2:
         return None
     return " or ".join(f"name:{tok}" for tok in tokens)
 
 
 async def _search_scryfall(q: str, limit: int) -> list[dict[str, Any]]:
-    # Mirror first — complete local catalog, ~ms, immune to Scryfall latency
-    # and cold-start. Empty mirror ⇒ None ⇒ fall through to the live path.
+    parsed = parse_search_query(q)
+    scry_q = scryfall_query(parsed)
+    rank_q = parsed.rank_text
     mirror = await pokemon_mirror_service.search_mirror(
         "magic", q, page=1, page_size=max(limit * 5, 60)
     )
-    if mirror is not None:
-        return _rank([_from_scryfall(p) for p in mirror["payloads"]], q, limit)
+    if mirror is not None and mirror.get("payloads"):
+        return _rank([_from_scryfall(p) for p in mirror["payloads"]], rank_q, limit)
     items: list[dict[str, Any]] = []
     err: Exception | None = None
     try:
-        raw = await scryfall.search_cards(q, page=1)
+        raw = await scryfall.search_cards(scry_q, page=1)
         items = [_from_scryfall(c) for c in (raw.get("data") or [])]
     except (httpx.HTTPError, CircuitOpenError, ValueError, KeyError) as exc:
         # Scryfall 404s a search with zero hits — hold the error so we can
@@ -1168,20 +1205,29 @@ async def _search_scryfall(q: str, limit: int) -> list[dict[str, Any]]:
                 logger.info("relaxed scryfall search failed (%s): %s", q, exc)
     if not items and err is not None:
         raise err
-    return _rank(items, q, limit)
+    return _rank(items, rank_q, limit)
 
 
 async def _search_ygoprodeck(q: str, limit: int) -> list[dict[str, Any]]:
-    # Mirror first — see _search_scryfall. YGOPRODeck is the slowest live
-    # upstream (~1.9s), so the local hit is the biggest speed win.
+    parsed = parse_search_query(q)
+    search_q = parsed.name_text.strip() or parsed.raw
+    rank_q = parsed.rank_text
     mirror = await pokemon_mirror_service.search_mirror(
         "yugioh", q, page=1, page_size=max(limit * 5, 60)
     )
-    if mirror is not None:
-        return _rank([_from_yugioh(p) for p in mirror["payloads"]], q, limit)
-    raw = await ygoprodeck.search_cards(q)
+    if mirror is not None and mirror.get("payloads"):
+        return _rank([_from_yugioh(p) for p in mirror["payloads"]], rank_q, limit)
+    raw = await ygoprodeck.search_cards(search_q)
     items = [_from_yugioh(c) for c in (raw.get("data") or [])]
-    return _rank(items, q, limit)
+    if parsed.has_number and parsed.number_bare:
+        items = [
+            c
+            for c in items
+            if parsed.number_bare
+            in str(c.get("number") or "").split("/")[0].lstrip("0")
+            or (parsed.number_raw and parsed.number_raw in str(c.get("number") or ""))
+        ] or items
+    return _rank(items, rank_q, limit)
 
 
 async def _search_digimon(q: str, limit: int) -> list[dict[str, Any]]:
@@ -1468,10 +1514,12 @@ async def search_cards_paged(
                 start = (page - 1) * page_size
                 sc_page = start // _SCRYFALL_PAGE_SIZE + 1
                 offset = start % _SCRYFALL_PAGE_SIZE
-                raw = await scryfall.search_cards(q, page=sc_page)
+                raw = await scryfall.search_cards(scryfall_query(parse_search_query(q)), page=sc_page)
                 pool = [_from_scryfall(c) for c in (raw.get("data") or [])]
                 if offset + page_size > len(pool) and raw.get("has_more"):
-                    raw2 = await scryfall.search_cards(q, page=sc_page + 1)
+                    raw2 = await scryfall.search_cards(
+                        scryfall_query(parse_search_query(q)), page=sc_page + 1
+                    )
                     pool += [_from_scryfall(c) for c in (raw2.get("data") or [])]
                 body = {
                     "results": pool[offset : offset + page_size],

@@ -265,6 +265,47 @@ async def get_filter_metadata(
     }
 
 
+@router.get(
+    "/count",
+    summary="Filtered vault row count (fast — no card payload)",
+)
+async def count_mine(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+    q: str | None = Query(None, max_length=120),
+    sets: list[str] | None = Query(None, alias="set"),
+    house: list[str] | None = Query(None),
+    min_grade: float | None = Query(None, ge=0, le=10),
+    max_grade: float | None = Query(None, ge=0, le=10),
+    min_value: Decimal | None = Query(None, ge=0),
+    max_value: Decimal | None = Query(None, ge=0),
+    tags: list[str] | None = Query(None),
+    graded_only: bool = Query(False),
+    raw_only: bool = Query(False),
+    watchlist: bool = Query(False),
+    collection_id: uuid.UUID | None = Query(None),
+) -> dict[str, int]:
+    total = await graded_card_service.count_for_user(
+        db,
+        user,
+        q=q,
+        set_name=None,
+        sets=sets,
+        house=None,
+        houses=house,
+        min_grade=min_grade,
+        max_grade=max_grade,
+        min_value=min_value,
+        max_value=max_value,
+        tags=tags,
+        graded_only=graded_only,
+        raw_only=raw_only,
+        watchlist=watchlist,
+        collection_id=collection_id,
+    )
+    return {"count": total}
+
+
 @router.get("/{grade_id}", response_model=GradedCardRead, summary="Get one graded card")
 async def get_one(
     grade_id: uuid.UUID,

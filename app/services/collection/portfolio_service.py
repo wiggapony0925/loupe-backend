@@ -15,10 +15,11 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.card import Card
+from app.models.card import Card, CardSet
+from app.models.enums import GradeHouseEnum
 from app.models.grade import GradedCard
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.user import User
@@ -287,72 +288,95 @@ async def summary(
     db: AsyncSession, user: User, collection_id: uuid.UUID | None = None
 ) -> dict:
     """Aggregate the user's vault into a single hero card payload."""
-    rows = await _load_grades_with_cards(db, user, collection_id)
-    total = Decimal("0")
-    cost = Decimal("0")
-    cost_count = 0
-    grade_sum = Decimal("0")
-    grade_count = 0
-    # Vault-shape extras: lets the client render the Vault page header
-    # (Holdings / Avg Grade / Loupe-graded pills + the Category chip
-    # row) without downloading the full collection just to compute
-    # `Set(c.set)` and `count(c.house == 'loupe')` in JS.
-    unique_card_ids: set = set()
-    loupe_graded_count = 0
-    # Distinct user tags across the vault — feeds the mobile filter sheet + the
-    # grade-form tag suggestions (case-insensitive de-dupe, first casing wins).
-    tags_seen: dict[str, str] = {}
-    for g, _card in rows:
-        # Collection value is the grade-aware per-card estimate — the same
-        # `holding_value_usd` basis the analytics overview and the history
-        # endpoint use, so the vault total, the Command Center hero, and the
-        # Analytics tab all agree to the cent. (We sum `estimated_value_usd`
-        # directly here to keep `total` in Decimal for the cost-basis P/L math
-        # below; the float mirror is `holding_value_usd`.)
-        if g.estimated_value_usd is not None:
-            total += g.estimated_value_usd
-        if g.purchase_price_usd is not None:
-            cost += g.purchase_price_usd
-            cost_count += 1
-        if g.grade is not None:
-            grade_sum += g.grade
-            grade_count += 1
-        if g.card_id is not None:
-            unique_card_ids.add(g.card_id)
-        house_val = (
-            g.house.value if hasattr(g.house, "value") else str(g.house or "")
-        ).lower()
-        if house_val == "loupe":
-            loupe_graded_count += 1
-        for raw_tag in g.tags or []:
-            tag = str(raw_tag).strip()
-            if tag:
-                tags_seen.setdefault(tag.lower(), tag)
-    # Distinct set names the user owns. Pulled in a single SQL pass
-    # (graded_cards → cards → card_sets) so the cost is one query, not
-    # one per row. Result is sorted for stable client-side rendering.
-    from app.models.card import CardSet
+    where = [GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None)]
+    scope = collection_service.holdings_scope(collection_id, user)
+    if scope is not None:
+        where.append(scope)
+
+    (
+        total_value,
+        card_count,
+        cost_sum,
+        cost_count,
+        grade_sum,
+        grade_count,
+        unique_card_count,
+    ) = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(GradedCard.estimated_value_usd), 0),
+                func.count(GradedCard.id),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                GradedCard.purchase_price_usd.is_not(None),
+                                GradedCard.purchase_price_usd,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (GradedCard.purchase_price_usd.is_not(None), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                func.coalesce(func.sum(GradedCard.grade), 0),
+                func.coalesce(
+                    func.sum(case((GradedCard.grade.is_not(None), 1), else_=0)),
+                    0,
+                ),
+                func.count(func.distinct(GradedCard.card_id)),
+            ).where(*where)
+        )
+    ).one()
+
+    loupe_graded_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(GradedCard)
+            .where(*where, GradedCard.house == GradeHouseEnum.loupe)
+        )
+    ).scalar() or 0
 
     set_rows = (
         await db.execute(
             select(CardSet.name)
             .join(Card, Card.set_id == CardSet.id)
             .join(GradedCard, GradedCard.card_id == Card.id)
-            .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
+            .where(*where)
             .where(CardSet.name.is_not(None))
             .distinct()
             .order_by(CardSet.name.asc())
         )
     ).all()
     available_sets = [r[0] for r in set_rows if r[0]]
+
+    # Tags are the only field still scanned row-by-row — JSON arrays are
+    # small and this runs once per vault open, not per filter keystroke.
+    tags_seen: dict[str, str] = {}
+    tag_rows = (await db.execute(select(GradedCard.tags).where(*where))).scalars().all()
+    for tag_list in tag_rows:
+        for raw_tag in tag_list or []:
+            tag = str(raw_tag).strip()
+            if tag:
+                tags_seen.setdefault(tag.lower(), tag)
+
+    total = Decimal(str(total_value))
+    cost = Decimal(str(cost_sum))
+    cost_count = int(cost_count or 0)
+    card_count = int(card_count or 0)
+    grade_count = int(grade_count or 0)
+    grade_sum = Decimal(str(grade_sum))
+
     avg_grade = float(grade_sum / grade_count) if grade_count else None
-    # Opportunistic intraday snapshot (throttled) — the summary path runs on
-    # every vault/dashboard open, so active users build a real 1D curve.
-    await maybe_capture_snapshot(db, user, float(total), len(rows))
-    # Unrealized P/L is `value - cost`, but only meaningful when the user
-    # has recorded a cost on at least one card. We report `null` (not 0)
-    # in that case so the UI can hide the P/L chip instead of showing
-    # "+$0.00 (+0%)", which would mislead a brand-new collector.
+    await maybe_capture_snapshot(db, user, float(total), card_count)
     if cost_count > 0:
         pnl_usd: float | None = float(total - cost)
         pnl_pct: float | None = float((total - cost) / cost * 100) if cost > 0 else 0.0
@@ -363,22 +387,15 @@ async def summary(
         total_cost = None
     return {
         "totalValueUsd": float(total),
-        "cardCount": len(rows),
-        # Average grade (0-10) is the most honest "quality" signal we have
-        # until the scan pipeline reports per-job accuracy. Frontend shows
-        # null as "—" rather than fabricating an accuracy percentage.
+        "cardCount": card_count,
         "avgGrade": avg_grade,
         "avgAccuracy": None,
-        # Cost basis & unrealized P/L. `null` means the user has not
-        # recorded a purchase price on any card yet.
         "totalCostUsd": total_cost,
         "costBasisCardCount": cost_count,
         "unrealizedPnlUsd": pnl_usd,
         "unrealizedPnlPct": pnl_pct,
-        # Vault aggregates — moved off the client so the Vault header
-        # never needs the full card list to render.
-        "uniqueCardCount": len(unique_card_ids),
-        "loupeGradedCount": loupe_graded_count,
+        "uniqueCardCount": int(unique_card_count or 0),
+        "loupeGradedCount": int(loupe_graded_count),
         "availableSets": available_sets,
         "availableTags": sorted(tags_seen.values(), key=str.lower),
     }
