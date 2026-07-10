@@ -108,6 +108,14 @@ async def create(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> ReportRead:
+    # Resolve the optional collection scope first: ownership-checked (404
+    # for foreign/unknown ids) and the name baked into the statement title.
+    collection_name: str | None = None
+    if payload.collection_id is not None:
+        from app.services.collection import collection_service
+
+        col = await collection_service.get_owned(db, user, payload.collection_id)
+        collection_name = col.name
     try:
         row = await generate_report(
             db,
@@ -115,6 +123,8 @@ async def create(
             period=payload.period,
             year=payload.year,
             month=payload.month,
+            collection_id=payload.collection_id,
+            collection_name=collection_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

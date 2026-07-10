@@ -21,6 +21,11 @@ class ReportRead(BaseModel):
     period_end: date
     status: ReportStatusEnum
     title: str
+    # Collection scope; null = whole-vault statement. `collection_name`
+    # is baked at generation time so the label survives collection
+    # rename/delete.
+    collection_id: uuid.UUID | None = None
+    collection_name: str | None = None
     file_size_bytes: int | None = None
     error_message: str | None = None
     generated_at: datetime | None = None
@@ -38,6 +43,8 @@ class ReportGenerateRequest(BaseModel):
     # Only required for monthly reports. Validated server-side because
     # FastAPI can't express the dependency in JSON schema.
     month: int | None = Field(None, ge=1, le=12)
+    # Scope the statement to one collection. Omit / null = whole vault.
+    collection_id: uuid.UUID | None = None
 
 
 class ReportDownloadResponse(BaseModel):

@@ -2,8 +2,11 @@
 <table class="data-table movers">
   <thead>
     <tr>
-      <th class="thumb"></th><th>Card</th><th>Set</th>
-      <th class="num">Value</th><th class="num">Change</th>
+      <th class="thumb"></th>
+      <th>Card</th>
+      <th>Set</th>
+      <th class="num">Closing value</th>
+      <th class="num">Period change</th>
     </tr>
   </thead>
   <tbody>
@@ -17,7 +20,7 @@
       <td class="num {{ 'up' if is_gain else 'down' }}">{{ r.delta_usd | money }} ({{ r.delta_pct | pct }})</td>
     </tr>
     {% else %}
-    <tr><td class="thumb"></td><td>—</td><td>—</td><td class="num">—</td><td class="num">—</td></tr>
+    <tr><td class="thumb"></td><td colspan="4" class="empty-cell">No movers in this category.</td></tr>
     {% endfor %}
   </tbody>
 </table>
@@ -26,106 +29,127 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Loupe statement — {{ period_label }}</title>
+  <title>Loupe Portfolio Statement — {{ period_label }}</title>
 </head>
 <body>
-  {# Running header / footer elements — pulled into the @page margin boxes. #}
-  <div class="run run-brand">◆ LOUPE · Portfolio Statement</div>
+  <div class="run run-brand">Loupe · Portfolio Statement</div>
   <div class="run run-period">{{ period_label }}</div>
   <div class="run run-generated">Generated {{ generated_at }}</div>
   <div class="run run-email">{{ user_email }}</div>
 
   {# ─── Cover ─────────────────────────────────────────────────────────── #}
   <section class="page cover">
-    <div class="band">
-      <div class="band-left">
-        <div class="band-brand">◆ LOUPE</div>
-        <div class="band-title">Portfolio Statement</div>
-        <div class="band-sub">{{ period_label }}</div>
+    <header class="cover-header">
+      <div class="cover-brand">
+        <div class="cover-mark">Loupe</div>
+        <div class="cover-type">Portfolio Statement</div>
       </div>
-      <div class="band-right">
-        <div class="k">Statement Period</div>
-        <div class="v">{{ period_start_short }} – {{ period_end_long }}</div>
+      <div class="cover-meta">
+        <div class="cover-meta-label">Statement period</div>
+        <div class="cover-meta-value">{{ period_start_long }} – {{ period_end_long }}</div>
+        <div class="cover-meta-sub">Issued {{ statement_date }}</div>
+      </div>
+    </header>
+
+    {% if collection_name %}
+    <div class="scope-badge">Collection: {{ collection_name }}</div>
+    {% endif %}
+
+    <div class="balance-block">
+      <div class="balance-label">Closing balance</div>
+      <div class="balance-value">{{ closing_value_usd | money }}</div>
+      <div class="balance-change {{ 'up' if up else 'down' }}">
+        Period change {{ delta_usd | money }} ({{ delta_pct | pct }})
       </div>
     </div>
 
-    <div class="hero">
-      <div class="hero-left">
-        <div class="eyebrow">Closing value</div>
-        <div class="hero-value">{{ closing_value_usd | money }}</div>
-        <div class="hero-sub">over {{ period_label }}</div>
+    <div class="stat-grid">
+      <div class="stat">
+        <div class="stat-label">Opening balance</div>
+        <div class="stat-value">{{ opening_value_usd | money }}</div>
       </div>
-      <div class="chip {{ 'up' if up else 'down' }}">
-        {{ '▲' if up else '▼' }} {{ delta_usd | money }}
-        <span class="chip-pct">({{ delta_pct | pct }})</span>
+      <div class="stat">
+        <div class="stat-label">Unrealized P/L</div>
+        <div class="stat-value {{ pnl_class }}">{{ unrealized_pnl_usd | money }}</div>
       </div>
-    </div>
-
-    <div class="kpis">
-      <div class="kpi">
-        <div class="kpi-label">Opening value</div>
-        <div class="kpi-value">{{ opening_value_usd | money }}</div>
+      <div class="stat">
+        <div class="stat-label">Holdings</div>
+        <div class="stat-value">{{ "{:,}".format(card_count) }}</div>
       </div>
-      <div class="kpi">
-        <div class="kpi-label">Unrealized P/L</div>
-        <div class="kpi-value {{ pnl_class }}">{{ unrealized_pnl_usd | money }}</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Cards in vault</div>
-        <div class="kpi-value">{{ "{:,}".format(card_count) }}</div>
-      </div>
-      <div class="kpi">
-        <div class="kpi-label">Avg grade</div>
-        <div class="kpi-value">{{ ("%.1f" % avg_grade) if avg_grade else "—" }}</div>
+      <div class="stat">
+        <div class="stat-label">Average grade</div>
+        <div class="stat-value">{{ ("%.1f" % avg_grade) if avg_grade else "—" }}</div>
       </div>
     </div>
 
-    <div class="eyebrow spaced">Account information</div>
-    <table class="account">
-      <tr>
-        <td class="lbl">Account holder</td><td class="val">{{ user_email }}</td>
-        <td class="lbl">Statement date</td><td class="val">{{ statement_date }}</td>
-      </tr>
-      <tr>
-        <td class="lbl">Statement period</td><td class="val">{{ period_start_long }} – {{ period_end_long }}</td>
-        <td class="lbl">Vault holdings</td><td class="val">{{ "{:,}".format(card_count) }} cards</td>
-      </tr>
+    <table class="ledger">
+      <thead>
+        <tr>
+          <th colspan="2">Account summary</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="lbl">Account holder</td>
+          <td class="val">{{ account_holder }}</td>
+        </tr>
+        <tr>
+          <td class="lbl">Account email</td>
+          <td class="val">{{ user_email }}</td>
+        </tr>
+        <tr>
+          <td class="lbl">Statement period</td>
+          <td class="val">{{ period_start_long }} – {{ period_end_long }}</td>
+        </tr>
+        <tr>
+          <td class="lbl">Opening balance</td>
+          <td class="val">{{ opening_value_usd | money }}</td>
+        </tr>
+        <tr>
+          <td class="lbl">Closing balance</td>
+          <td class="val">{{ closing_value_usd | money }}</td>
+        </tr>
+        <tr>
+          <td class="lbl">Period change</td>
+          <td class="val {{ 'up' if up else 'down' }}">{{ delta_usd | money }} ({{ delta_pct | pct }})</td>
+        </tr>
+        <tr>
+          <td class="lbl">Total cost basis</td>
+          <td class="val">{{ total_cost_usd | money }}</td>
+        </tr>
+        <tr>
+          <td class="lbl">Unrealized gain/loss</td>
+          <td class="val {{ pnl_class }}">{{ unrealized_pnl_usd | money }}{% if unrealized_pnl_pct is not none %} ({{ unrealized_pnl_pct | pct }}){% endif %}</td>
+        </tr>
+      </tbody>
     </table>
 
-    <div class="eyebrow spaced">Account summary</div>
-    <table class="summary">
-      <tr><td class="lbl">Opening value</td><td class="val">{{ opening_value_usd | money }}</td></tr>
-      <tr><td class="lbl">Closing value</td><td class="val">{{ closing_value_usd | money }}</td></tr>
-      <tr><td class="lbl">Period change</td><td class="val">{{ delta_usd | money }} ({{ delta_pct | pct }})</td></tr>
-      <tr><td class="lbl">Cards in vault</td><td class="val">{{ "{:,}".format(card_count) }}</td></tr>
-      <tr><td class="lbl">Average grade</td><td class="val">{{ ("%.2f" % avg_grade) if avg_grade else "—" }}</td></tr>
-      <tr><td class="lbl">Total cost basis</td><td class="val">{{ total_cost_usd | money }}</td></tr>
-      <tr><td class="lbl">Unrealized P/L</td><td class="val">{{ unrealized_pnl_usd | money }} ({{ unrealized_pnl_pct | pct }})</td></tr>
-    </table>
+    <p class="disclaimer">
+      Values reflect Loupe market estimates for graded holdings as of the statement
+      close date. This document is provided for record-keeping and is not tax,
+      legal, or investment advice.
+    </p>
   </section>
 
   {# ─── Performance ───────────────────────────────────────────────────── #}
   <section class="page">
-    <div class="eyebrow">Performance</div>
-    <h2 class="section">Performance</h2>
+    <h2 class="section-title">Portfolio performance</h2>
+    <p class="section-lead">Estimated daily portfolio value across the statement period.</p>
     {% if area_svg %}
-      <p class="dim">Daily value across the period.</p>
       <div class="chart">{{ area_svg | safe }}</div>
     {% else %}
       <div class="empty">
-        Not enough price history was available during this period to render a
-        chart. As your scanner accumulates daily prices the next statement will
-        include a full value curve.
+        Insufficient price history was available to chart this period. Future
+        statements will include a daily value curve as market data accumulates.
       </div>
     {% endif %}
   </section>
 
-  {# ─── Allocation ────────────────────────────────────────────────────── #}
+  {# ─── Allocation ──────────────────────────────────────────────────────── #}
   <section class="page">
-    <div class="eyebrow">Composition</div>
-    <h2 class="section">Allocation</h2>
+    <h2 class="section-title">Portfolio composition</h2>
     {% if legend %}
-      <p class="dim">By trading-card game (closing value).</p>
+      <p class="section-lead">Allocation by game at period close.</p>
       <div class="alloc">
         <div class="donut">{{ donut_svg | safe }}</div>
         <ul class="legend">
@@ -140,37 +164,35 @@
         </ul>
       </div>
 
-      <h3 class="subhead">Grade distribution</h3>
+      <h3 class="subsection-title">Grade distribution</h3>
       {% if bar_svg %}
         <div class="chart">{{ bar_svg | safe }}</div>
       {% else %}
-        <div class="empty">No graded cards in this period yet.</div>
+        <div class="empty">No graded holdings to display.</div>
       {% endif %}
     {% else %}
-      <div class="empty">No cards in vault yet — nothing to allocate.</div>
+      <div class="empty">No holdings were in the vault during this period.</div>
     {% endif %}
   </section>
 
   {# ─── Top movers ────────────────────────────────────────────────────── #}
   <section class="page">
-    <div class="eyebrow">Markets</div>
-    <h2 class="section">Top movers</h2>
+    <h2 class="section-title">Price movement</h2>
+    <p class="section-lead">Largest estimated value changes during the statement period.</p>
     {% if top_gainers or top_losers %}
-      <div class="rowhead">Gainers</div>
+      <div class="rowhead">Top gainers</div>
       {{ movers_table(top_gainers, true) }}
-      <div class="rowhead">Losers</div>
+      <div class="rowhead">Top decliners</div>
       {{ movers_table(top_losers, false) }}
     {% else %}
-      <div class="empty">No measurable price movement during this window.</div>
+      <div class="empty">No measurable price movement occurred during this period.</div>
     {% endif %}
   </section>
 
-  {# ─── Showcase gallery (only when we hydrated artwork) ──────────────── #}
   {% if gallery %}
   <section class="page">
-    <div class="eyebrow">Showcase</div>
-    <h2 class="section">Top holdings</h2>
-    <p class="dim">Your most valuable cards at period close.</p>
+    <h2 class="section-title">Largest holdings</h2>
+    <p class="section-lead">Highest-value positions at period close.</p>
     <div class="gallery">
       {% for h in gallery %}
       <div class="g-card">
@@ -191,14 +213,25 @@
 
   {# ─── Holdings ──────────────────────────────────────────────────────── #}
   <section class="page">
-    <div class="eyebrow">Positions</div>
-    <h2 class="section">Holdings</h2>
+    <h2 class="section-title">Holdings detail</h2>
     {% if holdings %}
+      <p class="section-lead">
+        All positions valued at period open and close.
+        {% if holdings_truncated %}
+          Showing {{ holdings | length }} of {{ holdings_total }} holdings, sorted by closing value.
+        {% else %}
+          {{ holdings_total }} position{{ "s" if holdings_total != 1 else "" }}, sorted by closing value.
+        {% endif %}
+      </p>
       <table class="data-table holdings">
         <thead>
           <tr>
-            <th>Card</th><th>Set</th><th class="num">Grade</th>
-            <th class="num">Opening</th><th class="num">Closing</th><th class="num">Chg %</th>
+            <th>Card</th>
+            <th>Set</th>
+            <th class="num">Grade</th>
+            <th class="num">Opening</th>
+            <th class="num">Closing</th>
+            <th class="num">Change</th>
           </tr>
         </thead>
         <tbody>
@@ -215,10 +248,7 @@
         </tbody>
       </table>
     {% else %}
-      <div class="empty">
-        Your vault is empty for this period. Scan a card to start building a
-        statement.
-      </div>
+      <div class="empty">No holdings were recorded for this statement period.</div>
     {% endif %}
   </section>
 </body>

@@ -284,8 +284,14 @@ def test_html_renderer_produces_multipage_pdf():
 
     Skipped where WeasyPrint's native libs (Pango) aren't installed — the
     orchestrator still falls back to ReportLab there (covered separately).
+    WeasyPrint imports but raises OSError when Pango's shared library is
+    missing (common on dev Macs), so we skip on that too — importorskip
+    alone only catches ImportError.
     """
-    pytest.importorskip("weasyprint")
+    try:
+        pytest.importorskip("weasyprint")
+    except OSError as exc:  # Pango/GObject native libs missing
+        pytest.skip(f"weasyprint native deps unavailable: {exc}")
     from app.services.analytics.reports import html_builder
 
     # render_statement_pdf has no internal fallback — a %PDF- result proves the
@@ -294,6 +300,44 @@ def test_html_renderer_produces_multipage_pdf():
     assert pdf.startswith(b"%PDF-")
     # Six charted/table sections dwarf the cover-only fallback.
     assert len(pdf) > 8000
+
+
+def test_rendered_html_contains_professional_sections():
+    """HTML output carries the expected statement structure and labels."""
+    from app.services.analytics.reports.html_builder import render_statement_html
+
+    html = render_statement_html(_mini_snapshot())
+    assert "Portfolio Statement" in html
+    assert "Closing balance" in html
+    assert "Pokémon" in html
+    assert "Holdings detail" in html
+    assert "record-keeping" in html
+    assert "investment advice" in html
+    assert "Account summary" in html
+
+
+def test_holdings_truncation_note_in_html():
+    from app.services.analytics.reports.aggregator import HoldingRow
+    from app.services.analytics.reports.html_builder import (
+        HOLDINGS_PDF_LIMIT,
+        render_statement_html,
+    )
+
+    snap = _mini_snapshot()
+    snap.holdings = [
+        HoldingRow(
+            card_id=f"c{i}",
+            name=f"Card {i}",
+            set_name="Test Set",
+            grade=9.0,
+            value_close_usd=float(i + 1),
+            value_open_usd=float(i + 1),
+            delta_pct=0.0,
+        )
+        for i in range(HOLDINGS_PDF_LIMIT + 3)
+    ]
+    html = render_statement_html(snap)
+    assert f"Showing {HOLDINGS_PDF_LIMIT} of {HOLDINGS_PDF_LIMIT + 3}" in html
 
 
 def test_render_pdf_falls_back_when_html_path_raises(monkeypatch):

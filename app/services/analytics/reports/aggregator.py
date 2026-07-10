@@ -19,6 +19,7 @@ is responsible for rendering an honest "no data" panel.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -31,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
+from app.services.collection.collection_service import holdings_scope
 from app.services.collection.portfolio_service import _extract_price_history
 
 
@@ -81,6 +83,9 @@ class ReportSnapshot:
     unrealized_pnl_pct: float | None
 
     avg_grade: float | None
+    # Collection scope. None ⇒ whole vault. Baked label so the PDF stays
+    # honest even after the collection is renamed/deleted.
+    collection_name: str | None = None
     series: list[SeriesPoint] = field(default_factory=list)
     holdings: list[HoldingRow] = field(default_factory=list)
     top_gainers: list[MoverRow] = field(default_factory=list)
@@ -135,21 +140,32 @@ async def build_snapshot(
     period_label: str,
     period_start: date,
     period_end: date,
+    collection_id: uuid.UUID | None = None,
+    collection_name: str | None = None,
 ) -> ReportSnapshot:
-    """Aggregate everything the renderer needs for one statement window."""
+    """Aggregate everything the renderer needs for one statement window.
+
+    ``collection_id`` scopes the statement to one collection via the same
+    ``holdings_scope`` seam the dashboard/vault/analytics use, so a scoped
+    statement's totals always match what the app shows for that portfolio.
+    """
+    conditions = [
+        GradedCard.user_id == user.id,
+        GradedCard.deleted_at.is_(None),
+        # Only include cards that existed *during or before* the
+        # window. Cards graded after the period close shouldn't
+        # appear on a statement that covers an earlier window.
+        GradedCard.graded_at <= _eod_dt(period_end),
+    ]
+    scope = holdings_scope(collection_id, user)
+    if scope is not None:
+        conditions.append(scope)
     rows = (
         await db.execute(
             select(GradedCard, Card, CardSet)
             .outerjoin(Card, Card.id == GradedCard.card_id)
             .outerjoin(CardSet, CardSet.id == Card.set_id)
-            .where(
-                GradedCard.user_id == user.id,
-                GradedCard.deleted_at.is_(None),
-                # Only include cards that existed *during or before* the
-                # window. Cards graded after the period close shouldn't
-                # appear on a statement that covers an earlier window.
-                GradedCard.graded_at <= _eod_dt(period_end),
-            )
+            .where(*conditions)
         )
     ).all()
 
@@ -252,6 +268,7 @@ async def build_snapshot(
         period_label=period_label,
         period_start=period_start,
         period_end=period_end,
+        collection_name=collection_name,
         card_count=len(rows),
         opening_value_usd=open_total,
         closing_value_usd=close_total,

@@ -32,6 +32,29 @@ from app.services.analytics.reports.images import GALLERY_HOLDINGS
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _SCSS_PATH = _TEMPLATES_DIR / "statement.scss"
 
+# Large vaults still get a complete PDF without hundreds of table pages.
+HOLDINGS_PDF_LIMIT = 100
+
+_TCG_LABELS: dict[str, str] = {
+    "pokemon": "Pokémon",
+    "magic": "Magic: The Gathering",
+    "mtg": "Magic: The Gathering",
+    "yugioh": "Yu-Gi-Oh!",
+    "one_piece": "One Piece",
+    "lorcana": "Disney Lorcana",
+    "sports": "Sports Cards",
+}
+
+
+def _tcg_label(raw: str) -> str:
+    key = raw.strip().lower().replace("-", "_").replace(" ", "_")
+    return _TCG_LABELS.get(key, raw.replace("_", " ").title())
+
+
+def _account_holder(email: str) -> str:
+    local = email.split("@", 1)[0].replace(".", " ").replace("_", " ")
+    return local.title() if local else email
+
 
 # ─── Formatting helpers (mirror the ReportLab _money / _pct) ─────────────
 
@@ -130,9 +153,10 @@ def _build_context(snap: ReportSnapshot) -> dict:
     donut_svg = ""
     if snap.tcg_breakdown and alloc_total > 0:
         for i, (name, value) in enumerate(snap.tcg_breakdown):
+            label = _tcg_label(name)
             legend.append(
                 {
-                    "name": name.title(),
+                    "name": label,
                     "value": value,
                     "pct": f"{value / alloc_total * 100:.1f}%",
                     "color": charts.ALLOCATION_PALETTE[
@@ -140,7 +164,8 @@ def _build_context(snap: ReportSnapshot) -> dict:
                     ],
                 }
             )
-        donut_svg = charts.donut_chart(snap.tcg_breakdown, alloc_total)
+        labeled_breakdown = [(_tcg_label(n), v) for n, v in snap.tcg_breakdown]
+        donut_svg = charts.donut_chart(labeled_breakdown, alloc_total)
 
     # Showcase gallery: top holdings that actually have hydrated artwork.
     gallery = [
@@ -160,15 +185,22 @@ def _build_context(snap: ReportSnapshot) -> dict:
     else:
         pnl_class = "up" if snap.unrealized_pnl_usd >= 0 else "down"
 
+    grade_buckets = [(label, count) for label, count in snap.grade_buckets if count > 0]
+    holdings_total = len(snap.holdings)
+    holdings_display = snap.holdings[:HOLDINGS_PDF_LIMIT]
+    holdings_truncated = holdings_total > len(holdings_display)
+
     return {
         # Period / identity
         "period_label": snap.period_label,
+        "collection_name": snap.collection_name,
         "period_start_short": snap.period_start.strftime("%b %d"),
         "period_start_long": snap.period_start.strftime("%b %d, %Y"),
         "period_end_long": snap.period_end.strftime("%b %d, %Y"),
         "statement_date": now.strftime("%B %d, %Y"),
         "generated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
         "user_email": snap.user_email,
+        "account_holder": _account_holder(snap.user_email),
         # Headline numbers
         "card_count": snap.card_count,
         "opening_value_usd": snap.opening_value_usd,
@@ -186,23 +218,30 @@ def _build_context(snap: ReportSnapshot) -> dict:
         if len(snap.series) >= 2
         else "",
         "donut_svg": donut_svg,
-        "bar_svg": charts.bar_chart(snap.grade_buckets),
+        "bar_svg": charts.bar_chart(grade_buckets),
         "legend": legend,
         # Tables / gallery
         "top_gainers": snap.top_gainers,
         "top_losers": snap.top_losers,
         "gallery": gallery,
-        "holdings": snap.holdings,
+        "holdings": holdings_display,
+        "holdings_total": holdings_total,
+        "holdings_truncated": holdings_truncated,
         # Helper the movers macro calls to look up embedded art.
         "thumb": img.get,
     }
+
+
+def render_statement_html(snap: ReportSnapshot) -> str:
+    """Render the statement HTML (for tests and previews)."""
+    return _env().get_template("statement.html.j2").render(**_build_context(snap))
 
 
 def render_statement_pdf(snap: ReportSnapshot) -> bytes:
     """Render the statement to PDF bytes via Jinja2 + SCSS + WeasyPrint."""
     from weasyprint import CSS, HTML  # lazy: needs Pango at import time
 
-    html = _env().get_template("statement.html.j2").render(**_build_context(snap))
+    html = render_statement_html(snap)
     pdf = HTML(string=html, base_url=str(_TEMPLATES_DIR)).write_pdf(
         stylesheets=[CSS(string=_compiled_css())]
     )
@@ -217,4 +256,9 @@ def scss_source_mtime() -> float:  # small hook for tests / cache-busting
     return os.path.getmtime(_SCSS_PATH)
 
 
-__all__ = ["render_statement_pdf", "scss_source_mtime"]
+__all__ = [
+    "HOLDINGS_PDF_LIMIT",
+    "render_statement_html",
+    "render_statement_pdf",
+    "scss_source_mtime",
+]

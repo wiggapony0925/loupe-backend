@@ -74,12 +74,17 @@ async def _get_or_create_pending(
     period_start: date,
     period_end: date,
     title: str,
+    collection_id: uuid.UUID | None = None,
+    collection_name: str | None = None,
 ) -> tuple[UserReport, bool]:
     """Return ``(row, created)``. Reuses an existing row for the same window.
 
     A row is "reused" when it's pending or failed — we treat the new
     request as a retry. A `ready` row is returned as-is; the router
-    short-circuits and the caller can simply download it.
+    short-circuits and the caller can simply download it. Scoped and
+    whole-vault statements for the same window are distinct rows
+    (``collection_id`` participates in the match — ``== None`` compiles
+    to ``IS NULL``).
     """
     existing = (
         await db.execute(
@@ -87,6 +92,7 @@ async def _get_or_create_pending(
                 UserReport.user_id == user.id,
                 UserReport.period == period,
                 UserReport.period_start == period_start,
+                UserReport.collection_id == collection_id,
             )
         )
     ).scalar_one_or_none()
@@ -96,6 +102,7 @@ async def _get_or_create_pending(
         existing.status = ReportStatusEnum.pending
         existing.error_message = None
         existing.title = title
+        existing.collection_name = collection_name
         await db.flush()
         return existing, False
 
@@ -106,6 +113,8 @@ async def _get_or_create_pending(
         period_end=period_end,
         status=ReportStatusEnum.pending,
         title=title,
+        collection_id=collection_id,
+        collection_name=collection_name,
     )
     db.add(row)
     try:
@@ -119,6 +128,7 @@ async def _get_or_create_pending(
                     UserReport.user_id == user.id,
                     UserReport.period == period,
                     UserReport.period_start == period_start,
+                    UserReport.collection_id == collection_id,
                 )
             )
         ).scalar_one()
@@ -133,10 +143,18 @@ async def generate_report(
     period: ReportPeriodEnum,
     year: int,
     month: int | None = None,
+    collection_id: uuid.UUID | None = None,
+    collection_name: str | None = None,
 ) -> UserReport:
-    """Render + persist a portfolio statement for *(user, period, year[, month])*."""
+    """Render + persist a portfolio statement for *(user, period, year[, month])*.
+
+    Passing ``collection_id`` scopes the statement to one collection —
+    the PDF then covers only holdings in that portfolio and its title
+    carries the collection name so the archive stays unambiguous.
+    """
     period_start, period_end, label = resolve_period(period, year=year, month=month)
-    title = f"{label} statement"
+    scoped_label = f"{label} · {collection_name}" if collection_name else label
+    title = f"{scoped_label} statement"[:120]
     row, _created = await _get_or_create_pending(
         db,
         user=user,
@@ -144,6 +162,8 @@ async def generate_report(
         period_start=period_start,
         period_end=period_end,
         title=title,
+        collection_id=collection_id,
+        collection_name=collection_name,
     )
     # Already rendered — nothing to do, hand the row back.
     if row.status is ReportStatusEnum.ready and row.storage_key:
@@ -160,9 +180,11 @@ async def generate_report(
         snap = await build_snapshot(
             db,
             user=user,
-            period_label=label,
+            period_label=scoped_label,
             period_start=period_start,
             period_end=period_end,
+            collection_id=collection_id,
+            collection_name=collection_name,
         )
         stage = "render"
         # Best-effort card art for the movers tables + top-holdings gallery.

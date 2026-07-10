@@ -51,10 +51,17 @@ class UserReport(Base):
         Enum(ReportPeriodEnum, name="report_period_enum"),
         nullable=False,
     )
+    # Optional collection scope. NULL = whole-vault statement. Not an FK —
+    # a deleted collection must never cascade away the user's historical
+    # PDFs; `collection_name` is baked at generation time so the archive
+    # row stays labelled even after the collection is gone.
+    collection_id: Mapped[uuid.UUID | None] = mapped_column(UuidCol(), nullable=True)
+    collection_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # Inclusive period bounds in UTC. For "May 2026" that's
     # (2026-05-01, 2026-05-31); for the year 2026 that's
-    # (2026-01-01, 2026-12-31). The pair is unique per (user, period)
-    # so a given month/year can only be generated once.
+    # (2026-01-01, 2026-12-31). The tuple is unique per (user, period,
+    # collection scope) so a given month/year can only be generated once
+    # per scope.
     period_start: Mapped[date] = mapped_column(Date(), nullable=False)
     period_end: Mapped[date] = mapped_column(Date(), nullable=False)
     status: Mapped[ReportStatusEnum] = mapped_column(
@@ -85,14 +92,17 @@ class UserReport(Base):
     )
 
     __table_args__ = (
-        # One report per (user, period type, period start). Re-running
-        # generation for the same window updates the existing row in
-        # place rather than racing two PDFs.
+        # One report per (user, period type, period start, collection scope).
+        # Re-running generation for the same window updates the existing row
+        # in place rather than racing two PDFs. NULL collection_id (whole
+        # vault) dedupe is additionally enforced app-side in
+        # `_get_or_create_pending` because Postgres treats NULLs as distinct.
         UniqueConstraint(
             "user_id",
             "period",
             "period_start",
-            name="uq_user_reports_user_period_start",
+            "collection_id",
+            name="uq_user_reports_user_period_start_scope",
         ),
         Index("ix_user_reports_user_created_at", "user_id", "created_at"),
     )
