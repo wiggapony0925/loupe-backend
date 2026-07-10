@@ -62,6 +62,16 @@ class Settings(BaseSettings):
 
     # --- Database ---
     database_url: str = "sqlite+aiosqlite:///./loupe.db"
+    # Per-process SQLAlchemy pool sizing (Postgres only; sqlite ignores these).
+    # Kept deliberately small: Cloud Run fans out to many instances and the
+    # Cloud SQL instance has a finite ``max_connections``. Peak connections ≈
+    # (db_pool_size + db_max_overflow) x running instances (api + worker + jobs),
+    # which MUST stay under Cloud SQL ``max_connections`` or asyncpg raises
+    # ``TooManyConnectionsError``. Tune via env alongside instance maxScale.
+    db_pool_size: int = 2
+    db_max_overflow: int = 3
+    db_pool_timeout: int = 30
+    db_pool_recycle: int = 1800
 
     # --- Redis ---
     redis_url: str = "redis://localhost:6379/0"

@@ -81,6 +81,17 @@ def _build_engine(url: str) -> AsyncEngine:
         if ":memory:" in url:
             kwargs["poolclass"] = StaticPool
             kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        # Bound the per-process pool so a fan-out of Cloud Run instances can't
+        # exhaust Cloud SQL's finite ``max_connections`` (asyncpg
+        # ``TooManyConnectionsError``). LIFO keeps the working set of live
+        # connections small so idle ones age out under low load.
+        settings = get_settings()
+        kwargs["pool_size"] = settings.db_pool_size
+        kwargs["max_overflow"] = settings.db_max_overflow
+        kwargs["pool_timeout"] = settings.db_pool_timeout
+        kwargs["pool_recycle"] = settings.db_pool_recycle
+        kwargs["pool_use_lifo"] = True
     return create_async_engine(url, **kwargs)
 
 
