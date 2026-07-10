@@ -17,7 +17,6 @@ these flows compose surface immediately.
 from __future__ import annotations
 
 import uuid
-from datetime import date, timedelta
 from typing import Any
 
 import pytest
@@ -137,7 +136,7 @@ CREATE_CASES: list[pytest.ParameterSet] = [
         {"condition": "dmg"},
         id="raw_dmg",
     ),
-    # Slabs — condition cleared (full house × grade matrix)
+    # Slabs — condition cleared (full house x grade matrix)
     *_slab_cases(),
     # Optional cost / tags / notes
     pytest.param(
@@ -218,7 +217,9 @@ async def test_create_holding_scenarios(client, auth_headers, db_session, body, 
 
 
 @pytest.mark.asyncio
-async def test_create_two_copies_are_distinct_holdings(client, auth_headers, db_session):
+async def test_create_two_copies_are_distinct_holdings(
+    client, auth_headers, db_session
+):
     """Form "Copies=2" → two POSTs = two vault rows for the same card."""
     card = await make_card(db_session, name="MultiCopy")
     ids = []
@@ -376,14 +377,18 @@ async def test_collection_create_list_rename_delete(client, auth_headers, db_ses
         )
     )
     assert renamed["name"] == "Master Set"
-    listed = assert_envelope_ok(await client.get("/v1/collections", headers=auth_headers))
+    listed = assert_envelope_ok(
+        await client.get("/v1/collections", headers=auth_headers)
+    )
     assert any(c["id"] == coll["id"] and c["name"] == "Master Set" for c in listed)
 
     r = await client.delete(f"/v1/collections/{coll['id']}", headers=auth_headers)
     assert r.status_code == 204
     # Holding survived; only membership gone.
     assert h["id"] in await vault_ids(client, auth_headers)
-    listed = assert_envelope_ok(await client.get("/v1/collections", headers=auth_headers))
+    listed = assert_envelope_ok(
+        await client.get("/v1/collections", headers=auth_headers)
+    )
     assert coll["id"] not in {c["id"] for c in listed}
 
 
@@ -437,9 +442,7 @@ BULK_IDS_CASES = [
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("n,expected_added", BULK_IDS_CASES)
-async def test_bulk_add_n_cards(
-    client, auth_headers, db_session, n, expected_added
-):
+async def test_bulk_add_n_cards(client, auth_headers, db_session, n, expected_added):
     holdings = [
         await create_holding(client, auth_headers, db_session, name=f"B{i}")
         for i in range(n)
@@ -602,7 +605,9 @@ BULK_VALIDATION = [
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload,status", BULK_VALIDATION)
-async def test_bulk_payload_validation(client, auth_headers, db_session, payload, status):
+async def test_bulk_payload_validation(
+    client, auth_headers, db_session, payload, status
+):
     coll = await create_collection(client, auth_headers, "Val")
     r = await client.post(
         f"/v1/collections/{coll['id']}/items/bulk",
@@ -628,7 +633,7 @@ async def test_overview_all_plus_counts_and_values(client, auth_headers, db_sess
         house="loupe",
         estimated_value_usd="100",
     )
-    b = await create_holding(
+    await create_holding(
         client,
         auth_headers,
         db_session,
@@ -710,7 +715,9 @@ async def test_merge_collections_keeps_cards(client, auth_headers, db_session):
         a["id"],
         b["id"],
     }
-    listed = assert_envelope_ok(await client.get("/v1/collections", headers=auth_headers))
+    listed = assert_envelope_ok(
+        await client.get("/v1/collections", headers=auth_headers)
+    )
     assert source["id"] not in {c["id"] for c in listed}
     assert {a["id"], b["id"]} <= await vault_ids(client, auth_headers)
 
@@ -890,9 +897,7 @@ async def test_journey_quickadd_then_apply_then_organize(
         )
     )
     assert await collection_item_ids(client, auth_headers, pc["id"]) == set()
-    assert await collection_item_ids(client, auth_headers, trade["id"]) == {
-        quick["id"]
-    }
+    assert await collection_item_ids(client, auth_headers, trade["id"]) == {quick["id"]}
     # Still in All
     assert quick["id"] in await vault_ids(client, auth_headers)
 
@@ -968,7 +973,11 @@ async def test_journey_multi_select_organize_then_merge(
     ids = [
         (
             await create_holding(
-                client, auth_headers, db_session, name=f"MS{i}", estimated_value_usd="10"
+                client,
+                auth_headers,
+                db_session,
+                name=f"MS{i}",
+                estimated_value_usd="10",
             )
         )["id"]
         for i in range(4)
@@ -1002,7 +1011,9 @@ async def test_journey_multi_select_organize_then_merge(
 
 
 @pytest.mark.asyncio
-async def test_journey_active_collection_pref_roundtrip(client, auth_headers, db_session):
+async def test_journey_active_collection_pref_roundtrip(
+    client, auth_headers, db_session
+):
     coll = await create_collection(client, auth_headers, "ActivePref")
     body = assert_envelope_ok(
         await client.patch(
@@ -1055,7 +1066,9 @@ async def test_create_validation_edges(client, auth_headers, db_session, body, s
 @pytest.mark.asyncio
 async def test_unknown_grade_and_collection_404(client, auth_headers):
     missing = str(uuid.uuid4())
-    assert (await client.get(f"/v1/grades/{missing}", headers=auth_headers)).status_code in (
+    assert (
+        await client.get(f"/v1/grades/{missing}", headers=auth_headers)
+    ).status_code in (
         404,
         403,
     )
@@ -1084,9 +1097,10 @@ async def test_summary_reflects_add_edit_delete(client, auth_headers, db_session
         await client.get("/v1/grades/summary", headers=auth_headers)
     )
     assert summary["cardCount"] >= 1
-    assert summary["totalValueUsd"] == pytest.approx(80.0) or summary[
-        "totalValueUsd"
-    ] >= 80.0
+    assert (
+        summary["totalValueUsd"] == pytest.approx(80.0)
+        or summary["totalValueUsd"] >= 80.0
+    )
 
     assert_envelope_ok(
         await client.patch(

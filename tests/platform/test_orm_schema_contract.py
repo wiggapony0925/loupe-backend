@@ -19,8 +19,8 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect as sa_inspect
 
-from app.db import Base
 from app import models  # noqa: F401 — register every table on Base.metadata
+from app.db import Base
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -179,9 +179,7 @@ def test_graded_cards_fk_and_indexes() -> None:
 def test_alembic_single_head() -> None:
     cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
     # Point script_location explicitly — alembic.ini uses a relative path.
-    cfg.set_main_option(
-        "script_location", str(BACKEND_ROOT / "app" / "db" / "alembic")
-    )
+    cfg.set_main_option("script_location", str(BACKEND_ROOT / "app" / "db" / "alembic"))
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1, f"branched alembic heads: {heads}"
@@ -189,9 +187,7 @@ def test_alembic_single_head() -> None:
 
 def test_alembic_history_includes_grade_collection_revisions() -> None:
     cfg = Config(str(BACKEND_ROOT / "alembic.ini"))
-    cfg.set_main_option(
-        "script_location", str(BACKEND_ROOT / "app" / "db" / "alembic")
-    )
+    cfg.set_main_option("script_location", str(BACKEND_ROOT / "app" / "db" / "alembic"))
     script = ScriptDirectory.from_config(cfg)
     revision_ids = {rev.revision for rev in script.walk_revisions()}
     # Alembic ids are often short hashes OR our explicit 000N names —
@@ -215,7 +211,7 @@ def test_sqlalchemy_inspector_sees_create_all_tables() -> None:
     Base.metadata.create_all(eng)
     insp = sa_inspect(eng)
     names = set(insp.get_table_names())
-    assert EXPECTED_TABLES <= names, sorted(EXPECTED_TABLES - names)
+    assert names >= EXPECTED_TABLES, sorted(EXPECTED_TABLES - names)
     cols = {c["name"] for c in insp.get_columns("graded_cards")}
     assert {"grade", "house", "condition", "tags", "purchase_price_usd"} <= cols
     item_cols = {c["name"] for c in insp.get_columns("collection_items")}

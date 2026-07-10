@@ -785,9 +785,7 @@ async def search_mirror(
     async def _fetch(where: list[Any]) -> dict[str, Any] | None:
         async with maker() as session:
             total = (
-                await session.execute(
-                    select(func.count()).select_from(C).where(*where)
-                )
+                await session.execute(select(func.count()).select_from(C).where(*where))
             ).scalar_one()
             if not total:
                 return None
@@ -813,7 +811,9 @@ async def search_mirror(
             number_preds.append(C.number.ilike(f"%{parsed.number_raw}%"))
         number_clause: list[Any] = [*base, or_(*number_preds)]
         if parsed.name_tokens:
-            number_clause.extend(C.name_lower.like(f"%{tok}%") for tok in parsed.name_tokens)
+            number_clause.extend(
+                C.name_lower.like(f"%{tok}%") for tok in parsed.name_tokens
+            )
         hit = await _fetch(number_clause)
         if hit:
             return hit

@@ -203,14 +203,18 @@ async def _owned_grade_ids(
     if not ids:
         return set()
     rows = (
-        await db.execute(
-            select(GradedCard.id).where(
-                GradedCard.user_id == user.id,
-                GradedCard.deleted_at.is_(None),
-                GradedCard.id.in_(ids),
+        (
+            await db.execute(
+                select(GradedCard.id).where(
+                    GradedCard.user_id == user.id,
+                    GradedCard.deleted_at.is_(None),
+                    GradedCard.id.in_(ids),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return set(rows)
 
 

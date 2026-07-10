@@ -121,12 +121,17 @@ def _vault_filter_clauses(
                     preds.append(
                         or_(
                             GradedCard.house.in_(others),
-                            and_(GradedCard.house == "loupe", GradedCard.condition.is_(None)),
+                            and_(
+                                GradedCard.house == "loupe",
+                                GradedCard.condition.is_(None),
+                            ),
                         )
                     )
                 else:
                     preds.append(
-                        and_(GradedCard.house == "loupe", GradedCard.condition.is_(None))
+                        and_(
+                            GradedCard.house == "loupe", GradedCard.condition.is_(None)
+                        )
                     )
             else:
                 preds.append(GradedCard.house.in_(standard_houses))

@@ -863,7 +863,10 @@ def _filter_catalog(
                 continue
         elif not parsed.has_number:
             blob = f"{name} {num} {set_name}".lower()
-            if parsed.raw.lower() not in blob and relevance_score(name, parsed.rank_text) < 0.58:
+            if (
+                parsed.raw.lower() not in blob
+                and relevance_score(name, parsed.rank_text) < 0.58
+            ):
                 continue
         hits.append(c)
 
@@ -1514,7 +1517,9 @@ async def search_cards_paged(
                 start = (page - 1) * page_size
                 sc_page = start // _SCRYFALL_PAGE_SIZE + 1
                 offset = start % _SCRYFALL_PAGE_SIZE
-                raw = await scryfall.search_cards(scryfall_query(parse_search_query(q)), page=sc_page)
+                raw = await scryfall.search_cards(
+                    scryfall_query(parse_search_query(q)), page=sc_page
+                )
                 pool = [_from_scryfall(c) for c in (raw.get("data") or [])]
                 if offset + page_size > len(pool) and raw.get("has_more"):
                     raw2 = await scryfall.search_cards(
@@ -2514,7 +2519,9 @@ def _onepiece_sets_from_catalog(
     return out
 
 
-async def _resolve_set_image(tcg: str, set_name: str, set_code: str | None = None) -> str | None:
+async def _resolve_set_image(
+    tcg: str, set_name: str, set_code: str | None = None
+) -> str | None:
     """Resolve set images using official packaging patterns or TCGplayer groups."""
     if tcg == "onepiece":
         sc = str(set_code or "").split(":")[-1].upper() if set_code else ""
@@ -2524,9 +2531,9 @@ async def _resolve_set_image(tcg: str, set_name: str, set_code: str | None = Non
                 sc = m.group(0).replace("-", "").upper()
         if sc.startswith("OP") and len(sc) == 4:
             return f"https://en.onepiece-cardgame.com/images/products/booster/{sc.lower()}/pack.png"
-        elif sc.startswith("EB") and len(sc) == 4:
+        if sc.startswith("EB") and len(sc) == 4:
             return f"https://en.onepiece-cardgame.com/images/products/extra/{sc.lower()}/pack.png"
-        elif sc.startswith("ST") and len(sc) == 4:
+        if sc.startswith("ST") and len(sc) == 4:
             return f"https://en.onepiece-cardgame.com/images/products/starter/{sc.lower()}/pack.png"
 
     if tcg == "digimon":
@@ -2535,7 +2542,7 @@ async def _resolve_set_image(tcg: str, set_name: str, set_code: str | None = Non
             m = re.search(r"BT-?\d+|EX-?\d+", set_name, re.I)
             if m:
                 sc = m.group(0).replace("-", "").upper()
-        if (sc.startswith("BT") or sc.startswith("EX")) and len(sc) == 4:
+        if sc.startswith(("BT", "EX")) and len(sc) == 4:
             if sc in ("BT01", "BT02", "BT03"):
                 return "https://world.digimoncard.com/images/products/booster/bt01-03/pack.png"
             return f"https://world.digimoncard.com/images/products/booster/{sc.lower()}/pack.png"
@@ -2552,8 +2559,8 @@ async def _resolve_set_image(tcg: str, set_name: str, set_code: str | None = Non
         return None
 
     try:
-        from app.services.catalog import sealed_image_resolver
         from app.models.enums import SealedProductTypeEnum
+        from app.services.catalog import sealed_image_resolver
 
         async def _fetch():
             await sealed_image_resolver._ensure_groups(cat)
