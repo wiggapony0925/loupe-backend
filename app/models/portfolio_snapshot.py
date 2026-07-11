@@ -37,6 +37,15 @@ class PortfolioSnapshot(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+    #: Scope of the captured total. NULL = the whole-vault ("All") series;
+    #: a value = that collection's own series. Every scope charts only its
+    #: own observations — mixing them poisoned the 1D chart when collection
+    #: scoping shipped (an Umbreon-sized total landing in the All series).
+    collection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UuidCol(),
+        ForeignKey("collections.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     captured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -49,6 +58,12 @@ class PortfolioSnapshot(Base):
 
     __table_args__ = (
         Index("ix_portfolio_snapshots_user_captured", "user_id", "captured_at"),
+        Index(
+            "ix_portfolio_snapshots_user_scope_captured",
+            "user_id",
+            "collection_id",
+            "captured_at",
+        ),
     )
 
 

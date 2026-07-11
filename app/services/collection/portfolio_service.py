@@ -185,13 +185,31 @@ _SNAPSHOT_RETENTION = timedelta(days=400)
 _SNAPSHOT_INTRADAY_WINDOW = timedelta(hours=48)
 
 
+def _snapshot_scope(collection_id: uuid.UUID | None):
+    """NULL-safe WHERE fragment isolating one snapshot series.
+
+    Every scope — the whole-vault "All" (NULL) and each collection — charts
+    only its OWN observations. Without this isolation a collection-sized
+    total captured while browsing that collection would land in the All
+    series (and vice versa), minting fake cliffs on the 1D chart.
+    """
+    if collection_id is None:
+        return PortfolioSnapshot.collection_id.is_(None)
+    return PortfolioSnapshot.collection_id == collection_id
+
+
 async def maybe_capture_snapshot(
     db: AsyncSession,
     user: User,
     total_value_usd: float,
     holdings_count: int,
+    collection_id: uuid.UUID | None = None,
 ) -> bool:
     """Persist the live canonical total, at most once per throttle window.
+
+    Scoped: the total is recorded under *collection_id*'s own series (NULL
+    = the whole vault), and the throttle/retention/compaction all operate
+    within that series only.
 
     Best effort — a failed snapshot must never break the read path that
     triggered it. Also enforces the retention window so the table stays
@@ -201,10 +219,11 @@ async def maybe_capture_snapshot(
         return False
     try:
         now = datetime.now(UTC)
+        scope = _snapshot_scope(collection_id)
         last = (
             await db.execute(
                 select(func.max(PortfolioSnapshot.captured_at)).where(
-                    PortfolioSnapshot.user_id == user.id
+                    PortfolioSnapshot.user_id == user.id, scope
                 )
             )
         ).scalar()
@@ -216,6 +235,7 @@ async def maybe_capture_snapshot(
         db.add(
             PortfolioSnapshot(
                 user_id=user.id,
+                collection_id=collection_id,
                 captured_at=now,
                 total_value_usd=Decimal(str(round(total_value_usd, 2))),
                 holdings_count=holdings_count,
@@ -224,6 +244,7 @@ async def maybe_capture_snapshot(
         await db.execute(
             delete(PortfolioSnapshot).where(
                 PortfolioSnapshot.user_id == user.id,
+                scope,
                 PortfolioSnapshot.captured_at < now - _SNAPSHOT_RETENTION,
             )
         )
@@ -237,6 +258,7 @@ async def maybe_capture_snapshot(
                 select(PortfolioSnapshot.id, PortfolioSnapshot.captured_at)
                 .where(
                     PortfolioSnapshot.user_id == user.id,
+                    scope,
                     PortfolioSnapshot.captured_at < cutoff,
                 )
                 .order_by(PortfolioSnapshot.captured_at.asc())
@@ -263,14 +285,19 @@ async def maybe_capture_snapshot(
 
 
 async def _intraday_snapshots(
-    db: AsyncSession, user: User, since: datetime
+    db: AsyncSession,
+    user: User,
+    since: datetime,
+    collection_id: uuid.UUID | None = None,
 ) -> list[tuple[datetime, float]]:
-    """Chronological (captured_at, total) observations after *since*."""
+    """Chronological (captured_at, total) observations after *since*,
+    limited to *collection_id*'s own series (NULL = the All series)."""
     rows = (
         await db.execute(
             select(PortfolioSnapshot.captured_at, PortfolioSnapshot.total_value_usd)
             .where(
                 PortfolioSnapshot.user_id == user.id,
+                _snapshot_scope(collection_id),
                 PortfolioSnapshot.captured_at > since,
             )
             .order_by(PortfolioSnapshot.captured_at.asc())
@@ -297,6 +324,7 @@ async def summary(
         total_value,
         card_count,
         cost_sum,
+        cost_value_sum,
         cost_count,
         grade_sum,
         grade_count,
@@ -312,6 +340,21 @@ async def summary(
                             (
                                 GradedCard.purchase_price_usd.is_not(None),
                                 GradedCard.purchase_price_usd,
+                            ),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                # Current value of ONLY the cost-basis cards, so P/L compares
+                # like-for-like. Summing the whole vault against a partial
+                # cost basis would count every no-cost card's value as gain.
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                GradedCard.purchase_price_usd.is_not(None),
+                                GradedCard.estimated_value_usd,
                             ),
                             else_=0,
                         )
@@ -376,10 +419,17 @@ async def summary(
     grade_sum = Decimal(str(grade_sum))
 
     avg_grade = float(grade_sum / grade_count) if grade_count else None
-    await maybe_capture_snapshot(db, user, float(total), card_count)
+    await maybe_capture_snapshot(
+        db, user, float(total), card_count, collection_id=collection_id
+    )
     if cost_count > 0:
-        pnl_usd: float | None = float(total - cost)
-        pnl_pct: float | None = float((total - cost) / cost * 100) if cost > 0 else 0.0
+        # P/L is value-vs-cost over the SAME population (cards with a
+        # recorded purchase price) — never whole-vault value vs partial cost.
+        cost_value = Decimal(str(cost_value_sum))
+        pnl_usd: float | None = float(cost_value - cost)
+        pnl_pct: float | None = (
+            float((cost_value - cost) / cost * 100) if cost > 0 else 0.0
+        )
         total_cost: float | None = float(cost)
     else:
         pnl_usd = None
@@ -596,7 +646,7 @@ async def history(
     # recorded (same canonical basis) instead of the raw-ratio model — every
     # range gets progressively truer the longer Loupe has been tracking.
     snap_rows = await _intraday_snapshots(
-        db, user, datetime.now(UTC) - _SNAPSHOT_RETENTION
+        db, user, datetime.now(UTC) - _SNAPSHOT_RETENTION, collection_id
     )
     snap_daily: dict[date, float] = {}
     for ts, v in snap_rows:
@@ -668,7 +718,7 @@ async def history(
         since = datetime.combine(
             date.fromisoformat(yesterday_anchor.date), datetime.min.time(), tzinfo=UTC
         )
-        snaps = await _intraday_snapshots(db, user, since)
+        snaps = await _intraday_snapshots(db, user, since, collection_id)
         if snaps:
             mid = [
                 PortfolioPoint(date=ts.isoformat(), price_usd=round(v, 2))
@@ -686,7 +736,9 @@ async def history(
     # Opportunistic snapshot of the live canonical total (throttled inside).
     # Runs AFTER the 1D splice so the snapshot written by this request never
     # appears inside its own response.
-    await maybe_capture_snapshot(db, user, canonical_total, len(rows))
+    await maybe_capture_snapshot(
+        db, user, canonical_total, len(rows), collection_id=collection_id
+    )
 
     first = points[0].price_usd if points else 0.0
     last = points[-1].price_usd if points else 0.0
