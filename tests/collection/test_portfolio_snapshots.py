@@ -239,3 +239,122 @@ async def test_long_ranges_chart_real_snapshots(db_session):
     assert values[-1] == 200.0
     # The week actually MOVES now.
     assert len(set(values)) >= 4, values
+
+
+# ── Collection-scoped series isolation ───────────────────────────────────
+# Snapshots are per-scope: the All series (collection_id NULL) and each
+# collection's series never mix. Regression for the poisoning bug where a
+# collection-sized total captured while browsing that collection landed in
+# the All series and minted fake cliffs on the 1D chart.
+
+
+async def _mk_collection_with(db, user: User, grade: GradedCard):
+    from app.models.collection import Collection, CollectionItem
+
+    col = Collection(user_id=user.id, name="Scoped")
+    db.add(col)
+    await db.commit()
+    db.add(CollectionItem(collection_id=col.id, graded_card_id=grade.id))
+    await db.commit()
+    return col
+
+
+@pytest.mark.anyio
+async def test_scoped_capture_never_lands_in_the_all_series(db_session):
+    user = await _mk_user(db_session)
+    g = await _mk_holding(db_session, user, "100.00")
+    col = await _mk_collection_with(db_session, user, g)
+
+    # Scoped summary (a user browsing one collection) captures a snapshot…
+    await portfolio_service.summary(db_session, user, col.id)
+
+    all_rows = (
+        (
+            await db_session.execute(
+                select(PortfolioSnapshot).where(
+                    PortfolioSnapshot.user_id == user.id,
+                    PortfolioSnapshot.collection_id.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    scoped_rows = (
+        (
+            await db_session.execute(
+                select(PortfolioSnapshot).where(
+                    PortfolioSnapshot.collection_id == col.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert all_rows == [], "scoped total must NOT poison the All series"
+    assert len(scoped_rows) == 1, "…it belongs to the collection's own series"
+
+
+@pytest.mark.anyio
+async def test_scoped_capture_throttles_independently_per_scope(db_session):
+    user = await _mk_user(db_session)
+    g = await _mk_holding(db_session, user, "100.00")
+    col = await _mk_collection_with(db_session, user, g)
+
+    first_all = await portfolio_service.maybe_capture_snapshot(
+        db_session, user, 100.0, 1
+    )
+    first_scoped = await portfolio_service.maybe_capture_snapshot(
+        db_session, user, 40.0, 1, collection_id=col.id
+    )
+    assert first_all is True
+    assert first_scoped is True, "a fresh All row must not throttle the scope"
+
+
+@pytest.mark.anyio
+async def test_scoped_history_ignores_all_series_snapshots(db_session):
+    """The Umbreon chart must never splice whole-vault observations."""
+    user = await _mk_user(db_session)
+    g = await _mk_holding(db_session, user, "100.00")
+    col = await _mk_collection_with(db_session, user, g)
+
+    now = datetime.now(UTC)
+    # A whole-vault observation from earlier today ($60k-style outlier).
+    db_session.add(
+        PortfolioSnapshot(
+            user_id=user.id,
+            collection_id=None,
+            captured_at=now - timedelta(hours=3),
+            total_value_usd=Decimal("60000.00"),
+            holdings_count=10,
+        )
+    )
+    await db_session.commit()
+
+    hist = await portfolio_service.history(db_session, user, "1D", col.id)
+    values = [p.price_usd for p in hist.points]
+    assert 60000.0 not in values, f"All-series total leaked into scope: {values}"
+
+
+@pytest.mark.anyio
+async def test_all_history_ignores_scoped_snapshots(db_session):
+    """…and the All chart must never splice a collection-sized total."""
+    user = await _mk_user(db_session)
+    g = await _mk_holding(db_session, user, "60000.00")
+    col = await _mk_collection_with(db_session, user, g)
+
+    now = datetime.now(UTC)
+    db_session.add(
+        PortfolioSnapshot(
+            user_id=user.id,
+            collection_id=col.id,
+            captured_at=now - timedelta(hours=3),
+            total_value_usd=Decimal("40.00"),
+            holdings_count=1,
+        )
+    )
+    await db_session.commit()
+
+    hist = await portfolio_service.history(db_session, user, "1D")
+    values = [p.price_usd for p in hist.points]
+    assert 40.0 not in values, f"scoped total leaked into the All chart: {values}"

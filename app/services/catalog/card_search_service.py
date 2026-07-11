@@ -1766,13 +1766,21 @@ async def resolve_pricing_for_local(
     return None
 
 
-async def get_card(card_id: str) -> dict[str, Any] | None:
+async def get_card(
+    card_id: str, *, force_refresh: bool = False
+) -> dict[str, Any] | None:
     """Look up a single card by composite ``<source>:<upstream_id>`` ID.
 
     Falls back to a local-DB lookup when given a UUID. On first view of a
     locally-seeded card we transparently resolve it on the matching upstream
     and persist the embedded pricing into ``Card.card_metadata`` so future
     requests are served from the DB without re-hitting upstream.
+
+    ``force_refresh`` re-runs the upstream resolve even when a cached
+    ``pricing_summary`` exists — the daily owned-card price tick uses this,
+    since a stale cached price would otherwise be served forever (the
+    normal path only resolves when pricing is entirely absent). The
+    negative cache is still honoured so a dead upstream isn't hammered.
     """
     if ":" not in card_id:
         # UUID fallback: resolve against the local catalog.
@@ -1821,11 +1829,12 @@ async def get_card(card_id: str) -> dict[str, Any] | None:
             # individually waits the full 4s on the dead provider, turning
             # a 4s blip into a 24s page load.
             neg_cache_key = f"loupe:resolve_neg:{as_uuid}"
-            if not cached_pricing and await _cache_get(neg_cache_key) is not None:
+            want_resolve = force_refresh or not cached_pricing
+            if want_resolve and await _cache_get(neg_cache_key) is not None:
                 # Skip the upstream resolve entirely and serve what we
                 # have from the local DB. Negative TTL is 5 min.
                 pass
-            elif not cached_pricing:
+            elif want_resolve:
                 resolved = None
                 upstream_match: tuple[str, str] | None = None
 

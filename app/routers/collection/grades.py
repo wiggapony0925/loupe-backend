@@ -19,6 +19,7 @@ from app.db import get_db
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
 from app.services.collection import graded_card_service, portfolio_service
+from app.tasks import price_freshness
 
 router = APIRouter(prefix="/grades", tags=["grades"])
 
@@ -198,6 +199,10 @@ async def get_history(
     collection_id: uuid.UUID | None = Query(None),
 ) -> dict[str, Any]:
     result = await portfolio_service.history(db, user, range, collection_id)
+    # Background top-up of stale owned-card prices (throttled per user) so
+    # tomorrow's chart has today's points — the chart read is the natural
+    # trigger now that the nightly price worker is offline.
+    price_freshness.kick_owned_price_refresh(user.id)
     return result.to_dict()
 
 
