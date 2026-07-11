@@ -175,6 +175,7 @@ async def build_snapshot(
     open_total = 0.0
     close_total = 0.0
     cost_total = Decimal("0")
+    cost_close_total = 0.0
     cost_count = 0
     grade_sum = Decimal("0")
     grade_count = 0
@@ -190,6 +191,7 @@ async def build_snapshot(
 
         if g.purchase_price_usd is not None:
             cost_total += g.purchase_price_usd
+            cost_close_total += v_close
             cost_count += 1
         if g.grade is not None:
             grade_sum += g.grade
@@ -246,9 +248,11 @@ async def build_snapshot(
     delta_pct_total = (delta_usd_total / open_total * 100.0) if open_total > 0 else 0.0
 
     if cost_count > 0:
-        pnl_usd: float | None = float(Decimal(str(close_total)) - cost_total)
+        # P/L is value-vs-cost over the SAME population (cards with a
+        # recorded purchase price) — mirrors portfolio_service.summary.
+        pnl_usd: float | None = float(Decimal(str(cost_close_total)) - cost_total)
         pnl_pct: float | None = (
-            float((Decimal(str(close_total)) - cost_total) / cost_total * 100)
+            float((Decimal(str(cost_close_total)) - cost_total) / cost_total * 100)
             if cost_total > 0
             else 0.0
         )

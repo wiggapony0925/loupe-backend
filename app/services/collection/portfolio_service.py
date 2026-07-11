@@ -22,6 +22,7 @@ from app.models.card import Card, CardSet
 from app.models.enums import GradeHouseEnum
 from app.models.grade import GradedCard
 from app.models.portfolio_snapshot import PortfolioSnapshot
+from app.models.sealed import SealedHolding
 from app.models.user import User
 from app.services.collection import collection_service
 from app.utils.logger import get_logger
@@ -325,6 +326,7 @@ async def summary(
         card_count,
         cost_sum,
         cost_count,
+        cost_value_sum,
         grade_sum,
         grade_count,
         unique_card_count,
@@ -349,6 +351,21 @@ async def summary(
                     func.sum(
                         case(
                             (GradedCard.purchase_price_usd.is_not(None), 1),
+                            else_=0,
+                        )
+                    ),
+                    0,
+                ),
+                # Current value of ONLY the cost-basis cards, so P/L compares
+                # like-for-like. Summing the whole vault against a partial
+                # cost basis would count every no-cost card's value as gain.
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                GradedCard.purchase_price_usd.is_not(None),
+                                GradedCard.estimated_value_usd,
+                            ),
                             else_=0,
                         )
                     ),
@@ -402,13 +419,54 @@ async def summary(
     grade_count = int(grade_count or 0)
     grade_sum = Decimal(str(grade_sum))
 
+    # Sealed-product rollup (qty x estimated value / purchase price) so the
+    # BACKEND defines whether sealed counts toward "collection value" — the
+    # clients render these fields instead of summing holdings themselves.
+    # Sealed lives outside collections, so a scoped summary is cards-only
+    # (zeros); opened boxes are excluded from the investment rollup.
+    sealed_value = Decimal("0")
+    sealed_cost = Decimal("0")
+    sealed_count = 0
+    if collection_id is None:
+        sealed_value_sum, sealed_cost_sum, sealed_count = (
+            await db.execute(
+                select(
+                    func.coalesce(
+                        func.sum(
+                            SealedHolding.estimated_value_usd * SealedHolding.quantity
+                        ),
+                        0,
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            SealedHolding.purchase_price_usd * SealedHolding.quantity
+                        ),
+                        0,
+                    ),
+                    func.count(SealedHolding.id),
+                ).where(
+                    SealedHolding.user_id == user.id,
+                    SealedHolding.deleted_at.is_(None),
+                    SealedHolding.opened_at.is_(None),
+                )
+            )
+        ).one()
+        sealed_value = Decimal(str(sealed_value_sum))
+        sealed_cost = Decimal(str(sealed_cost_sum))
+        sealed_count = int(sealed_count or 0)
+
     avg_grade = float(grade_sum / grade_count) if grade_count else None
     await maybe_capture_snapshot(
         db, user, float(total), card_count, collection_id=collection_id
     )
     if cost_count > 0:
-        pnl_usd: float | None = float(total - cost)
-        pnl_pct: float | None = float((total - cost) / cost * 100) if cost > 0 else 0.0
+        # P/L is value-vs-cost over the SAME population (cards with a
+        # recorded purchase price) — never whole-vault value vs partial cost.
+        cost_value = Decimal(str(cost_value_sum))
+        pnl_usd: float | None = float(cost_value - cost)
+        pnl_pct: float | None = (
+            float((cost_value - cost) / cost * 100) if cost > 0 else 0.0
+        )
         total_cost: float | None = float(cost)
     else:
         pnl_usd = None
@@ -427,6 +485,11 @@ async def summary(
         "loupeGradedCount": int(loupe_graded_count),
         "availableSets": available_sets,
         "availableTags": sorted(tags_seen.values(), key=str.lower),
+        # Sealed + combined — the canonical "collection value" definition.
+        "sealedValueUsd": float(sealed_value),
+        "sealedCostUsd": float(sealed_cost),
+        "sealedHoldingCount": sealed_count,
+        "combinedValueUsd": float(total + sealed_value),
     }
 
 

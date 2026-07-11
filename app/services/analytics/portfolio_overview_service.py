@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
 from app.models.user import User
-from app.services.analytics.home_feed_service import _change_pct_1y
+from app.services.analytics.home_feed_service import _change_1y
 from app.services.collection import collection_service
 from app.services.collection.portfolio_service import holding_value_usd
 
@@ -137,6 +137,7 @@ async def build_overview(
         )
         set_logo = s.image_url if s is not None else None
         year = c.year if c is not None and c.year is not None else None
+        change = _change_1y(c, value)
         holdings.append(
             {
                 "gradeId": str(g.id),
@@ -148,7 +149,10 @@ async def build_overview(
                 "valueUsd": value,
                 "grade": grade,
                 "year": year,
-                "changePct1y": _change_pct_1y(c, value),
+                "changePct1y": change[0] if change is not None else None,
+                # Absolute 1Y move from the SAME history baseline — clients
+                # must render this, never back-derive dollars from the %.
+                "changeUsd1y": change[1] if change is not None else None,
             }
         )
 
@@ -236,6 +240,7 @@ async def build_overview(
             "setName": m["setName"],
             "valueUsd": round(m["valueUsd"], 2),
             "changePct1y": m["changePct1y"],
+            "changeUsd1y": m["changeUsd1y"],
         }
 
     # --- Concentration (top-N share of total value) ----------------------

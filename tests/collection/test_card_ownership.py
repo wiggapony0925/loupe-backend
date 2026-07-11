@@ -63,6 +63,49 @@ async def test_ownership_composes_holdings_and_rollups(
 
 
 @pytest.mark.asyncio
+async def test_ownership_pl_ignores_copies_without_cost_basis(
+    client, auth_headers, db_session, created_user
+):
+    """P/L compares value vs cost over the SAME copies.
+
+    A copy without a purchase price contributes to ``holding_value_usd``
+    but must not inflate ``unrealized_pl_usd`` — its full value is not a
+    "gain" (mirrors the /v1/grades/summary semantics).
+    """
+    card = await make_card(db_session)
+    db_session.add_all(
+        [
+            GradedCard(
+                user_id=created_user.id,
+                card_id=card.id,
+                grade=Decimal("9.0"),
+                house=GradeHouseEnum.psa,
+                estimated_value_usd=Decimal("250.00"),
+                purchase_price_usd=Decimal("100.00"),
+            ),
+            GradedCard(  # no purchase recorded — value-only copy
+                user_id=created_user.id,
+                card_id=card.id,
+                grade=Decimal("10.0"),
+                house=GradeHouseEnum.psa,
+                estimated_value_usd=Decimal("500.00"),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(f"/v1/cards/{card.id}/ownership", headers=auth_headers)
+    body = assert_envelope_ok(resp)
+
+    assert Decimal(str(body["cost_basis_usd"])) == Decimal("100.00")
+    assert Decimal(str(body["holding_value_usd"])) == Decimal("750.00")
+    # 250 (value of the costed copy) - 100 cost = +150 (+150%),
+    # NOT 750 - 100 = +650.
+    assert Decimal(str(body["unrealized_pl_usd"])) == Decimal("150.00")
+    assert round(body["unrealized_pl_pct"], 1) == 150.0
+
+
+@pytest.mark.asyncio
 async def test_ownership_false_when_user_owns_none(client, auth_headers, db_session):
     card = await make_card(db_session)
     resp = await client.get(f"/v1/cards/{card.id}/ownership", headers=auth_headers)

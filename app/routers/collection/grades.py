@@ -167,11 +167,18 @@ async def create(
     description=(
         "Returns `{ totalValueUsd, cardCount, avgGrade, avgAccuracy, "
         "totalCostUsd, costBasisCardCount, unrealizedPnlUsd, "
-        "unrealizedPnlPct }`. All values are computed from the user's real "
-        "graded cards; `avgAccuracy` is null until the scan pipeline "
-        "reports per-job accuracy. The cost-basis fields are null when no "
-        "card has a recorded purchase price (so the UI can hide P/L "
-        "rather than display a misleading `$0`)."
+        "unrealizedPnlPct, sealedValueUsd, sealedCostUsd, "
+        "sealedHoldingCount, combinedValueUsd }`. All values are computed "
+        "from the user's real graded cards; `avgAccuracy` is null until "
+        "the scan pipeline reports per-job accuracy. The cost-basis "
+        "fields are null when no card has a recorded purchase price (so "
+        "the UI can hide P/L rather than display a misleading `$0`); "
+        "unrealized P/L compares value vs cost over only the cards with "
+        "a recorded purchase price. Sealed fields roll up unopened "
+        "sealed holdings (qty × value); `combinedValueUsd` = cards + "
+        "sealed and is THE canonical headline collection value. Sealed "
+        "is excluded (zeros) when `collection_id` scopes the summary — "
+        "collections contain cards only."
     ),
 )
 async def get_summary(

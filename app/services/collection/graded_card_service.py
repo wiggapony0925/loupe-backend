@@ -520,6 +520,11 @@ async def get_card_ownership(
     holdings: list[CardHolding] = []
     cost_total = Decimal("0")
     value_total = Decimal("0")
+    # Value of ONLY the costed copies, so the rolled-up P/L compares
+    # like-for-like (mirrors portfolio_service.summary). Subtracting a
+    # partial cost basis from the all-copies value would count every
+    # no-cost copy's full value as gain.
+    cost_value_total = Decimal("0")
     has_cost = False
     has_value = False
 
@@ -535,6 +540,8 @@ async def get_card_ownership(
         if r.purchase_price_usd is not None:
             cost_total += r.purchase_price_usd
             has_cost = True
+            if r.estimated_value_usd is not None:
+                cost_value_total += r.estimated_value_usd
         if r.estimated_value_usd is not None:
             value_total += r.estimated_value_usd
             has_value = True
@@ -565,7 +572,9 @@ async def get_card_ownership(
     total_pl: Decimal | None = None
     total_pct: float | None = None
     if cost_basis is not None and holding_value is not None:
-        total_pl = holding_value - cost_basis
+        # P/L over the costed copies only — never all-copies value minus
+        # a partial cost basis.
+        total_pl = cost_value_total - cost_basis
         if cost_basis > 0:
             total_pct = float(total_pl / cost_basis * 100)
 

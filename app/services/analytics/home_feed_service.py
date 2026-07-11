@@ -29,13 +29,15 @@ from app.services.collection import collection_service
 from app.services.collection.portfolio_service import _extract_price_history, _value_on
 
 
-def _change_pct_1y(
+def _change_1y(
     card: Card | None, estimated_value_usd: float | None
-) -> float | None:
-    """Compute trailing 1-year change % from real price_history.
+) -> tuple[float, float] | None:
+    """Compute the trailing 1-year change from real price_history.
 
-    Returns ``None`` when we don't have enough history to make an honest
-    claim (less than two distinct dated points covering >= 30 days).
+    Returns ``(pct, usd)`` — the % change AND the absolute dollar move from
+    the SAME history baseline, so no client ever back-derives one from the
+    other. Returns ``None`` when we don't have enough history to make an
+    honest claim (less than two distinct dated points covering >= 30 days).
     """
     hist = _extract_price_history(card)
     if len(hist) < 2:
@@ -52,7 +54,15 @@ def _change_pct_1y(
     if price_then <= 0:
         return None
     pct = (price_now - price_then) / price_then * 100.0
-    return round(pct, 2)
+    return round(pct, 2), round(price_now - price_then, 2)
+
+
+def _change_pct_1y(
+    card: Card | None, estimated_value_usd: float | None
+) -> float | None:
+    """Trailing 1-year change % (see :func:`_change_1y`)."""
+    change = _change_1y(card, estimated_value_usd)
+    return change[0] if change is not None else None
 
 
 async def top_movers(
@@ -91,7 +101,7 @@ async def top_movers(
         est = (
             float(g.estimated_value_usd) if g.estimated_value_usd is not None else None
         )
-        change_pct = _change_pct_1y(c, est)
+        change = _change_1y(c, est)
         scored.append(
             {
                 "gradeId": str(g.id),
@@ -107,7 +117,10 @@ async def top_movers(
                 ),
                 "cardSetName": s.name if s is not None else None,
                 "priceUsd": est,
-                "changePct1y": change_pct,
+                "changePct1y": change[0] if change is not None else None,
+                # Absolute 1Y move from the SAME history baseline — clients
+                # must render this, never back-derive dollars from the %.
+                "changeUsd1y": change[1] if change is not None else None,
             }
         )
         if len(scored) >= enrich_limit:

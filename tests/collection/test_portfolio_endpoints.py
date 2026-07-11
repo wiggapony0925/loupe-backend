@@ -94,6 +94,109 @@ async def test_summary_pnl_math_when_cost_basis_set(
 
 
 @pytest.mark.asyncio
+async def test_summary_pnl_ignores_cards_without_cost_basis(
+    client, auth_headers, db_session, created_user
+):
+    """P/L compares value vs cost over the SAME population.
+
+    A card without a purchase price contributes to `totalValueUsd` but must
+    not inflate `unrealizedPnlUsd` — its full value is not a "gain".
+    """
+    card = await make_card(db_session)
+    seeds = [
+        # (grade, estimate, purchase) — the 500.00 card has no cost basis.
+        ("9.5", "100.00", "80.00"),
+        ("10.0", "250.00", "120.00"),
+        ("8.0", "500.00", None),
+    ]
+    for grade, val, cost in seeds:
+        db_session.add(
+            GradedCard(
+                user_id=created_user.id,
+                card_id=card.id,
+                grade=Decimal(grade),
+                house=GradeHouseEnum.loupe,
+                estimated_value_usd=Decimal(val),
+                purchase_price_usd=Decimal(cost) if cost is not None else None,
+            )
+        )
+    await db_session.commit()
+
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/summary", headers=auth_headers)
+    )
+    assert float(body["totalValueUsd"]) == pytest.approx(850.0)
+    assert float(body["totalCostUsd"]) == pytest.approx(200.0)
+    assert body["costBasisCardCount"] == 2
+    # 350 (value of the two cost-basis cards) - 200 cost = +150 (+75%),
+    # NOT 850 - 200 = +650.
+    assert float(body["unrealizedPnlUsd"]) == pytest.approx(150.0)
+    assert float(body["unrealizedPnlPct"]) == pytest.approx(75.0)
+
+
+@pytest.mark.asyncio
+async def test_summary_rolls_up_sealed_and_combined_value(
+    client, auth_headers, db_session, created_user
+):
+    """The backend defines "collection value": cards + unopened sealed.
+
+    Sealed value/cost multiply by quantity; opened boxes are excluded from
+    the investment rollup; `combinedValueUsd` = cards + sealed so both
+    clients render the same headline without summing holdings themselves.
+    """
+    from app.models.enums import SealedProductTypeEnum, TcgEnum
+    from app.models.sealed import SealedHolding, SealedProduct
+
+    card = await make_card(db_session)
+    db_session.add(
+        GradedCard(
+            user_id=created_user.id,
+            card_id=card.id,
+            grade=Decimal("9.0"),
+            house=GradeHouseEnum.loupe,
+            estimated_value_usd=Decimal("100.00"),
+        )
+    )
+    product = SealedProduct(
+        tcg=TcgEnum.pokemon,
+        product_type=SealedProductTypeEnum.booster_box,
+        name="Test Booster Box",
+        msrp_usd=Decimal("161.64"),
+    )
+    db_session.add(product)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            SealedHolding(  # 2 x $200 value, 2 x $150 cost
+                user_id=created_user.id,
+                product_id=product.id,
+                quantity=2,
+                purchase_price_usd=Decimal("150.00"),
+                estimated_value_usd=Decimal("200.00"),
+            ),
+            SealedHolding(  # opened → excluded from the rollup
+                user_id=created_user.id,
+                product_id=product.id,
+                quantity=1,
+                purchase_price_usd=Decimal("120.00"),
+                estimated_value_usd=Decimal("500.00"),
+                opened_at=datetime.now(UTC),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    body = assert_envelope_ok(
+        await client.get("/v1/grades/summary", headers=auth_headers)
+    )
+    assert float(body["totalValueUsd"]) == pytest.approx(100.0)
+    assert float(body["sealedValueUsd"]) == pytest.approx(400.0)
+    assert float(body["sealedCostUsd"]) == pytest.approx(300.0)
+    assert body["sealedHoldingCount"] == 1
+    assert float(body["combinedValueUsd"]) == pytest.approx(500.0)
+
+
+@pytest.mark.asyncio
 async def test_grade_patch_can_clear_nullable_value_fields(
     client, auth_headers, db_session, created_user
 ):
@@ -165,9 +268,11 @@ async def test_summary_pnl_only_counts_cards_with_recorded_cost(
     assert float(body["totalValueUsd"]) == pytest.approx(600.0)
     assert float(body["totalCostUsd"]) == pytest.approx(60.0)
     assert body["costBasisCardCount"] == 1
-    # P/L is value(600) - cost(60) = 540; pct = 540/60*100 = 900
-    assert float(body["unrealizedPnlUsd"]) == pytest.approx(540.0)
-    assert float(body["unrealizedPnlPct"]) == pytest.approx(900.0)
+    # P/L compares like-for-like: value of the tracked card (100) - its
+    # cost (60) = 40; pct = 40/60*100 ≈ 66.67. The 500.00 no-cost card
+    # contributes to totalValueUsd but never to P/L.
+    assert float(body["unrealizedPnlUsd"]) == pytest.approx(40.0)
+    assert float(body["unrealizedPnlPct"]) == pytest.approx(66.6667, rel=1e-4)
 
 
 @pytest.mark.asyncio
