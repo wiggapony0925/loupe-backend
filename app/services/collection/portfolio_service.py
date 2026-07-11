@@ -74,6 +74,22 @@ class PortfolioHistory:
     points: list[PortfolioPoint]
     delta_usd: float
     delta_pct: float
+    # ── Chart intelligence (additive; older clients simply ignore) ──────
+    #: Highest / lowest rendered value across the series.
+    high_usd: float | None = None
+    low_usd: float | None = None
+    #: Total recorded cost basis for the scope (None = nothing recorded) —
+    #: lets the chart draw the break-even line without a second call.
+    cost_basis_usd: float | None = None
+    #: Biggest single-bucket rise / drop: {"date", "deltaUsd"}.
+    best_day: dict | None = None
+    worst_day: dict | None = None
+    #: Which holdings drove the range's move, largest |Δ| first:
+    #: [{gradeId, cardId, name, imageUrl, deltaUsd, deltaPct}].
+    movers: list[dict] | None = None
+    #: In-range acquisitions, newest first:
+    #: [{date, count, valueUsd, name}].
+    events: list[dict] | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +97,13 @@ class PortfolioHistory:
             "points": [p.to_dict() for p in self.points],
             "deltaUsd": self.delta_usd,
             "deltaPct": self.delta_pct,
+            "highUsd": self.high_usd,
+            "lowUsd": self.low_usd,
+            "costBasisUsd": self.cost_basis_usd,
+            "bestDay": self.best_day,
+            "worstDay": self.worst_day,
+            "movers": self.movers or [],
+            "events": self.events or [],
         }
 
 
@@ -602,6 +625,11 @@ async def history(
     # line between past buckets; it never sets the absolute level (the raw
     # catalog price is grade-agnostic and would undervalue slabs).
     canonical_total = 0.0
+    cost_basis_total = 0.0
+    has_cost_basis = False
+    # Parallel context for the intelligence block (attribution + events):
+    # per_card_history stays the hot bucket-loop shape.
+    holdings_ctx: list[tuple[GradedCard, Card | None, float, list, float | None]] = []
     for g, c in rows:
         hist = _extract_price_history(c)
         if hist:
@@ -614,7 +642,11 @@ async def history(
         # in which case the card stays flat at its canonical value.
         raw_ref = _value_on(None, hist, today) if hist else None
         per_card_history.append((value, hist, raw_ref))
+        holdings_ctx.append((g, c, value, hist, raw_ref))
         canonical_total += value
+        if g.purchase_price_usd is not None:
+            cost_basis_total += float(g.purchase_price_usd)
+            has_cost_basis = True
     earliest = min(earliest_dates) if earliest_dates else today - timedelta(days=30)
 
     buckets = _bucket_dates(range_, earliest)
@@ -723,8 +755,94 @@ async def history(
     last = points[-1].price_usd if points else 0.0
     delta_usd = round(last - first, 2)
     delta_pct = round((delta_usd / first * 100), 2) if first > 0 else 0.0
+
+    # ── Chart intelligence — what Robinhood doesn't tell you ────────────
+    # All derived from data this function already loaded; no extra queries.
+
+    high_usd = round(max(p.price_usd for p in points), 2) if points else None
+    low_usd = round(min(p.price_usd for p in points), 2) if points else None
+
+    # Best/worst bucket-over-bucket move. Skipped for 1D (its points are
+    # intraday observations — "best day" doesn't apply within a day).
+    best_day: dict | None = None
+    worst_day: dict | None = None
+    if range_ != "1D" and len(points) >= 3:
+        best = worst = None
+        for prev, cur in zip(points, points[1:], strict=False):
+            step = round(cur.price_usd - prev.price_usd, 2)
+            if best is None or step > best[1]:
+                best = (cur.date, step)
+            if worst is None or step < worst[1]:
+                worst = (cur.date, step)
+        if best is not None and best[1] > 0:
+            best_day = {"date": best[0], "deltaUsd": best[1]}
+        if worst is not None and worst[1] < 0:
+            worst_day = {"date": worst[0], "deltaUsd": worst[1]}
+
+    # Attribution: each holding's contribution to the range move, using the
+    # SAME ratio model as the curve itself (value × raw-price ratio), so the
+    # per-card deltas are consistent with what the line shows.
+    range_start = buckets[0] if buckets else today
+    movers: list[dict] = []
+    for g, c, value, hist, raw_ref in holdings_ctx:
+        if not hist or raw_ref is None or raw_ref <= 0:
+            continue  # flat by construction → contributed nothing
+        raw_first = _value_on(
+            None,
+            hist,
+            range_start,
+            live_fallback=raw_ref,
+            max_carry_days=max_carry_days,
+        )
+        card_delta = round(value - value * (raw_first / raw_ref), 2)
+        if abs(card_delta) < 0.01:
+            continue
+        base = value * (raw_first / raw_ref)
+        movers.append(
+            {
+                "gradeId": str(g.id),
+                "cardId": str(g.card_id) if g.card_id else None,
+                "name": c.name if c is not None else None,
+                "imageUrl": c.image_url if c is not None else None,
+                "deltaUsd": card_delta,
+                "deltaPct": round(card_delta / base * 100, 2) if base > 0 else 0.0,
+            }
+        )
+    movers.sort(key=lambda m: abs(m["deltaUsd"]), reverse=True)
+    movers = movers[:3]
+
+    # Acquisition markers: cards added inside the charted window, grouped by
+    # day (newest first) so the chart can pin "you added N cards here" dots.
+    events_by_day: dict[str, dict] = {}
+    for g, c, value, _hist, _raw in holdings_ctx:
+        if g.graded_at is None:
+            continue
+        d = g.graded_at.date()
+        if d < range_start or d > today:
+            continue
+        key = d.isoformat()
+        entry = events_by_day.setdefault(
+            key,
+            {"date": key, "count": 0, "valueUsd": 0.0, "name": None},
+        )
+        entry["count"] += 1
+        entry["valueUsd"] = round(entry["valueUsd"] + value, 2)
+        if entry["name"] is None and c is not None:
+            entry["name"] = c.name
+    events = sorted(events_by_day.values(), key=lambda e: e["date"], reverse=True)[:20]
+
     return PortfolioHistory(
-        range=range_, points=points, delta_usd=delta_usd, delta_pct=delta_pct
+        range=range_,
+        points=points,
+        delta_usd=delta_usd,
+        delta_pct=delta_pct,
+        high_usd=high_usd,
+        low_usd=low_usd,
+        cost_basis_usd=round(cost_basis_total, 2) if has_cost_basis else None,
+        best_day=best_day,
+        worst_day=worst_day,
+        movers=movers,
+        events=events,
     )
 
 
