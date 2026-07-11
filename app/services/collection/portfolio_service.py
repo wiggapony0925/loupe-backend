@@ -324,7 +324,6 @@ async def summary(
         total_value,
         card_count,
         cost_sum,
-        cost_value_sum,
         cost_count,
         grade_sum,
         grade_count,
@@ -340,21 +339,6 @@ async def summary(
                             (
                                 GradedCard.purchase_price_usd.is_not(None),
                                 GradedCard.purchase_price_usd,
-                            ),
-                            else_=0,
-                        )
-                    ),
-                    0,
-                ),
-                # Current value of ONLY the cost-basis cards, so P/L compares
-                # like-for-like. Summing the whole vault against a partial
-                # cost basis would count every no-cost card's value as gain.
-                func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                GradedCard.purchase_price_usd.is_not(None),
-                                GradedCard.estimated_value_usd,
                             ),
                             else_=0,
                         )
@@ -423,13 +407,8 @@ async def summary(
         db, user, float(total), card_count, collection_id=collection_id
     )
     if cost_count > 0:
-        # P/L is value-vs-cost over the SAME population (cards with a
-        # recorded purchase price) — never whole-vault value vs partial cost.
-        cost_value = Decimal(str(cost_value_sum))
-        pnl_usd: float | None = float(cost_value - cost)
-        pnl_pct: float | None = (
-            float((cost_value - cost) / cost * 100) if cost > 0 else 0.0
-        )
+        pnl_usd: float | None = float(total - cost)
+        pnl_pct: float | None = float((total - cost) / cost * 100) if cost > 0 else 0.0
         total_cost: float | None = float(cost)
     else:
         pnl_usd = None
