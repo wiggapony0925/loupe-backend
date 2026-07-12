@@ -14,16 +14,21 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_user
+from app.auth.dependencies import require_user, user_rate_limit
 from app.db import get_db
 from app.models.user import User
 from app.services.analytics import home_feed_service as home_service
 
 router = APIRouter(prefix="/home", tags=["home"])
 
+# Per-USER cap — fires on every app open; 60/min is far above real usage
+# but bounds a runaway client loop.
+_feed_limit = user_rate_limit(limit=60, window_seconds=60, name="home.feed")
+
 
 @router.get(
     "/feed",
+    dependencies=[Depends(_feed_limit)],
     summary="Aggregated home-screen rails",
     description=(
         "Returns ``{ topMovers, recentScans }`` for the authenticated user. "

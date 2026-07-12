@@ -14,16 +14,24 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_user
+from app.auth.dependencies import require_user, user_rate_limit
 from app.db import get_db
 from app.models.user import User
 from app.services.analytics import portfolio_overview_service
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
+# Per-USER cap: this endpoint walks the whole vault + per-card price
+# history. 60/min never touches a real client (they poll at most ~1/min)
+# but stops a scripted loop from turning one account into a CPU sink.
+_overview_limit = user_rate_limit(
+    limit=60, window_seconds=60, name="analytics.overview"
+)
+
 
 @router.get(
     "/overview",
+    dependencies=[Depends(_overview_limit)],
     summary="Server-computed analytics rollup",
     description=(
         "Returns the data the mobile Analytics tab renders, all at once. "

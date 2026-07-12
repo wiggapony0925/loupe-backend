@@ -1,4 +1,4 @@
-"""WebSocket endpoint for live scan progress updates."""
+"""WebSocket endpoints for live per-user pushes (scan progress, price ticks)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.auth.jwt import verify_token
 from app.db import get_sessionmaker
 from app.models.user import User
-from app.platform.cache_config import SCAN_PUBSUB_CHANNEL
+from app.platform.cache_config import PRICE_PUBSUB_CHANNEL, SCAN_PUBSUB_CHANNEL
 from app.platform.redis_client import get_redis
 from app.platform.ws_manager import get_manager, ws_envelope
 from app.utils.logger import get_logger
@@ -39,7 +39,9 @@ async def _authenticate(token: str) -> User | None:
     return None
 
 
-async def _redis_relay(user_id: uuid.UUID, ws: WebSocket) -> None:
+async def _redis_relay(
+    user_id: uuid.UUID, ws: WebSocket, channel_template: str
+) -> None:
     """Forward Redis pub/sub messages for this user to the connected WS."""
     redis = await get_redis()
     pubsub = None
@@ -47,7 +49,7 @@ async def _redis_relay(user_id: uuid.UUID, ws: WebSocket) -> None:
         return
     try:
         pubsub = redis.pubsub()
-        channel = SCAN_PUBSUB_CHANNEL.format(user_id=user_id)
+        channel = channel_template.format(user_id=user_id)
         await pubsub.subscribe(channel)
         async for message in pubsub.listen():
             if message.get("type") != "message":
@@ -72,19 +74,15 @@ async def _redis_relay(user_id: uuid.UUID, ws: WebSocket) -> None:
                 pass
 
 
-@router.websocket("/ws/scans")
-async def scan_progress_socket(
-    ws: WebSocket,
-    token: str = Query(..., description="Access token (JWT) for auth."),
-) -> None:
-    """Push real-time scan progress events to the authenticated user."""
+async def _serve_user_socket(ws: WebSocket, token: str, channel_template: str) -> None:
+    """Shared lifecycle for per-user push sockets: auth → hello → relay."""
     user = await _authenticate(token)
     if user is None:
         await ws.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     manager = get_manager()
     await manager.connect(str(user.id), ws)
-    relay_task = asyncio.create_task(_redis_relay(user.id, ws))
+    relay_task = asyncio.create_task(_redis_relay(user.id, ws, channel_template))
     try:
         await ws.send_text(json.dumps(ws_envelope("hello", {"user_id": str(user.id)})))
         while True:
@@ -101,6 +99,29 @@ async def scan_progress_socket(
         except (asyncio.CancelledError, Exception):
             pass
         await manager.disconnect(str(user.id), ws)
+
+
+@router.websocket("/ws/scans")
+async def scan_progress_socket(
+    ws: WebSocket,
+    token: str = Query(..., description="Access token (JWT) for auth."),
+) -> None:
+    """Push real-time scan progress events to the authenticated user."""
+    await _serve_user_socket(ws, token, SCAN_PUBSUB_CHANNEL)
+
+
+@router.websocket("/ws/prices")
+async def price_feed_socket(
+    ws: WebSocket,
+    token: str = Query(..., description="Access token (JWT) for auth."),
+) -> None:
+    """Push live ``price.tick`` frames for the cards the user owns.
+
+    Ticks fire whenever a persisted price observation actually changes a
+    card's price (new daily point or an intraday move) — see
+    ``price_feed_service.publish_price_tick``.
+    """
+    await _serve_user_socket(ws, token, PRICE_PUBSUB_CHANNEL)
 
 
 __all__ = ["router"]

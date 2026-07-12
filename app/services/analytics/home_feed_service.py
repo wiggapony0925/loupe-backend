@@ -19,8 +19,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.models.card import Card, CardSet
 from app.models.grade import GradedCard
@@ -78,26 +79,51 @@ async def top_movers(
     (cheap upper bound on price_history extraction); ``limit`` caps the
     rows returned to the client. ``collection_id`` scopes the movers to a
     single collection via the same ``holdings_scope`` seam the dashboard uses.
+
+    The dedupe-to-newest-copy-per-card AND the ``enrich_limit`` cap both
+    happen in SQL (window function), so a 5k-card vault costs the same
+    bounded fetch as a 50-card one — this endpoint fires on every app
+    open and must not scale with vault size.
     """
     scope = collection_service.holdings_scope(collection_id, user)
-    stmt = (
-        select(GradedCard, Card, CardSet)
-        .outerjoin(Card, Card.id == GradedCard.card_id)
-        .outerjoin(CardSet, CardSet.id == Card.set_id)
-        .where(GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None))
-        .order_by(GradedCard.graded_at.desc().nulls_last())
-    )
+    inner_where = [
+        GradedCard.user_id == user.id,
+        GradedCard.deleted_at.is_(None),
+        GradedCard.card_id.is_not(None),
+    ]
     if scope is not None:
-        stmt = stmt.where(scope)
+        inner_where.append(scope)
+    # rn = 1 selects the newest copy per distinct card; the outer ORDER BY /
+    # LIMIT keeps the first `enrich_limit` distinct cards by that recency —
+    # byte-identical semantics to the old Python loop, without fetching
+    # every row in the vault.
+    ranked = (
+        select(
+            GradedCard,
+            func.row_number()
+            .over(
+                partition_by=GradedCard.card_id,
+                order_by=GradedCard.graded_at.desc().nulls_last(),
+            )
+            .label("rn"),
+        )
+        .where(*inner_where)
+        .subquery()
+    )
+    newest_copy = aliased(GradedCard, ranked)
+    stmt = (
+        select(newest_copy, Card, CardSet)
+        .outerjoin(Card, Card.id == newest_copy.card_id)
+        .outerjoin(CardSet, CardSet.id == Card.set_id)
+        .where(ranked.c.rn == 1)
+        .order_by(ranked.c.graded_at.desc().nulls_last())
+        .limit(enrich_limit)
+    )
     rows = (await db.execute(stmt)).all()
 
-    seen: set[str] = set()
     scored: list[dict[str, Any]] = []
     for g, c, s in rows:
-        cid = str(g.card_id) if g.card_id is not None else None
-        if cid is None or cid in seen:
-            continue
-        seen.add(cid)
+        cid = str(g.card_id)
         est = (
             float(g.estimated_value_usd) if g.estimated_value_usd is not None else None
         )
@@ -123,8 +149,6 @@ async def top_movers(
                 "changeUsd1y": change[1] if change is not None else None,
             }
         )
-        if len(scored) >= enrich_limit:
-            break
 
     # Sort by |change_pct| desc; rows without history sink to the bottom.
     scored.sort(key=lambda r: abs(r["changePct1y"] or -1), reverse=True)

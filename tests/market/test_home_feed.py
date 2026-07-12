@@ -101,6 +101,10 @@ async def test_home_feed_top_movers_ranks_by_abs_change_1y(
     assert movers[1]["cardName"] == "Mover Down"
     assert movers[1]["changePct1y"] == -50.0
     assert movers[2]["cardName"] == "Mover Flat"
+    # Absolute 1Y move ships alongside the % from the SAME baseline, so
+    # clients never back-derive dollars from the percentage.
+    assert movers[0]["changeUsd1y"] == 100.0
+    assert movers[1]["changeUsd1y"] == -100.0
 
 
 @pytest.mark.asyncio

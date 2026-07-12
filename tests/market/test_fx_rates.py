@@ -44,6 +44,38 @@ async def test_live_fetch_merges_fiat_and_crypto(monkeypatch):
 
 
 @pytest.mark.anyio
+async def test_currency_catalog_ships_with_every_rate_source(monkeypatch):
+    """The metadata catalog rides along on live, cached, AND static docs
+    so clients render symbols/decimals from ONE source instead of
+    hand-copied tables."""
+
+    async def fake_live():
+        return fx_service._complete({"EUR": 0.5})
+
+    monkeypatch.setattr(fx_service, "_fetch_live", fake_live)
+
+    live_doc = await fx_service.get_rates(force_refresh=True)
+    cached_doc = await fx_service.get_rates()  # L2 hit from the line above
+
+    async def broken_live():
+        raise RuntimeError("upstream down")
+
+    monkeypatch.setattr(fx_service, "_fetch_live", broken_live)
+    static_doc = await fx_service.get_rates(force_refresh=True)
+    assert static_doc["source"] == "static"
+
+    catalog_codes = {c["code"] for c in fx_service.CURRENCY_CATALOG}
+    for doc in (live_doc, cached_doc, static_doc):
+        entries = doc["currencies"]
+        assert {c["code"] for c in entries} == catalog_codes
+        for entry in entries:
+            assert set(entry) == {"code", "name", "symbol", "flag", "kind", "decimals"}
+        # Every cataloged code has a rate — no orphan metadata.
+        for code in catalog_codes:
+            assert code in doc["rates"], code
+
+
+@pytest.mark.anyio
 async def test_second_call_serves_from_cache(monkeypatch):
     calls = {"n": 0}
 

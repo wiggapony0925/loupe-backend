@@ -32,6 +32,11 @@ _log = get_logger("portfolio")
 
 PortfolioRange = Literal["1D", "1W", "1M", "3M", "YTD", "1Y", "ALL"]
 
+# Sparklines are bounded to the newest N holdings — comfortably above the
+# clients' largest visible page (mobile vault fetches 300) while keeping
+# the endpoint's cost independent of vault size.
+_SPARKLINE_MAX_ROWS = 500
+
 _RANGE_BUCKETS: dict[str, tuple[timedelta | None, str]] = {
     # delta_from_now, bucket_granularity
     "1D": (timedelta(days=1), "hour"),
@@ -124,19 +129,34 @@ class CardSparkline:
 
 
 async def _load_grades_with_cards(
-    db: AsyncSession, user: User, collection_id: uuid.UUID | None = None
+    db: AsyncSession,
+    user: User,
+    collection_id: uuid.UUID | None = None,
+    *,
+    newest_first_limit: int | None = None,
 ) -> list[tuple[GradedCard, Card | None]]:
+    """Load the user's holdings (+ catalog card) in one join.
+
+    ``newest_first_limit`` bounds the fetch to the N most recently graded
+    holdings — use it for per-row VISUALS (sparklines) where a bounded
+    subset is fine. Leave it ``None`` for anything that must see every
+    holding (the portfolio history total, for instance) — a bounded total
+    would silently undercount large vaults.
+    """
     where = [GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None)]
     scope = collection_service.holdings_scope(collection_id, user)
     if scope is not None:
         where.append(scope)
-    rows = (
-        await db.execute(
-            select(GradedCard, Card)
-            .outerjoin(Card, Card.id == GradedCard.card_id)
-            .where(*where)
+    stmt = (
+        select(GradedCard, Card)
+        .outerjoin(Card, Card.id == GradedCard.card_id)
+        .where(*where)
+    )
+    if newest_first_limit is not None:
+        stmt = stmt.order_by(GradedCard.graded_at.desc().nulls_last()).limit(
+            newest_first_limit
         )
-    ).all()
+    rows = (await db.execute(stmt)).all()
     return [(g, c) for (g, c) in rows]
 
 
@@ -917,7 +937,13 @@ async def sparklines(
     collection_id: uuid.UUID | None = None,
 ) -> list[dict]:
     """Per-card 14-point trend pulled from real `price_history`."""
-    rows = await _load_grades_with_cards(db, user, collection_id)
+    # Sparklines are per-ROW visuals: the clients render at most a few
+    # hundred rows (mobile vault pages at 300), so bounding the fetch to
+    # the newest holdings keeps this endpoint O(bound) instead of
+    # O(vault). Rows beyond the bound simply render without a sparkline.
+    rows = await _load_grades_with_cards(
+        db, user, collection_id, newest_first_limit=_SPARKLINE_MAX_ROWS
+    )
     out: list[dict] = []
     for g, c in rows:
         hist = _extract_price_history(c)

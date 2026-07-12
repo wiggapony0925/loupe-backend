@@ -24,5 +24,7 @@ GRADING_PIPELINE_CONCURRENCY = 2  # per worker
 # --- Redis key prefix ---
 REDIS_KEY_PREFIX = "loupe"
 
-# --- WebSocket channel template ---
+# --- WebSocket channel templates ---
 SCAN_PUBSUB_CHANNEL = "loupe:scans:user:{user_id}"
+# Live price ticks for the cards a user owns (see price_feed_service).
+PRICE_PUBSUB_CHANNEL = "loupe:prices:user:{user_id}"

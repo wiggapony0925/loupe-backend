@@ -57,6 +57,8 @@ CRYPTO_IDS = {
     "ethereum": "ETH",
     "solana": "SOL",
     "usd-coin": "USDC",
+    "tether": "USDT",
+    "matic-network": "MATIC",
 }
 
 #: Last-resort snapshot (kept in sync with the clients' historical tables).
@@ -81,7 +83,41 @@ STATIC_RATES: dict[str, float] = {
     "ETH": 1 / 3_120,
     "SOL": 1 / 152,
     "USDC": 1.0,
+    "USDT": 1.0,
+    "MATIC": 1 / 0.71,
 }
+
+# fmt: off
+#: Display metadata for every supported currency — served alongside the
+#: rates so BOTH clients render names/symbols/decimals from this ONE
+#: catalog instead of hand-copied tables that drift. Adding a currency
+#: here (plus a rate source above) lights it up on web + mobile without
+#: an app release; the clients' static tables are first-paint/offline
+#: fallback only.
+CURRENCY_CATALOG: list[dict[str, Any]] = [
+    {"code": "USD", "name": "US Dollar", "symbol": "$", "flag": "🇺🇸", "kind": "fiat", "decimals": 2},
+    {"code": "EUR", "name": "Euro", "symbol": "€", "flag": "🇪🇺", "kind": "fiat", "decimals": 2},
+    {"code": "GBP", "name": "British Pound", "symbol": "£", "flag": "🇬🇧", "kind": "fiat", "decimals": 2},
+    {"code": "JPY", "name": "Japanese Yen", "symbol": "¥", "flag": "🇯🇵", "kind": "fiat", "decimals": 0},
+    {"code": "CAD", "name": "Canadian Dollar", "symbol": "C$", "flag": "🇨🇦", "kind": "fiat", "decimals": 2},
+    {"code": "AUD", "name": "Australian Dollar", "symbol": "A$", "flag": "🇦🇺", "kind": "fiat", "decimals": 2},
+    {"code": "CHF", "name": "Swiss Franc", "symbol": "₣", "flag": "🇨🇭", "kind": "fiat", "decimals": 2},
+    {"code": "CNY", "name": "Chinese Yuan", "symbol": "¥", "flag": "🇨🇳", "kind": "fiat", "decimals": 2},
+    {"code": "HKD", "name": "Hong Kong Dollar", "symbol": "HK$", "flag": "🇭🇰", "kind": "fiat", "decimals": 2},
+    {"code": "SGD", "name": "Singapore Dollar", "symbol": "S$", "flag": "🇸🇬", "kind": "fiat", "decimals": 2},
+    {"code": "KRW", "name": "South Korean Won", "symbol": "₩", "flag": "🇰🇷", "kind": "fiat", "decimals": 0},
+    {"code": "INR", "name": "Indian Rupee", "symbol": "₹", "flag": "🇮🇳", "kind": "fiat", "decimals": 2},
+    {"code": "MXN", "name": "Mexican Peso", "symbol": "$", "flag": "🇲🇽", "kind": "fiat", "decimals": 2},
+    {"code": "BRL", "name": "Brazilian Real", "symbol": "R$", "flag": "🇧🇷", "kind": "fiat", "decimals": 2},
+    {"code": "AED", "name": "UAE Dirham", "symbol": "د.إ", "flag": "🇦🇪", "kind": "fiat", "decimals": 2},
+    {"code": "BTC", "name": "Bitcoin", "symbol": "₿", "flag": "₿", "kind": "crypto", "decimals": 6},
+    {"code": "ETH", "name": "Ethereum", "symbol": "Ξ", "flag": "Ξ", "kind": "crypto", "decimals": 4},
+    {"code": "SOL", "name": "Solana", "symbol": "◎", "flag": "◎", "kind": "crypto", "decimals": 3},
+    {"code": "USDC", "name": "USD Coin", "symbol": "$", "flag": "Ⓤ", "kind": "crypto", "decimals": 2},
+    {"code": "USDT", "name": "Tether", "symbol": "₮", "flag": "₮", "kind": "crypto", "decimals": 2},
+    {"code": "MATIC", "name": "Polygon", "symbol": "◆", "flag": "◆", "kind": "crypto", "decimals": 2},
+]
+# fmt: on
 
 
 async def _fetch_fiat(client: httpx.AsyncClient) -> dict[str, float]:
@@ -157,6 +193,9 @@ async def get_rates(*, force_refresh: bool = False) -> dict[str, Any]:
             try:
                 doc = json.loads(cached)
                 doc["source"] = "cached"
+                # Catalog is attached at serve time (never cached) so a
+                # catalog change ships without waiting out the rates TTL.
+                doc["currencies"] = CURRENCY_CATALOG
                 return doc
             except Exception:
                 pass  # corrupt entry — fall through to refresh
@@ -170,7 +209,7 @@ async def get_rates(*, force_refresh: bool = False) -> dict[str, Any]:
             "rates": rates,
         }
         await kv_set(_CACHE_KEY, json.dumps(doc), ttl_seconds=_CACHE_TTL_SECONDS)
-        return doc
+        return {**doc, "currencies": CURRENCY_CATALOG}
     except Exception:
         logger.warning("fx: live fetch failed; serving static snapshot")
         return {
@@ -178,7 +217,14 @@ async def get_rates(*, force_refresh: bool = False) -> dict[str, Any]:
             "as_of": None,
             "source": "static",
             "rates": dict(STATIC_RATES),
+            "currencies": CURRENCY_CATALOG,
         }
 
 
-__all__ = ["CRYPTO_IDS", "FIAT_CODES", "STATIC_RATES", "get_rates"]
+__all__ = [
+    "CRYPTO_IDS",
+    "CURRENCY_CATALOG",
+    "FIAT_CODES",
+    "STATIC_RATES",
+    "get_rates",
+]

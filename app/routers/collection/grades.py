@@ -14,7 +14,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_user
+from app.auth.dependencies import require_user, user_rate_limit
 from app.db import get_db
 from app.models.user import User
 from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
@@ -159,6 +159,16 @@ async def create(
     return GradedCardRead.model_validate(row)
 
 
+# Per-USER caps for the vault-walking read endpoints. Generous enough
+# that real clients (which poll at most ~1/min per surface) never trip
+# them; tight enough that one account looping requests can't become a
+# CPU sink.
+_history_limit = user_rate_limit(limit=60, window_seconds=60, name="grades.history")
+_sparklines_limit = user_rate_limit(
+    limit=60, window_seconds=60, name="grades.sparklines"
+)
+
+
 # NOTE: literal-path routes MUST be declared before `/{grade_id}` so they
 # aren't shadowed by the UUID-parsing path parameter.
 @router.get(
@@ -191,6 +201,7 @@ async def get_summary(
 
 @router.get(
     "/history",
+    dependencies=[Depends(_history_limit)],
     summary="Portfolio value over time",
     description=(
         "Returns `{ range, points: [{date, priceUsd}], deltaUsd, deltaPct }`. "
@@ -215,6 +226,7 @@ async def get_history(
 
 @router.get(
     "/sparklines",
+    dependencies=[Depends(_sparklines_limit)],
     summary="Per-card 14-point trend",
     description=(
         "Returns `[{cardId, points: number[14], deltaPct}, ...]`. Each entry "

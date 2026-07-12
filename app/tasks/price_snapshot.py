@@ -242,6 +242,14 @@ async def record_price_observation(card_id: str, price: float) -> bool:
             if changed or fired:
                 await session.commit()
             await _fan_out_alert_pushes(fired, card)
+            # 3) Live feed — push the fresh price to every owner's
+            #    /ws/prices socket. Only on a real change (new daily point
+            #    or an intraday move); no-op observations stay silent.
+            if changed:
+                # Import here to keep the task layer import-light at startup.
+                from app.services.market import price_feed_service
+
+                await price_feed_service.publish_price_tick(session, card, float(price))
             return changed
     except Exception:  # pragma: no cover — observation is always optional
         logger.warning("price observation failed for %s", card_id, exc_info=True)

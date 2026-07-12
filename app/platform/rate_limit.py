@@ -168,7 +168,13 @@ reset_password_limit = rate_limit(
 verify_email_limit = rate_limit(limit=5, window_seconds=300, name="auth.verify_email")
 
 
+# Public alias so higher layers (e.g. the per-USER limiter in
+# app/auth/dependencies.py) can build limiters keyed on something other
+# than the client IP without reaching into a private name.
+SlidingWindow = _SlidingWindow
+
 __all__ = [
+    "SlidingWindow",
     "application_submit_limit",
     "application_track_limit",
     "catalog_read_limit",

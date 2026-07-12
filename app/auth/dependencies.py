@@ -14,6 +14,7 @@ from app.auth.jwt import verify_token
 from app.config import get_settings
 from app.db import get_db
 from app.models.user import User
+from app.platform.rate_limit import SlidingWindow
 from app.platform.request_context import set_request_user_id
 from app.utils.logger import get_logger
 
@@ -174,6 +175,35 @@ async def require_super_admin(user: User = Depends(require_admin)) -> User:
     return user
 
 
+def user_rate_limit(*, limit: int, window_seconds: float, name: str):
+    """Per-USER sliding-window limiter for costly authenticated endpoints.
+
+    The platform's `rate_limit` keys on client IP — right for public
+    routes, wrong for authenticated ones: mobile users behind carrier NAT
+    share IPs (false positives), and one account scripting across proxies
+    dodges an IP cap entirely. Keying on the verified user id fixes both.
+
+    Same caveats as the IP limiter: per-process state (Cloud Run fan-out
+    multiplies the effective limit), so tune generously — this is the
+    cheap first line against a runaway client loop, not a billing meter.
+    """
+    window = SlidingWindow(limit=limit, window_s=window_seconds)
+
+    async def _dep(user: User = Depends(require_user)) -> None:
+        if not window.hit(f"{name}:{user.id}"):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Rate limit exceeded for {name}: "
+                    f"max {limit} requests per {int(window_seconds)}s. "
+                    "Slow down and retry."
+                ),
+                headers={"Retry-After": str(int(window_seconds))},
+            )
+
+    return _dep
+
+
 __all__ = [
     "AUTH_COOKIE",
     "bearer_scheme",
@@ -183,4 +213,5 @@ __all__ = [
     "require_admin",
     "require_super_admin",
     "require_user",
+    "user_rate_limit",
 ]

@@ -44,6 +44,17 @@ _DEFAULT_HOME_RAILS: list[str] = [
     "recentScans",
 ]
 
+# Discovery carousels below the personal feed on the mobile home tab.
+# The BACKEND owns which rails show and in what order — reorder or drop
+# an id here and every client follows on next config refresh, no release.
+# Unknown ids are skipped client-side, so adding new ones is always safe.
+_DEFAULT_DISCOVERY_RAILS: list[str] = [
+    "trendingNow",
+    "mostValuable",
+    "sealedProducts",
+    "stealsUnder5",
+]
+
 # Default feature flags. Add new flags here with a sensible default,
 # then read them from the mobile client via `useAppConfig().flags.<name>`.
 _DEFAULT_FLAGS: dict[str, bool] = {
@@ -63,11 +74,12 @@ _DEFAULT_FLAGS: dict[str, bool] = {
     "/config",
     summary="Remote app configuration",
     description=(
-        "Returns `{ minSupportedVersion, forceUpdate, flags, homeRails }`. "
-        "`forceUpdate` is server-computed from the optional `clientVersion` "
-        "query param. Clients should call this on cold start and again on "
-        "resume after >1h, and persist the last response so launch is "
-        "offline-tolerant."
+        "Returns `{ minSupportedVersion, forceUpdate, flags, homeRails, "
+        "discoveryRails }`. `forceUpdate` is server-computed from the "
+        "optional `clientVersion` query param. `discoveryRails` orders the "
+        "home-tab discovery carousels (unknown ids are skipped client-side). "
+        "Clients should call this on cold start and again on resume after "
+        ">1h, and persist the last response so launch is offline-tolerant."
     ),
 )
 async def get_app_config(
@@ -86,6 +98,7 @@ async def get_app_config(
         "forceUpdate": _is_below_min(clientVersion, _MIN_SUPPORTED_VERSION),
         "flags": flags,
         "homeRails": list(_DEFAULT_HOME_RAILS),
+        "discoveryRails": list(_DEFAULT_DISCOVERY_RAILS),
     }
 
 
