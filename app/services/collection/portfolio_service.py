@@ -781,7 +781,7 @@ async def history(
             worst_day = {"date": worst[0], "deltaUsd": worst[1]}
 
     # Attribution: each holding's contribution to the range move, using the
-    # SAME ratio model as the curve itself (value × raw-price ratio), so the
+    # SAME ratio model as the curve itself (value x raw-price ratio), so the
     # per-card deltas are consistent with what the line shows.
     range_start = buckets[0] if buckets else today
     movers: list[dict] = []
