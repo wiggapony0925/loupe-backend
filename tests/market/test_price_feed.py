@@ -29,6 +29,27 @@ class _FakeManager:
         return 1
 
 
+class _StubRedis:
+    """``publish`` but no ``pubsub`` → the feed treats this as the in-memory
+    stub and delivers through the local connection manager (what these tests
+    capture). Mirrors :class:`app.platform.redis_client._InMemoryRedis`."""
+
+    async def publish(self, channel: str, message: str) -> int:  # pragma: no cover
+        return 0
+
+
+@pytest.fixture(autouse=True)
+def _force_inmemory_delivery(monkeypatch):
+    """Pin the feed to its in-memory topology. CI provides real Redis, whose
+    pub/sub path bypasses the local manager — so without this the manager-path
+    assertions below only pass where Redis is absent (e.g. a dev laptop)."""
+
+    async def _stub() -> _StubRedis:
+        return _StubRedis()
+
+    monkeypatch.setattr(price_feed_service, "get_redis", _stub)
+
+
 async def _mk_user(db, label: str) -> User:
     user = User(
         id=uuid.uuid4(),
