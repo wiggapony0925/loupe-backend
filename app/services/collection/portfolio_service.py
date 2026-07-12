@@ -9,6 +9,7 @@ values; the UI is expected to render an empty state.
 
 from __future__ import annotations
 
+import itertools
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -768,7 +769,7 @@ async def history(
     worst_day: dict | None = None
     if range_ != "1D" and len(points) >= 3:
         best = worst = None
-        for prev, cur in zip(points, points[1:], strict=False):
+        for prev, cur in itertools.pairwise(points):
             step = round(cur.price_usd - prev.price_usd, 2)
             if best is None or step > best[1]:
                 best = (cur.date, step)
