@@ -44,6 +44,11 @@ ADMIN_PAGE_FLAGS: tuple[tuple[str, str, str], ...] = (
     ("admin_users", "Admin · Users", "People: user search, roles, bans."),
     ("admin_catalog", "Admin · Catalog", "Catalog: coverage by game."),
     (
+        "admin_carousels",
+        "Admin · Carousels",
+        "Catalog: live control of every marketplace carousel.",
+    ),
+    (
         "admin_pricecharting",
         "Admin · PriceCharting",
         "Catalog: PriceCharting tier detection + fallback chain.",

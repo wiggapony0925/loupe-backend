@@ -8,16 +8,19 @@ never sees or returns card data: it only emits carousel *definitions* over a
 fixed vocabulary, so one cheap call a day produces creative merchandising while
 the actual cards keep coming from our cached catalog. Results are cached per
 game per day; when no model is configured (or it errors) the endpoint returns
-the built-in **curated pool** (``_curated_for``) — the single source of truth
-both the web and mobile render, so the clients no longer each hardcode their own.
+the **curated registry** (``carousel_registry`` — checked-in JSON + live
+operator overrides) — the single source of truth both the web and mobile
+render, so the clients no longer each hardcode their own.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import time
+from collections.abc import Iterable
 from datetime import date
 from typing import Any
 
@@ -31,132 +34,24 @@ from app.schemas.carousel import (
     ResolvedCarousels,
     ResolvedRail,
 )
+from app.services.catalog import carousel_registry
+from app.services.catalog.carousel_registry import GAME_LABELS
 from app.utils.logger import get_logger
 
 logger = get_logger("services.carousel")
 
-GAME_LABELS: dict[str, str] = {
-    "pokemon": "Pokémon",
-    "magic": "Magic: The Gathering",
-    "yugioh": "Yu-Gi-Oh!",
-    "onepiece": "One Piece",
-    "digimon": "Digimon",
-}
-
 # ──────────────────────────────────────────────────────────────────────────
 # Curated shelf pool — the canonical, always-on merchandising the endpoint
-# serves. This is the SINGLE SOURCE OF TRUTH both the web and mobile render
-# (they used to each hardcode their own copy). The AI layer below only *adds*
-# to / replaces this when a model is configured; with no model, this pool is
-# what ships. Titles keep the ``{label}`` placeholder — each client
-# interpolates it with its own game label (web "Magic" vs long forms, etc.),
-# exactly as the web strategy pool did before it moved here.
+# serves; the SINGLE SOURCE OF TRUTH both the web and mobile render. It now
+# lives in ``carousel_registry`` (checked-in JSON + live operator overrides
+# from /admin/carousels), and is re-read on every serve so an operator edit
+# shows up without a deploy. The AI layer below only *adds* to / replaces it
+# when a model is configured. Titles keep the ``{label}`` placeholder — each
+# client interpolates it with its own game label.
 # ──────────────────────────────────────────────────────────────────────────
-_CURATED_POOL: list[CarouselRecipe] = [
-    CarouselRecipe(
-        id="grails",
-        title="Grails & chase cards",
-        subtitle="The trophy {label} cards serious collectors hunt.",
-        source="value",
-        priceMin=250,
-        sort="price_desc",
-    ),
-    CarouselRecipe(
-        id="rainbow",
-        title="Rainbow & secret rares",
-        subtitle="The flashiest pulls in {label}.",
-        source="value",
-        rarityPattern="secret|rainbow|illustration|special",
-        sort="price_desc",
-    ),
-    CarouselRecipe(
-        id="premium",
-        title="Premium tier · $150+",
-        subtitle="Heavy hitters at live market value.",
-        source="value",
-        priceMin=150,
-        sort="price_desc",
-    ),
-    CarouselRecipe(
-        id="midrange",
-        title="Collector picks · $25–$150",
-        subtitle="Standouts that won't break the bank.",
-        source="value",
-        priceMin=25,
-        priceMax=150,
-        sort="price_desc",
-    ),
-    CarouselRecipe(
-        id="holo-hits",
-        title="Holo & ultra-rare hits",
-        subtitle="Shiny {label} cards worth chasing.",
-        source="value",
-        rarityPattern="holo|ultra|ex|gx|\\bv\\b|vmax|vstar",
-        sort="price_desc",
-    ),
-    CarouselRecipe(
-        id="under25",
-        title="Great finds under $25",
-        subtitle="Quality {label} pickups, priced live.",
-        source="value",
-        priceMax=25,
-        sort="price_desc",
-    ),
-    CarouselRecipe(
-        id="steals5",
-        title="Steals under $5",
-        subtitle="Affordable {label} singles.",
-        source="value",
-        priceMax=5,
-        sort="price_desc",
-    ),
-    CarouselRecipe(
-        id="budget-binder",
-        title="Budget binder fillers",
-        subtitle="Round out the collection for less.",
-        source="value",
-        priceMax=10,
-        sort="price_asc",
-    ),
-    CarouselRecipe(
-        id="blue-chips",
-        title="Blue-chip singles",
-        subtitle="Established, high-value {label} cards.",
-        source="value",
-        priceMin=75,
-        priceMax=400,
-        sort="price_desc",
-    ),
-]
-
-#: Games whose catalog has no price feed yet (mirrors
-#: ``trending_service._CATALOG_ONLY_SOURCE``). Value/price shelves are
-#: meaningless for them, and the ``catalog`` rail kind can't filter by rarity,
-#: so a "themed" shelf would just reorder the same cards — the exact
-#: same-cards-in-every-carousel trap. They therefore get NO curated pool and
-#: lean on the clients' structural anchors (explore/sets/sealed). See
-#: ``[[supported-tcgs]]`` — add prices to light up their value shelves.
-_CATALOG_ONLY_GAMES: frozenset[str] = frozenset({"onepiece", "digimon"})
-#: Games that actually have a priced discovery pool.
-_PRICED_GAMES: frozenset[str] = frozenset(GAME_LABELS) - _CATALOG_ONLY_GAMES
-
-
-def _curated_for(game: str) -> list[CarouselRecipe]:
-    """The always-on curated shelf pool for a game.
-
-    Priced games (Pokémon/Magic/Yu-Gi-Oh!) get the value/rarity merchandising
-    pool; catalog-only or unknown games get an empty list (their structural
-    anchors carry the storefront). This is what makes ``/v1/public/carousels``
-    the single source of truth instead of an empty placeholder the clients had
-    to paper over.
-    """
-    if game not in _PRICED_GAMES:
-        return []
-    return list(_CURATED_POOL)
 
 
 _AI_TTL = 24 * 60 * 60  # AI result is good for a day
-_FALLBACK_TTL = 60 * 60  # retry the model within the hour once a key is set
 _COUNT = 6  # shelves to generate
 
 _SYSTEM = """You are a trading-card marketplace merchandiser designing the \
@@ -178,7 +73,9 @@ objects... ]}} — no prose, no code fences. Each shelf object has this exact sh
 
 Rules:
 - "source":"value" for price/rarity-themed shelves (the priced market pool);
-  "source":"catalog" for a general "explore" shelf with no price filter.
+  "source":"catalog" for a general "explore" shelf with no price filter — \
+use it for AT MOST ONE shelf; every other shelf must be "value" or \
+"trending" so it renders real priced inventory.
 - Theme each shelf with a price band (priceMin/priceMax) AND/OR a rarityPattern.
 - Make the {count} shelves DIVERSE: mix value tiers (grails, premium, mid, \
 budget), rarity themes, and chase pulls. Titles should feel specific to \
@@ -193,7 +90,7 @@ def configured() -> bool:
 
 #: Bump when the curated pool or recipe shape changes so a deploy invalidates
 #: any still-cached placeholders instead of serving them until TTL.
-_CACHE_VERSION = "v2"
+_CACHE_VERSION = "v3"
 
 
 def _cache_key(game: str) -> str:
@@ -357,30 +254,26 @@ def _spawn_generation(game: str, label: str) -> None:
 async def get_carousels(game: str) -> CarouselResponse:
     """Return a game's shelves WITHOUT ever blocking the request on the model.
 
-    A cache miss returns the curated set instantly and kicks AI generation in the
-    background, so the *next* load serves the AI version. The curated set is the
-    canonical merchandising pool (``_curated_for``) — the single source of truth
-    both clients render — so the storefront is never bare, and a slow/at-fault
-    model can never spike request latency.
+    The curated set — the checked-in registry merged with the operator's live
+    overrides (``carousel_registry.recipes_for``) — is recomputed on every call
+    so a portal edit shows up immediately, and it's what serves whenever no AI
+    design is cached (kicking generation in the background so the *next* load
+    serves the AI version). The operator's AI kill switch pins serving to the
+    curated registry and stops model calls entirely.
     """
     label = GAME_LABELS.get(game, game.title())
-    cached = await _cache_get(game)
-    if cached is not None:
-        # Upgrade a curated placeholder to AI in the background once a model is
-        # configured (e.g. the key was just set) — still never blocking.
-        if cached.source == "curated" and configured():
+    overrides = await carousel_registry.get_overrides()
+    if overrides.aiEnabled:
+        cached = await _cache_get(game)
+        if cached is not None and cached.source == "ai":
+            return cached
+        if configured():
             _spawn_generation(game, label)
-        return cached
-
-    # Cold miss: cache the curated pool so concurrent requests don't all spawn,
-    # return it immediately, and generate AI off the request path.
-    curated = CarouselResponse(
-        game=game, source="curated", carousels=_curated_for(game)
+    return CarouselResponse(
+        game=game,
+        source="curated",
+        carousels=carousel_registry.recipes_for(game, overrides),
     )
-    await _cache_set(curated, _FALLBACK_TTL)
-    if configured():
-        _spawn_generation(game, label)
-    return curated
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -464,18 +357,33 @@ async def _shelf_cards(
 
 
 async def _catalog_cards(game: str, limit: int = 24) -> list[dict[str, Any]]:
+    """A varied slice of the game's catalog.
+
+    Page 1 sorted by name is alphabetically FIRST cards — every catalog
+    shelf led with the same Abras. Fetch a wide pool instead and rotate a
+    date-seeded sample so catalog rails differ per day AND per shelf size,
+    while staying deterministic within the day (stable cache).
+    """
     from app.services.catalog import catalog_browse_service
 
+    pool_size = max(limit * 4, 96)
     body = await catalog_browse_service.browse_catalog(
-        game=game, page=1, page_size=limit, sort="name"
+        game=game, page=1, page_size=pool_size, sort="name"
     )
     cards = body.get("cards")
-    return list(cards) if isinstance(cards, list) else []
+    pool = list(cards) if isinstance(cards, list) else []
+    rng = random.Random(f"{game}:{date.today().isoformat()}")
+    rng.shuffle(pool)
+    return pool[:limit]
 
 
 async def _resolve_recipe(game: str, recipe: CarouselRecipe) -> list[dict[str, Any]]:
     if recipe.source == "catalog":
-        return await _catalog_cards(game, limit=recipe.limit or 20)
+        # Fetch wide, then apply the SAME lens as priced shelves — a catalog
+        # rail themed "holo rares" must actually filter to holo rares, not
+        # serve the raw browse page under a fancy title.
+        pool = await _catalog_cards(game, limit=max((recipe.limit or 20) * 3, 48))
+        return _apply_lens(pool, recipe)
     sort = "trending" if recipe.source == "trending" else "value"
     cards = await _shelf_cards(game, sort=sort, max_price=recipe.priceMax, limit=48)
     return _apply_lens(cards, recipe)
@@ -541,12 +449,18 @@ async def resolve_carousels(game: str) -> ResolvedCarousels:
         seen.add("trending")
 
     # 2. The curated/AI recipe pool, resolved and de-duped by id.
+    # Cards already placed on an earlier rail — a card must appear on at
+    # most ONE shelf per page, or themed rails read as copy-paste filler.
+    placed: set[str] = {str(c.get("id")) for c in anchor if c.get("id")}
+
     for recipe in base.carousels:
         if recipe.id in seen:
             continue
         seen.add(recipe.id)
         cards = await _resolve_recipe(game, recipe)
+        cards = [c for c in cards if str(c.get("id")) not in placed]
         if len(cards) >= (recipe.minItems or _MIN_RAIL):
+            placed.update(str(c.get("id")) for c in cards if c.get("id"))
             rails.append(
                 ResolvedRail(
                     id=recipe.id,
@@ -560,7 +474,8 @@ async def resolve_carousels(game: str) -> ResolvedCarousels:
     # 3. Explore anchor — a broad catalog rail that fills for every game
     #    (including catalog-only ones whose priced pool is empty).
     if "explore" not in seen:
-        explore = await _catalog_cards(game, limit=24)
+        explore = await _catalog_cards(game, limit=48)
+        explore = [c for c in explore if str(c.get("id")) not in placed][:24]
         if len(explore) >= _MIN_RAIL:
             rails.append(
                 ResolvedRail(
@@ -575,3 +490,51 @@ async def resolve_carousels(game: str) -> ResolvedCarousels:
     resolved = ResolvedCarousels(game=game, source=base.source, rails=rails)
     await _resolved_cache_set(resolved)
     return resolved
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Admin helpers — what /v1/admin/carousels drives.
+# ──────────────────────────────────────────────────────────────────────────
+
+
+async def cached_ai(game: str) -> CarouselResponse | None:
+    """Today's cached AI design for a game, if one exists."""
+    cached = await _cache_get(game)
+    return cached if cached is not None and cached.source == "ai" else None
+
+
+async def cached_resolved(game: str) -> ResolvedCarousels | None:
+    """The cached resolved payload (what clients render), if warm."""
+    return await _resolved_cache_get(game)
+
+
+async def purge_resolved(games: Iterable[str] | None = None) -> None:
+    """Drop cached resolved payloads so an operator edit serves immediately.
+
+    The AI recipe cache is deliberately left alone — registry edits don't
+    invalidate an AI design, and regeneration overwrites it explicitly.
+    """
+    try:
+        redis = await get_redis()
+        for game in games if games is not None else GAME_LABELS:
+            await redis.delete(_resolved_cache_key(game))
+    except Exception as exc:  # pragma: no cover - cache best effort
+        logger.debug("carousel purge_resolved failed: %s", exc)
+
+
+async def regenerate_ai(game: str) -> CarouselResponse:
+    """Force a fresh AI design pass NOW (admin regenerate button).
+
+    Unlike the background path this runs synchronously — the operator is
+    watching — and it overwrites today's cached design + purges the game's
+    resolved payload so the new shelves serve on the next load. Raises
+    ``RuntimeError`` when the model yields nothing usable.
+    """
+    label = GAME_LABELS.get(game, game.title())
+    recipes = await _generate_ai(game, label)
+    if not recipes:
+        raise RuntimeError("the model returned no usable shelves")
+    resp = CarouselResponse(game=game, source="ai", carousels=recipes)
+    await _cache_set(resp, _AI_TTL)
+    await purge_resolved([game])
+    return resp

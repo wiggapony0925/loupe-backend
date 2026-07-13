@@ -24,11 +24,23 @@ from app.services.collection import set_progress_service
 router = APIRouter(prefix="/sets", tags=["sets"])
 
 
-@router.get("", summary="List card sets (public)")
+@router.get(
+    "",
+    summary="List card sets (public)",
+    description=(
+        "`sort=newest` orders by release date descending (undated sets last); "
+        "the default keeps the provider's natural order. `tcg=all` merges the "
+        "date-backed games (Pokémon/Magic/Yu-Gi-Oh!) and is always "
+        'newest-first — the feed behind the "Newest sets" discovery rail. '
+        "`limit` truncates after sorting; `total` stays the full count."
+    ),
+)
 async def list_sets(
     tcg: str = Query("magic", pattern=game_registry.tcg_pattern(supported_only=True)),
+    sort: str = Query("catalog", pattern="^(catalog|newest)$"),
+    limit: int | None = Query(None, ge=1, le=500),
 ) -> dict[str, Any]:
-    return await card_search_service.list_sets(tcg)
+    return await card_search_service.list_sets(tcg, sort=sort, limit=limit)
 
 
 @router.get(

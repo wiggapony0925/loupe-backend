@@ -193,16 +193,25 @@ async def test_trending_fallback_on_all_providers_down(client, monkeypatch):
     assert body["cards"] == []
 
 
-def test_rotate_daily_is_deterministic_permutation():
+def test_rotate_window_is_deterministic_permutation():
     pool = [{"id": str(i)} for i in range(20)]
-    once = trending_service._rotate_daily(pool, salt=1)
-    twice = trending_service._rotate_daily(pool, salt=1)
-    # Same day + same salt → identical order (stable while browsing).
+    once = trending_service._rotate_window(pool, salt=1)
+    twice = trending_service._rotate_window(pool, salt=1)
+    # Same window + same salt → identical order (stable while browsing).
     assert once == twice
     # It's a permutation — every card is still present, none dropped/dupes.
     assert sorted(c["id"] for c in once) == sorted(c["id"] for c in pool)
     # Different salt → different order (providers don't rotate in lockstep).
-    assert trending_service._rotate_daily(pool, salt=2) != once
+    assert trending_service._rotate_window(pool, salt=2) != once
+
+
+def test_rotation_stamp_is_half_day():
+    """The stamp rolls at midnight AND noon UTC — YYYYMMDD.AM / YYYYMMDD.PM —
+    so the trending rotation refreshes twice a day instead of once."""
+    stamp = trending_service._rotation_stamp()
+    date_part, _, half = stamp.partition(".")
+    assert len(date_part) == 8 and date_part.isdigit()
+    assert half in ("AM", "PM")
 
 
 def test_distinct_by_name_drops_duplicate_printings():

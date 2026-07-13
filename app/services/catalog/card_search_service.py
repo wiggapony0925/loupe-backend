@@ -2602,9 +2602,69 @@ async def _enrich_set_image(item: dict[str, Any]) -> None:
         item["image_url"] = img
 
 
-async def list_sets(tcg: str) -> dict[str, Any]:
-    """Live proxy of the upstream set lists."""
+def _release_sort_key(item: dict[str, Any]) -> str:
+    """Normalized release date for cross-provider compare — pokemontcg.io
+    uses ``1999/01/09``, everyone else ISO dashes. Empty string = undated."""
+    return str(item.get("release_date") or "").replace("/", "-")
+
+
+def _newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Newest-release-first copy. Undated sets keep their existing relative
+    order at the tail — for the derived catalogs (One Piece/Digimon) that
+    order already IS newest-first."""
+    dated = [s for s in items if _release_sort_key(s)]
+    undated = [s for s in items if not _release_sort_key(s)]
+    dated.sort(key=_release_sort_key, reverse=True)
+    return dated + undated
+
+
+#: Games whose upstream set list carries real release dates — the only ones a
+#: cross-game (``all``) newest-first merge can rank. One Piece / Digimon set
+#: lists are derived from their metered flat catalogs and carry no dates, so
+#: they'd only pad the tail while burning upstream budget.
+_DATED_SET_GAMES: tuple[str, ...] = ("pokemon", "magic", "yugioh")
+
+
+async def list_sets(
+    tcg: str, sort: str = "catalog", limit: int | None = None
+) -> dict[str, Any]:
+    """Live proxy of the upstream set lists.
+
+    ``sort="newest"`` orders by release date descending (undated sets last);
+    the default keeps each provider's natural order. ``tcg="all"`` merges the
+    date-backed games and is ALWAYS newest-first — it exists for the
+    backend-defined "Newest sets" discovery rail both clients render. ``limit``
+    truncates after sorting (rail-sized slices); ``total`` stays the full
+    count so clients can tell a slice from a small catalog.
+    """
     tcg = (tcg or "all").lower()
+
+    if tcg == "all":
+        bodies = await asyncio.gather(
+            *(_list_sets_upstream(g) for g in _DATED_SET_GAMES)
+        )
+        merged = _newest_first([s for b in bodies for s in (b.get("results") or [])])
+        total = len(merged)
+        return {
+            "results": merged[:limit] if limit is not None else merged,
+            "total": total,
+            "source": "mixed",
+        }
+
+    body = await _list_sets_upstream(tcg)
+    if sort != "newest" and limit is None:
+        return body
+    results = list(body.get("results") or [])
+    if sort == "newest":
+        results = _newest_first(results)
+    if limit is not None:
+        results = results[:limit]
+    # New dict — the cached body must never be mutated in place.
+    return {**body, "results": results}
+
+
+async def _list_sets_upstream(tcg: str) -> dict[str, Any]:
+    """One game's set list in the provider's natural order, L2-cached."""
     cache_key = f"loupe:sets:{tcg}"
     cached = await _cache_get(cache_key)
     if cached is not None:

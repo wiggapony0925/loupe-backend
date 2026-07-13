@@ -58,10 +58,10 @@ logger = logging.getLogger(__name__)
 MAX_LIMIT = 100
 DEFAULT_LIMIT = 24
 
-# How many popular cards to pull per provider before the daily rotation
-# picks the slice that surfaces today. A pool this size means a *different*
-# set of popular cards leads the rail each day (instead of the same Sol Ring
-# / Venusaur ex every single day) while staying within "genuinely popular".
+# How many popular cards to pull per provider before the half-day rotation
+# picks the slice that surfaces this window. A pool this size means a
+# *different* set of popular cards leads the rail each window (instead of the
+# same Sol Ring / Venusaur ex every visit) while staying "genuinely popular".
 _POOL_PER_PROVIDER = 50
 
 # Retries for the Pokémon "most valuable" upstream — its price-sort orderBy is
@@ -120,21 +120,25 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-def _today_key() -> str:
-    """UTC day stamp — rolls the trending rotation (and cache) over at midnight."""
-    return datetime.now(UTC).strftime("%Y%m%d")
+def _rotation_stamp() -> str:
+    """UTC half-day stamp — rolls the trending rotation (and cache) over at
+    midnight AND noon UTC. Daily-only rotation left the rail looking static
+    for anyone who browses morning and evening; half-day keeps it stable
+    within a session but visibly fresh across the day."""
+    now = datetime.now(UTC)
+    return now.strftime("%Y%m%d") + (".AM" if now.hour < 12 else ".PM")
 
 
-def _rotate_daily(items: list[dict[str, Any]], salt: int = 0) -> list[dict[str, Any]]:
-    """Deterministically shuffle a pool by today's date.
+def _rotate_window(items: list[dict[str, Any]], salt: int = 0) -> list[dict[str, Any]]:
+    """Deterministically shuffle a pool by the current rotation window.
 
-    Same order all day (so the feed is stable while you browse), a fresh
-    order tomorrow (so it doesn't show the identical cards every day). The
-    ``salt`` keeps each provider's pool from shuffling in lockstep.
+    Same order all window (so the feed is stable while you browse), a fresh
+    order next window (so it doesn't show the identical cards every visit).
+    The ``salt`` keeps each provider's pool from shuffling in lockstep.
     """
     if len(items) <= 1:
         return items
-    rng = random.Random(f"{_today_key()}:{salt}")
+    rng = random.Random(f"{_rotation_stamp()}:{salt}")
     shuffled = items[:]
     rng.shuffle(shuffled)
     return shuffled
@@ -171,7 +175,7 @@ async def _trending_pokemon(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, An
     # `orderBy=-set.releaseDate` surfaces chase cards from the NEWEST sets
     # first (Surging Sparks, Prismatic Evolutions, …) instead of the same
     # default-ordered handful. We pull a *pool* and drop art-less cards;
-    # the caller rotates it daily so different chase cards lead each day.
+    # the caller rotates it per half-day window so different chase cards lead.
     raw = await pokemon_tcg.search_cards(
         POKEMON_TRENDING_QUERY,
         page=1,
@@ -187,7 +191,7 @@ async def _trending_magic(pool: int = _POOL_PER_PROVIDER) -> list[dict[str, Any]
     # `scryfall.search_cards`, so we issue the request through the
     # resilient helper directly under the same ``"scryfall"`` breaker.
     # `order=edhrec` returns the most-played Commander cards (a genuine
-    # popularity signal); a page is ~175 cards, so the daily rotation has a
+    # popularity signal); a page is ~175 cards, so the half-day rotation has a
     # deep pool of real staples to vary across — not just Sol Ring forever.
     from app.config import get_settings
 
@@ -326,16 +330,16 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     tcg = (tcg or "all").lower()
     limit = max(1, min(MAX_LIMIT, int(limit)))
 
-    # The day stamp in the key means a new day is a cache miss → fresh daily
-    # rotation, while the 15-min TTL keeps it snappy within the day.
-    cache_key = f"loupe:cards:trending:{tcg}:{limit}:{_today_key()}"
+    # The half-day stamp in the key means a new window is a cache miss → a
+    # fresh rotation, while the 15-min TTL keeps it snappy within the window.
+    cache_key = f"loupe:cards:trending:{tcg}:{limit}:{_rotation_stamp()}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         cached_copy = dict(cached)
         cached_copy["source"] = "cached"
         return cached_copy
 
-    # Per-provider salts for the daily shuffle so the three pools don't
+    # Per-provider salts for the window shuffle so the three pools don't
     # rotate in lockstep.
     _SALT = {"pokemon": 1, "magic": 2, "yugioh": 3}
 
@@ -343,13 +347,13 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
     try:
         if tcg == "pokemon":
             pool = await _provider_pool("pokemon", _trending_pokemon, _valuable_pokemon)
-            cards = _rotate_daily(pool, _SALT["pokemon"])[:limit]
+            cards = _rotate_window(pool, _SALT["pokemon"])[:limit]
         elif tcg == "magic":
             pool = await _provider_pool("magic", _trending_magic, _valuable_magic)
-            cards = _rotate_daily(pool, _SALT["magic"])[:limit]
+            cards = _rotate_window(pool, _SALT["magic"])[:limit]
         elif tcg == "yugioh":
             pool = await _provider_pool("yugioh", _trending_yugioh, _valuable_yugioh)
-            cards = _rotate_daily(pool, _SALT["yugioh"])[:limit]
+            cards = _rotate_window(pool, _SALT["yugioh"])[:limit]
         else:
             # Each pool is live trending → last-good → value, so a slow/broken
             # Pokemon/YGO trending upstream no longer collapses the mix to Magic.
@@ -359,7 +363,7 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
                 _provider_pool("yugioh", _trending_yugioh, _valuable_yugioh),
             )
             lists = [
-                _rotate_daily(pool, _SALT[key])
+                _rotate_window(pool, _SALT[key])
                 for key, pool in zip(("pokemon", "magic", "yugioh"), pools, strict=True)
                 if pool
             ]
@@ -402,7 +406,7 @@ async def get_trending(tcg: str = "all", limit: int = DEFAULT_LIMIT) -> dict[str
 # the three lists so the rail is genuinely valuable *and* spans all games.
 
 
-# "Most valuable" is a deliberate browse cut, cached daily and not on the
+# "Most valuable" is a deliberate browse cut, cached per half-day and not on the
 # blocking home-hero path, so we give its (sometimes cold) upstream queries a
 # more generous budget than the snappy trending feed — otherwise a cold
 # Scryfall/Pokémon fetch times out and the rail collapses to one game.
@@ -551,7 +555,7 @@ async def get_most_valuable(
     tcg = (tcg or "all").lower()
     limit = max(1, min(MAX_LIMIT, int(limit)))
 
-    cache_key = f"loupe:cards:valuable:{tcg}:{limit}:{_today_key()}"
+    cache_key = f"loupe:cards:valuable:{tcg}:{limit}:{_rotation_stamp()}"
     cached = await _cache_get(cache_key)
     if cached is not None:
         out = dict(cached)

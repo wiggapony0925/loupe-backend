@@ -1,0 +1,88 @@
+{
+  "comment": "Checked-in carousel registry — the canonical curated shelf pool both clients render. One entry per recipe (validated through RegistryRecipe at import). `games` omitted/null = every priced game; an explicit list scopes verbatim. Operators layer live edits over this file from /admin/carousels (stored in kv_cache — see carousel_registry.py); edit here for defaults that should survive a database wipe.",
+  "recipes": [
+    {
+      "id": "grails",
+      "enabled": true,
+      "title": "Grails & chase cards",
+      "subtitle": "The trophy {label} cards serious collectors hunt.",
+      "source": "value",
+      "priceMin": 250,
+      "sort": "price_desc"
+    },
+    {
+      "id": "rainbow",
+      "enabled": true,
+      "title": "Rainbow & secret rares",
+      "subtitle": "The flashiest pulls in {label}.",
+      "source": "value",
+      "rarityPattern": "secret|rainbow|illustration|special",
+      "sort": "price_desc"
+    },
+    {
+      "id": "premium",
+      "enabled": true,
+      "title": "Premium tier · $150+",
+      "subtitle": "Heavy hitters at live market value.",
+      "source": "value",
+      "priceMin": 150,
+      "sort": "price_desc"
+    },
+    {
+      "id": "midrange",
+      "enabled": true,
+      "title": "Collector picks · $25–$150",
+      "subtitle": "Standouts that won't break the bank.",
+      "source": "value",
+      "priceMin": 25,
+      "priceMax": 150,
+      "sort": "price_desc"
+    },
+    {
+      "id": "holo-hits",
+      "enabled": true,
+      "title": "Holo & ultra-rare hits",
+      "subtitle": "Shiny {label} cards worth chasing.",
+      "source": "value",
+      "rarityPattern": "holo|ultra|ex|gx|\\bv\\b|vmax|vstar",
+      "sort": "price_desc"
+    },
+    {
+      "id": "under25",
+      "enabled": true,
+      "title": "Great finds under $25",
+      "subtitle": "Quality {label} pickups, priced live.",
+      "source": "value",
+      "priceMax": 25,
+      "sort": "price_desc"
+    },
+    {
+      "id": "steals5",
+      "enabled": true,
+      "title": "Steals under $5",
+      "subtitle": "Affordable {label} singles.",
+      "source": "value",
+      "priceMax": 5,
+      "sort": "price_desc"
+    },
+    {
+      "id": "budget-binder",
+      "enabled": true,
+      "title": "Budget binder fillers",
+      "subtitle": "Round out the collection for less.",
+      "source": "value",
+      "priceMax": 10,
+      "sort": "price_asc"
+    },
+    {
+      "id": "blue-chips",
+      "enabled": true,
+      "title": "Blue-chip singles",
+      "subtitle": "Established, high-value {label} cards.",
+      "source": "value",
+      "priceMin": 75,
+      "priceMax": 400,
+      "sort": "price_desc"
+    }
+  ]
+}

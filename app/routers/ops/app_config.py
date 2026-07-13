@@ -51,6 +51,9 @@ _DEFAULT_HOME_RAILS: list[str] = [
 _DEFAULT_DISCOVERY_RAILS: list[str] = [
     "trendingNow",
     "mostValuable",
+    # Newest releases across the date-backed games — `/v1/sets?tcg=all&
+    # sort=newest`. Sits with the product-discovery rails (sets → sealed).
+    "newestSets",
     "sealedProducts",
     "stealsUnder5",
 ]

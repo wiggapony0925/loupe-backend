@@ -65,14 +65,20 @@ async def test_catalog_only_game_has_empty_curated_pool(monkeypatch) -> None:
         assert resp.carousels == [], f"{game} should have no priced shelves"
 
 
-def test_curated_for_pool_shape() -> None:
-    # Priced games share one pool; catalog-only / unknown games get nothing.
-    pool = carousel_service._curated_for("pokemon")
-    assert carousel_service._curated_for("magic") == pool
-    assert carousel_service._curated_for("yugioh") == pool
-    assert carousel_service._curated_for("digimon") == []
-    assert carousel_service._curated_for("onepiece") == []
-    assert carousel_service._curated_for("sports") == []
+def test_registry_pool_shape() -> None:
+    # Priced games share one pool; catalog-only / unknown games get nothing
+    # (unless an operator explicitly scopes a recipe to them). The pool now
+    # comes from the checked-in JSON registry, unmodified overrides applied.
+    from app.schemas.carousel import CarouselOverrides
+    from app.services.catalog import carousel_registry
+
+    stock = CarouselOverrides()
+    pool = carousel_registry.recipes_for("pokemon", stock)
+    assert carousel_registry.recipes_for("magic", stock) == pool
+    assert carousel_registry.recipes_for("yugioh", stock) == pool
+    assert carousel_registry.recipes_for("digimon", stock) == []
+    assert carousel_registry.recipes_for("onepiece", stock) == []
+    assert carousel_registry.recipes_for("sports", stock) == []
     # Every recipe validates and keeps the {label} placeholder convention so the
     # clients interpolate their own game label.
     assert all(r.source in {"value", "trending", "catalog"} for r in pool)
@@ -279,3 +285,55 @@ def test_spawn_generation_respects_cooldown(monkeypatch) -> None:
     carousel_service._inflight.clear()
     carousel_service._spawn_generation(game, "Label")  # within cooldown → no-op
     assert created["n"] == 1
+
+
+@pytest.mark.anyio
+async def test_catalog_shelves_apply_lens_and_never_duplicate(monkeypatch):
+    """The screenshot bug: two catalog-sourced shelves ("Classic Holos",
+    "Illustration Rares") both served the SAME alphabetical commons because
+    catalog resolution skipped the lens and always took browse page 1.
+    Now: rarityPattern filters catalog shelves, and a card appears on at
+    most one rail per page."""
+    catalog = [
+        _card("Abra", 1.04, "Common"),
+        _card("Abra LV.8", 14.11, "Common"),
+        _card("Alakazam Holo", 80.0, "Rare Holo"),
+        _card("Charizard Holo", 300.0, "Rare Holo"),
+        _card("Umbreon IR", 120.0, "Illustration Rare"),
+        _card("Espeon IR", 90.0, "Illustration Rare"),
+        _card("Pidgey", 0.5, "Common"),
+        _card("Rattata", 0.3, "Common"),
+    ]
+
+    async def fake_browse(game, page, page_size, sort="name", set_id=None):
+        return {"cards": list(catalog)}
+
+    from app.services.catalog import catalog_browse_service
+
+    monkeypatch.setattr(catalog_browse_service, "browse_catalog", fake_browse)
+
+    holos = CarouselRecipe(
+        id="classic-holos",
+        title="Classic Holos from the Past",
+        subtitle="x",
+        source="catalog",
+        rarityPattern="holo",
+        minItems=1,
+    )
+    irs = CarouselRecipe(
+        id="illustration-rares",
+        title="Stunning Illustration Rares",
+        subtitle="x",
+        source="catalog",
+        rarityPattern="illustration",
+        minItems=1,
+    )
+
+    holo_cards = await carousel_service._resolve_recipe("pokemon", holos)
+    ir_cards = await carousel_service._resolve_recipe("pokemon", irs)
+
+    # The lens now bites on catalog shelves: only matching rarities serve.
+    assert holo_cards and all("Holo" in c["rarity"] for c in holo_cards)
+    assert ir_cards and all("Illustration" in c["rarity"] for c in ir_cards)
+    # And the two themed shelves share no cards.
+    assert {c["id"] for c in holo_cards}.isdisjoint({c["id"] for c in ir_cards})

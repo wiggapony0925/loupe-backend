@@ -41,6 +41,23 @@
   "/v1/admin/cards/{card_id}/price": [
     "POST"
   ],
+  "/v1/admin/carousels": [
+    "GET",
+    "POST"
+  ],
+  "/v1/admin/carousels/ai": [
+    "PUT"
+  ],
+  "/v1/admin/carousels/regenerate": [
+    "POST"
+  ],
+  "/v1/admin/carousels/{recipe_id}": [
+    "DELETE",
+    "PUT"
+  ],
+  "/v1/admin/carousels/{recipe_id}/reset": [
+    "POST"
+  ],
   "/v1/admin/catalog": [
     "GET"
   ],

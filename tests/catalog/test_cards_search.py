@@ -554,6 +554,106 @@ async def test_list_sets_live_magic(client, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_sets_sort_newest(client, monkeypatch):
+    """`sort=newest` orders by release date desc; undated sets go last."""
+
+    async def fake_list() -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "base1",
+                "name": "Base Set",
+                "releaseDate": "1999/01/09",
+                "total": 102,
+                "images": {"logo": "https://img/base1.png"},
+            },
+            {
+                "id": "promo",
+                "name": "Promos",
+                "releaseDate": None,
+                "total": 50,
+                "images": {"logo": "https://img/promo.png"},
+            },
+            {
+                "id": "sv8",
+                "name": "Surging Sparks",
+                "releaseDate": "2024/11/08",
+                "total": 252,
+                "images": {"logo": "https://img/sv8.png"},
+            },
+        ]
+
+    monkeypatch.setattr(card_search_service.pokemon_tcg, "list_sets", fake_list)
+    resp = await client.get("/v1/sets", params={"tcg": "pokemon", "sort": "newest"})
+    body = assert_envelope_ok(resp)
+    assert [s["code"] for s in body["results"]] == ["sv8", "base1", "promo"]
+    # `limit` slices AFTER the sort; `total` stays the full count.
+    resp = await client.get(
+        "/v1/sets", params={"tcg": "pokemon", "sort": "newest", "limit": 1}
+    )
+    body = assert_envelope_ok(resp)
+    assert [s["code"] for s in body["results"]] == ["sv8"]
+    assert body["total"] == 3
+
+
+@pytest.mark.asyncio
+async def test_list_sets_all_merges_dated_games_newest_first(client, monkeypatch):
+    """`tcg=all` merges Pokémon/Magic/Yu-Gi-Oh! newest-first across the mixed
+    date formats (pokemontcg slashes vs ISO dashes) — the "Newest sets" feed."""
+
+    async def fake_pokemon() -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "sv8",
+                "name": "Surging Sparks",
+                "releaseDate": "2024/11/08",
+                "total": 252,
+                "images": {"logo": "https://img/sv8.png"},
+            }
+        ]
+
+    async def fake_magic() -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "abc",
+                "code": "dsk",
+                "name": "Duskmourn",
+                "released_at": "2024-09-27",
+                "card_count": 286,
+                "icon_svg_uri": "https://img/dsk.svg",
+            }
+        ]
+
+    async def fake_yugioh() -> list[dict[str, Any]]:
+        return [
+            {
+                "set_code": "ROTA",
+                "set_name": "Rage of the Abyss",
+                "tcg_date": "2024-10-10",
+                "num_of_cards": 101,
+            }
+        ]
+
+    async def no_image(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(card_search_service.pokemon_tcg, "list_sets", fake_pokemon)
+    monkeypatch.setattr(card_search_service.scryfall, "list_sets", fake_magic)
+    monkeypatch.setattr(card_search_service.ygoprodeck, "list_sets", fake_yugioh)
+    # YGO sets carry no upstream art — keep the packaging-image enrichment
+    # offline (tests must never hit live providers).
+    monkeypatch.setattr(card_search_service, "_resolve_set_image", no_image)
+
+    resp = await client.get("/v1/sets", params={"tcg": "all", "limit": 2})
+    body = assert_envelope_ok(resp)
+    assert body["source"] == "mixed"
+    assert body["total"] == 3
+    assert [s["name"] for s in body["results"]] == [
+        "Surging Sparks",
+        "Rage of the Abyss",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_endpoints_are_public_no_auth_required(client):
     """No bearer token attached — must still be 200."""
     resp = await client.get("/v1/cards/search", params={"q": "", "tcg": "all"})

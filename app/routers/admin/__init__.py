@@ -16,6 +16,7 @@ from app.routers.admin import (
     blog,
     card_tree,
     cards,
+    carousels,
     catalog,
     cloud,
     database,
@@ -52,6 +53,7 @@ admin_router.include_router(integrations.router)
 admin_router.include_router(revenue.router)
 # Catalog & product.
 admin_router.include_router(catalog.router)
+admin_router.include_router(carousels.router)
 admin_router.include_router(pricecharting.router)
 admin_router.include_router(scanner.router)
 admin_router.include_router(cards.router)
