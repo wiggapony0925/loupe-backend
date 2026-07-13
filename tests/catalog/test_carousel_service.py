@@ -337,3 +337,135 @@ async def test_catalog_shelves_apply_lens_and_never_duplicate(monkeypatch):
     assert ir_cards and all("Illustration" in c["rarity"] for c in ir_cards)
     # And the two themed shelves share no cards.
     assert {c["id"] for c in holo_cards}.isdisjoint({c["id"] for c in ir_cards})
+
+
+# ── Rail expansion ("view more" → search surface) ──
+
+
+def _priced_pool(n: int, base: float = 10.0) -> list[dict]:
+    return [
+        _card(f"p{i}", base + i, "Holo Rare" if i % 2 else "Common") for i in range(n)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_expand_rail_trending_paginates_and_supports_all(monkeypatch) -> None:
+    pool = [_card(f"t{i}", 100 + i) for i in range(30)]
+
+    async def fake_shelf(game, sort, max_price=None, limit=48):
+        assert sort == "trending"
+        return pool
+
+    monkeypatch.setattr(carousel_service, "_shelf_cards", fake_shelf)
+
+    page1 = await carousel_service.expand_rail("all", "trending", page=1, page_size=10)
+    assert page1 is not None
+    assert page1["title"] == "Trending now"  # mixed-scope copy, no game label
+    assert page1["total"] == 30
+    assert [c["id"] for c in page1["cards"]] == [f"t{i}" for i in range(10)]
+
+    page3 = await carousel_service.expand_rail(
+        "pokemon", "trending", page=3, page_size=10
+    )
+    assert page3 is not None
+    assert page3["title"] == "Trending in Pokémon"
+    assert [c["id"] for c in page3["cards"]] == [f"t{i}" for i in range(20, 30)]
+
+
+@pytest.mark.asyncio
+async def test_expand_rail_recipe_lens_over_deep_pool(monkeypatch) -> None:
+    # A priced recipe rail expands by re-running its lens (price band + rarity)
+    # over the DEEP pool with no rail cap — total = every match, paginated.
+    async def fake_get_carousels(game: str) -> CarouselResponse:
+        return CarouselResponse(
+            game=game,
+            source="curated",
+            carousels=[
+                CarouselRecipe(
+                    id="holo-hits",
+                    title="Holo hits in {label}",
+                    subtitle="s",
+                    rarityPattern="holo",
+                    priceMin=15,
+                    limit=4,  # the rail cap must NOT cap the expansion
+                    sort="price_asc",
+                )
+            ],
+        )
+
+    async def fake_shelf(game, sort, max_price=None, limit=48):
+        assert limit == carousel_service._EXPAND_POOL  # deep pool, not the rail's 48
+        return _priced_pool(40)
+
+    monkeypatch.setattr(carousel_service, "get_carousels", fake_get_carousels)
+    monkeypatch.setattr(carousel_service, "_shelf_cards", fake_shelf)
+
+    out = await carousel_service.expand_rail(
+        "pokemon", "holo-hits", page=1, page_size=12
+    )
+    assert out is not None
+    assert out["title"] == "Holo hits in Pokémon"
+    # Odd indices are Holo Rare; price ≥ 15 drops p1, p3 (10+1, 10+3).
+    matches = [i for i in range(40) if i % 2 and 10 + i >= 15]
+    assert out["total"] == len(matches) > 12  # beyond the rail's limit=4
+    assert len(out["cards"]) == 12
+    prices = [c["pricing_summary"]["market"]["amount"] for c in out["cards"]]
+    assert prices == sorted(prices)  # price_asc kept
+
+
+@pytest.mark.asyncio
+async def test_expand_rail_catalog_delegates_to_browse(monkeypatch) -> None:
+    async def fake_get_carousels(game: str) -> CarouselResponse:
+        return CarouselResponse(
+            game=game,
+            source="ai",
+            carousels=[
+                CarouselRecipe(
+                    id="explore-more",
+                    title="Dig in",
+                    subtitle="s",
+                    source="catalog",
+                    sort="name",
+                )
+            ],
+        )
+
+    calls: list[dict] = []
+
+    async def fake_browse(game, page, page_size, sort="name", set_id=None):
+        calls.append({"game": game, "page": page, "page_size": page_size, "sort": sort})
+        return {
+            "cards": [_card(f"c{i}", None) for i in range(page_size)],
+            "total": 5000,
+        }
+
+    monkeypatch.setattr(carousel_service, "get_carousels", fake_get_carousels)
+    from app.services.catalog import catalog_browse_service
+
+    monkeypatch.setattr(catalog_browse_service, "browse_catalog", fake_browse)
+
+    out = await carousel_service.expand_rail(
+        "magic", "explore-more", page=7, page_size=24
+    )
+    assert out is not None
+    assert out["kind"] == "catalog"
+    assert out["total"] == 5000  # the REAL upstream total
+    assert calls == [{"game": "magic", "page": 7, "page_size": 24, "sort": "name"}]
+
+    # The structural explore anchor also pages the real catalog.
+    out = await carousel_service.expand_rail("magic", "explore", page=2, page_size=10)
+    assert out is not None
+    assert out["total"] == 5000
+    assert out["title"] == "Explore Magic: The Gathering"
+
+
+@pytest.mark.asyncio
+async def test_expand_rail_unknown_is_none(monkeypatch) -> None:
+    async def fake_get_carousels(game: str) -> CarouselResponse:
+        return CarouselResponse(game=game, source="curated", carousels=[])
+
+    monkeypatch.setattr(carousel_service, "get_carousels", fake_get_carousels)
+    assert await carousel_service.expand_rail("pokemon", "nope") is None
+    # Non-trending rails don't exist for the mixed scope or unknown games.
+    assert await carousel_service.expand_rail("all", "grails") is None
+    assert await carousel_service.expand_rail("sports", "grails") is None

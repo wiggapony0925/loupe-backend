@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.platform.rate_limit import catalog_read_limit, search_live_limit
 from app.services.catalog import (
@@ -25,6 +25,7 @@ from app.services.catalog import (
     catalog_browse_service,
     game_registry,
     games,
+    search_intel,
 )
 from app.services.market import trending_service
 
@@ -58,34 +59,10 @@ def _cache(response: Response) -> None:
 
 #: tcg values the trending feed understands (others collapse to "all").
 _TRENDING_TCGS = {"pokemon", "magic", "yugioh", "all"}
-
-
-def _market_amount(card: dict[str, Any]) -> float | None:
-    """Best-available numeric price for a card dict, or None if it has none.
-
-    Falls through market → high → mid → low so a card with only one price band
-    still counts as "priced" (and isn't dropped from the shopping rails)."""
-    pricing = card.get("pricing_summary") or {}
-    for key in ("market", "high", "mid", "low"):
-        chosen = pricing.get(key)
-        if isinstance(chosen, dict) and chosen.get("amount") is not None:
-            try:
-                return float(chosen["amount"])
-            except (TypeError, ValueError):
-                continue
-    return None
-
-
-def _apply_sort(cards: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
-    if sort == "price_asc":
-        return sorted(
-            cards, key=lambda c: (_market_amount(c) is None, _market_amount(c) or 0.0)
-        )
-    if sort == "price_desc":
-        return sorted(cards, key=lambda c: _market_amount(c) or 0.0, reverse=True)
-    if sort == "name":
-        return sorted(cards, key=lambda c: (c.get("name") or "").lower())
-    return cards  # "best" / "trending" → keep upstream order
+#: Games whose catalog browse supports set scoping (see catalog_browse_service).
+_SET_BROWSE_GAMES = {"pokemon", "magic"}
+#: Sorts the catalog browse applies server-side.
+_BROWSE_SORTS = {"name", "newest", "price_asc", "price_desc"}
 
 
 @router.get(
@@ -99,7 +76,9 @@ async def public_search(
     tcg: str = Query("all", pattern=game_registry.tcg_pattern()),
     rarity: str | None = Query(None, max_length=80),
     set_name: str | None = Query(None, alias="set", max_length=120),
-    sort: str = Query("best", pattern="^(best|price_asc|price_desc|name)$"),
+    sort: str = Query(
+        "best", pattern="^(best|price_asc|price_desc|name|newest|oldest)$"
+    ),
     langs: str = Query(
         "en",
         max_length=80,
@@ -109,6 +88,13 @@ async def public_search(
     page_size: int = Query(12, ge=1, le=60),
 ) -> dict[str, Any]:
     """Search (or, with no query, browse trending) with all derivation done here.
+
+    Free text is first run through the deterministic query-understanding layer
+    (``search_intel`` — regex + cached catalog lookups, zero AI): "most recent
+    charizard from evolving skies under $50" becomes text="charizard" +
+    sort=newest + a resolved real set + a price band. Explicit params always
+    WIN over parsed intent; whatever was understood is echoed back in
+    ``interpreted`` (with human-readable ``chips``) so clients can show it.
 
     Returns the paginated slice plus ``total``, ``facets`` and
     ``available_languages`` so the client renders + drives its language picker
@@ -121,50 +107,141 @@ async def public_search(
     langs_avail = await card_search_service.available_languages(
         tcg if tcg != "all" else None
     )
-    if q.strip():
+
+    # ── Query understanding (deterministic — parsed intent fills the gaps) ──
+    intent = search_intel.parse_query(q)
+    eff_tcg = tcg if tcg != "all" else (intent.game or "all")
+    eff_sort = sort if sort != "best" else (intent.sort or "best")
+    resolved_set: dict[str, Any] | None = None
+    if set_name is None and intent.set_query:
+        resolved_set = await search_intel.resolve_set(
+            intent.set_query, eff_tcg if eff_tcg != "all" else None
+        )
+        if resolved_set is not None and eff_tcg == "all":
+            eff_tcg = str(resolved_set.get("tcg") or "all")
+    interpreted = (
+        search_intel.interpreted_payload(intent, resolved_set)
+        if intent.has_signal
+        else None
+    )
+    has_text = bool(intent.text)
+    has_pool_filters = (
+        intent.price_min is not None
+        or intent.price_max is not None
+        or intent.rarity_pattern is not None
+        or intent.year is not None
+    )
+
+    def _respond(
+        items: list[dict[str, Any]],
+        total: int,
+        facets: dict[str, Any],
+        source: Any,
+    ) -> dict[str, Any]:
+        return {
+            "results": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "facets": facets,
+            "available_languages": langs_avail,
+            "interpreted": interpreted,
+            "source": source,
+        }
+
+    def _page_facets(items: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "rarities": sorted({c.get("rarity") for c in items if c.get("rarity")}),
+            "sets": sorted({c.get("set_name") for c in items if c.get("set_name")}),
+        }
+
+    # ── Set-scoped browse — "most recent from evolving skies" — the parsed
+    # set resolved to a REAL set, so page its actual catalog (true total,
+    # server-side newest/price sorts) instead of poking a name search.
+    if (
+        resolved_set is not None
+        and not has_text
+        and not has_pool_filters
+        and eff_tcg in _SET_BROWSE_GAMES
+    ):
+        browse_sort = eff_sort if eff_sort in _BROWSE_SORTS else "name"
+        body = await catalog_browse_service.browse_catalog(
+            game=eff_tcg,
+            page=page,
+            page_size=page_size,
+            sort=browse_sort,
+            set_id=str(resolved_set.get("id")),
+        )
+        items = list(body.get("cards") or [])
+        return _respond(
+            items, int(body.get("total") or 0), _page_facets(items), body.get("source")
+        )
+
+    # ── Whole-game browse — "newest pokemon" (modifier-only, no set/pool
+    # filters): the game catalog sorted server-side beats a trending sample.
+    if (
+        not has_text
+        and resolved_set is None
+        and not has_pool_filters
+        and eff_tcg != "all"
+        and eff_sort in _BROWSE_SORTS
+    ):
+        body = await catalog_browse_service.browse_catalog(
+            game=eff_tcg, page=page, page_size=page_size, sort=eff_sort
+        )
+        items = list(body.get("cards") or [])
+        return _respond(
+            items, int(body.get("total") or 0), _page_facets(items), body.get("source")
+        )
+
+    if has_text:
         # Default experience (relevance sort, no facet filters): TRUE upstream
         # pagination, so every printing of a popular name is reachable —
         # Pikachu has 177, Charizard 400+; the old pooled top-60 made the
         # catalog look like it was missing most of them.
-        if rarity is None and set_name is None and sort == "best" and page_size > 12:
+        if (
+            intent.plain
+            and rarity is None
+            and set_name is None
+            and sort == "best"
+            and page_size > 12
+        ):
             paged = await card_search_service.search_cards_paged(
-                q=q, tcg=tcg, page=page, page_size=page_size, langs=lang_list
+                q=intent.text,
+                tcg=eff_tcg,
+                page=page,
+                page_size=page_size,
+                langs=lang_list,
             )
             items = list(paged.get("results") or [])
-            return {
-                "results": items,
-                "total": paged.get("total", len(items)),
-                "page": page,
-                "page_size": page_size,
-                # Facets come from the visible page — options accumulate as
-                # the user pages; filtering re-enters the pooled path below.
-                "facets": {
-                    "rarities": sorted(
-                        {c.get("rarity") for c in items if c.get("rarity")}
-                    ),
-                    "sets": sorted(
-                        {c.get("set_name") for c in items if c.get("set_name")}
-                    ),
-                },
-                "available_languages": langs_avail,
-                "source": paged.get("source"),
-            }
+            # Facets come from the visible page — options accumulate as
+            # the user pages; filtering re-enters the pooled path below.
+            return _respond(
+                items,
+                int(paged.get("total") or len(items)),
+                _page_facets(items),
+                paged.get("source"),
+            )
         # Typeahead (small page_size) and filtered/price-sorted views work on
         # a ranked pool — filters and price sorts need the whole set in hand.
         fetch_limit = 20 if page_size <= 12 else 120
-        body = await card_search_service.search_cards(q=q, tcg=tcg, limit=fetch_limit)
+        body = await card_search_service.search_cards(
+            q=intent.text, tcg=eff_tcg, limit=fetch_limit
+        )
         cards = list(body.get("results") or [])
         source = body.get("source")
     else:
         body = await trending_service.get_trending(
-            tcg=tcg if tcg in _TRENDING_TCGS else "all", limit=100
+            tcg=eff_tcg if eff_tcg in _TRENDING_TCGS else "all", limit=100
         )
         cards = list(body.get("cards") or [])
         source = body.get("source")
 
     # Facets reflect the full (pre-filter) result set.
-    rarities = sorted({c.get("rarity") for c in cards if c.get("rarity")})
-    sets = sorted({c.get("set_name") for c in cards if c.get("set_name")})
+    facets = {
+        "rarities": sorted({c.get("rarity") for c in cards if c.get("rarity")}),
+        "sets": sorted({c.get("set_name") for c in cards if c.get("set_name")}),
+    }
 
     filtered = [
         c
@@ -172,20 +249,21 @@ async def public_search(
         if (rarity is None or c.get("rarity") == rarity)
         and (set_name is None or c.get("set_name") == set_name)
     ]
-    ordered = _apply_sort(filtered, sort)
+    # Parsed filters (price band / rarity vocab / year / set phrase) — only
+    # where no explicit param claimed the same axis.
+    filtered = search_intel.filter_cards(
+        filtered,
+        intent,
+        set_name=(
+            ((resolved_set or {}).get("name") or intent.set_query)
+            if set_name is None
+            else None
+        ),
+    )
+    ordered = search_intel.sort_cards(filtered, eff_sort)
     total = len(ordered)
     start = (page - 1) * page_size
-    page_items = ordered[start : start + page_size]
-
-    return {
-        "results": page_items,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "facets": {"rarities": rarities, "sets": sets},
-        "available_languages": langs_avail,
-        "source": source,
-    }
+    return _respond(ordered[start : start + page_size], total, facets, source)
 
 
 @router.get(
@@ -290,6 +368,34 @@ async def public_carousels_resolved(
     marketplace shows the exact same carousels everywhere."""
     _cache(response)
     return (await carousel_service.resolve_carousels(game)).model_dump()
+
+
+@router.get(
+    "/carousels/rail",
+    summary="One carousel expanded — the full paginated contents ('view more')",
+    dependencies=[Depends(catalog_read_limit)],
+)
+async def public_carousel_rail(
+    response: Response,
+    id: str = Query(..., max_length=48, description="Rail id, e.g. grails"),
+    game: str = Query(
+        "pokemon", pattern=game_registry.tcg_pattern(supported_only=True)
+    ),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(24, ge=1, le=50),
+) -> dict[str, Any]:
+    """The search-surface backing of a rail's "view more": the SAME recipe lens
+    the carousel used, run over the deep pool and truly paginated (real
+    ``total``). ``game=all`` is valid only for the mixed ``trending`` anchor.
+    Unknown rails (e.g. an expired AI shelf) return 404 so clients degrade
+    cleanly."""
+    _cache(response)
+    body = await carousel_service.expand_rail(game, id, page=page, page_size=page_size)
+    if body is None:
+        raise HTTPException(
+            status_code=404, detail=f"No carousel rail '{id}' for {game}."
+        )
+    return body
 
 
 @router.get(

@@ -307,11 +307,11 @@ def _price_of(card: dict[str, Any]) -> float | None:
     return None
 
 
-def _apply_lens(
+def _filter_sort(
     cards: list[dict[str, Any]], recipe: CarouselRecipe
 ) -> list[dict[str, Any]]:
-    """Server-side mirror of the web `cardFilters` lens: price band, rarity
-    pattern, sort, limit — applied to a fetched shelf."""
+    """The recipe lens WITHOUT the rail cap: price band, rarity pattern, sort.
+    ``_apply_lens`` caps it for a rail; ``expand_rail`` paginates it whole."""
     out = list(cards)
 
     lo, hi = recipe.priceMin, recipe.priceMax
@@ -341,7 +341,15 @@ def _apply_lens(
     elif sort == "name":
         out.sort(key=lambda c: str(c.get("name") or ""))
 
-    return out[: (recipe.limit or 20)]
+    return out
+
+
+def _apply_lens(
+    cards: list[dict[str, Any]], recipe: CarouselRecipe
+) -> list[dict[str, Any]]:
+    """Server-side mirror of the web `cardFilters` lens: price band, rarity
+    pattern, sort, limit — applied to a fetched shelf."""
+    return _filter_sort(cards, recipe)[: (recipe.limit or 20)]
 
 
 async def _shelf_cards(
@@ -490,6 +498,154 @@ async def resolve_carousels(game: str) -> ResolvedCarousels:
     resolved = ResolvedCarousels(game=game, source=base.source, rails=rails)
     await _resolved_cache_set(resolved)
     return resolved
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Rail expansion — "view more" behind one carousel.
+#
+# A rail shows a ~20-card teaser; tapping "view more" on a client lands on the
+# search surface with this endpoint behind it: the SAME recipe lens run over
+# the deep pool and truly paginated, so the filter tag shows everything the
+# shelf's theme matches — not just the teaser slice. Catalog rails delegate to
+# the browse catalog (real upstream ``total``); priced rails run the lens over
+# the full discovery pool and paginate in memory (the pool IS the universe of
+# priced cards, so its filtered length is the honest total).
+# ──────────────────────────────────────────────────────────────────────────
+
+#: Deep-pool size for priced-rail expansion (trending_service.MAX_LIMIT).
+_EXPAND_POOL = 100
+
+
+def _rail_page(
+    *,
+    game: str,
+    rail_id: str,
+    title: str,
+    subtitle: str,
+    kind: str,
+    page: int,
+    page_size: int,
+    total: int,
+    cards: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "game": game,
+        "id": rail_id,
+        "title": title,
+        "subtitle": subtitle,
+        "kind": kind,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "cards": cards,
+    }
+
+
+async def expand_rail(
+    game: str, rail_id: str, page: int = 1, page_size: int = 24
+) -> dict[str, Any] | None:
+    """One carousel expanded into its FULL paginated contents.
+
+    Handles the structural anchors (``trending`` — including ``game=all`` for
+    the mixed Search-tab rail — and ``explore``) plus every recipe in the
+    game's ACTIVE pool (AI design when cached, else the operator registry).
+    Returns ``None`` for a rail that doesn't exist (e.g. yesterday's expired
+    AI shelf) so the router can 404 and the client can degrade gracefully.
+    """
+    game = (game or "all").lower()
+    start = (page - 1) * page_size
+
+    # Momentum anchor — the only rail that also exists for the mixed scope.
+    if rail_id == "trending":
+        label = GAME_LABELS.get(game, game.title())
+        pool = await _shelf_cards(game, sort="trending", limit=_EXPAND_POOL)
+        return _rail_page(
+            game=game,
+            rail_id=rail_id,
+            title="Trending now" if game == "all" else f"Trending in {label}",
+            subtitle=(
+                "The cards moving most across marketplaces."
+                if game == "all"
+                else f"The {label} cards moving most across marketplaces."
+            ),
+            kind="cards",
+            page=page,
+            page_size=page_size,
+            total=len(pool),
+            cards=pool[start : start + page_size],
+        )
+
+    if game not in GAME_LABELS:
+        return None
+    label = GAME_LABELS[game]
+
+    from app.services.catalog import catalog_browse_service
+
+    # Explore anchor — the whole catalog, truly paginated (name order beats the
+    # rail's rotating daily sample when someone is actually digging through it).
+    if rail_id == "explore":
+        body = await catalog_browse_service.browse_catalog(
+            game=game, page=page, page_size=page_size, sort="name"
+        )
+        cards = body.get("cards")
+        return _rail_page(
+            game=game,
+            rail_id=rail_id,
+            title=f"Explore {label}",
+            subtitle=f"A look across the {label} catalog — open any card for details.",
+            kind="catalog",
+            page=page,
+            page_size=page_size,
+            total=int(body.get("total") or 0),
+            cards=list(cards) if isinstance(cards, list) else [],
+        )
+
+    base = await get_carousels(game)
+    recipe = next((r for r in base.carousels if r.id == rail_id), None)
+    if recipe is None:
+        return None
+
+    title = _interp(recipe.title, label)
+    subtitle = _interp(recipe.subtitle, label)
+
+    if recipe.source == "catalog":
+        sort = (
+            recipe.sort
+            if recipe.sort in ("name", "price_asc", "price_desc")
+            else "name"
+        )
+        body = await catalog_browse_service.browse_catalog(
+            game=game, page=page, page_size=page_size, sort=sort
+        )
+        cards = body.get("cards")
+        return _rail_page(
+            game=game,
+            rail_id=rail_id,
+            title=title,
+            subtitle=subtitle,
+            kind="catalog",
+            page=page,
+            page_size=page_size,
+            total=int(body.get("total") or 0),
+            cards=list(cards) if isinstance(cards, list) else [],
+        )
+
+    pool_sort = "trending" if recipe.source == "trending" else "value"
+    pool = await _shelf_cards(
+        game, sort=pool_sort, max_price=recipe.priceMax, limit=_EXPAND_POOL
+    )
+    filtered = _filter_sort(pool, recipe)
+    return _rail_page(
+        game=game,
+        rail_id=rail_id,
+        title=title,
+        subtitle=subtitle,
+        kind="cards",
+        page=page,
+        page_size=page_size,
+        total=len(filtered),
+        cards=filtered[start : start + page_size],
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────

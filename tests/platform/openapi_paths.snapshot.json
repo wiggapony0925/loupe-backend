@@ -512,6 +512,9 @@
   "/v1/public/carousels": [
     "GET"
   ],
+  "/v1/public/carousels/rail": [
+    "GET"
+  ],
   "/v1/public/carousels/resolved": [
     "GET"
   ],
