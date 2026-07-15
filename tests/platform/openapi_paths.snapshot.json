@@ -335,6 +335,9 @@
   "/v1/cards/search": [
     "GET"
   ],
+  "/v1/cards/search/ai": [
+    "GET"
+  ],
   "/v1/cards/trending": [
     "GET"
   ],

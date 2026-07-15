@@ -28,3 +28,17 @@ async def test_app_config_force_update_below_min(client):
     resp = await client.get("/v1/app/config", params={"clientVersion": "0.0.1"})
     body = assert_envelope_ok(resp)
     assert body["forceUpdate"] is True
+
+
+@pytest.mark.asyncio
+async def test_config_serves_ai_search_limits(client):
+    # The limits ride the remote config so a backend constant change reaches
+    # installed clients on the next refresh — no app-store release.
+    from app.services import ai
+
+    resp = await client.get("/v1/app/config")
+    body = resp.json()["data"]
+    assert body["aiSearch"] == {
+        "queryMaxChars": ai.QUERY_MAX_CHARS,
+        "messageMaxChars": ai.MESSAGE_MAX_CHARS,
+    }

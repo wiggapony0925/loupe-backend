@@ -103,6 +103,7 @@ async def entitlements_for(db: AsyncSession, user: User) -> EntitlementsRead:
         unlimited_alerts=avail(cfg.gate_unlimited_alerts),
         statements=avail(cfg.gate_statements),
         pro_badge=pro,
+        ai_search=pro,
     )
     return EntitlementsRead(
         plan="pro" if pro else "free",
@@ -161,6 +162,25 @@ async def enforce_can_add_alert(db: AsyncSession, user: User) -> None:
         )
 
 
+async def enforce_ai_search(db: AsyncSession, user: User) -> None:
+    """Raise 402 when a free account asks the AI search. Pure Pro gate — no
+    free allowance, no SiteConfig column: the kill switch already promotes
+    everyone to Pro when subscriptions are off. Structured ``detail``
+    (code=ai_search_pro) opens the paywall with the right story."""
+    if await is_pro(db, user):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_402_PAYMENT_REQUIRED,
+        detail={
+            "code": "ai_search_pro",
+            "message": (
+                "AI search is a Loupe Pro feature. Upgrade to describe any "
+                "card in your own words and let Loupe find it."
+            ),
+        },
+    )
+
+
 async def enforce_can_add_card(db: AsyncSession, user: User) -> None:
     """Raise 402 if adding one more card would exceed the free-tier cap.
 
@@ -195,6 +215,7 @@ __all__ = [
     "FREE_CARD_LIMIT",
     "SUBSCRIPTIONS_FLAG",
     "count_cards",
+    "enforce_ai_search",
     "enforce_can_add_alert",
     "enforce_can_add_card",
     "entitlements_for",

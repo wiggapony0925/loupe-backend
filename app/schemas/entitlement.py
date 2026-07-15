@@ -28,6 +28,8 @@ class PlanFeatures(BaseModel):
     unlimited_alerts: bool
     statements: bool
     pro_badge: bool
+    # Semantic "describe it" AI search ("red lizard with fire" → Charizard).
+    ai_search: bool = False
 
 
 class EntitlementsRead(BaseModel):

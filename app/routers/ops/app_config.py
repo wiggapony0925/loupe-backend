@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
+from app.services import ai
 from app.services.admin import flag_service
 
 router = APIRouter(prefix="/app", tags=["app"])
@@ -78,7 +79,7 @@ _DEFAULT_FLAGS: dict[str, bool] = {
     summary="Remote app configuration",
     description=(
         "Returns `{ minSupportedVersion, forceUpdate, flags, homeRails, "
-        "discoveryRails }`. `forceUpdate` is server-computed from the "
+        "discoveryRails, aiSearch }`. `forceUpdate` is server-computed from the "
         "optional `clientVersion` query param. `discoveryRails` orders the "
         "home-tab discovery carousels (unknown ids are skipped client-side). "
         "Clients should call this on cold start and again on resume after "
@@ -102,6 +103,13 @@ async def get_app_config(
         "flags": flags,
         "homeRails": list(_DEFAULT_HOME_RAILS),
         "discoveryRails": list(_DEFAULT_DISCOVERY_RAILS),
+        # AI "describe it" search limits — served here so changing the backend
+        # constants reaches every installed client on the next config refresh
+        # (no app-store release). Clients keep baked-in fallbacks for offline.
+        "aiSearch": {
+            "queryMaxChars": ai.QUERY_MAX_CHARS,
+            "messageMaxChars": ai.MESSAGE_MAX_CHARS,
+        },
     }
 
 

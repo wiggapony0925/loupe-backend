@@ -31,6 +31,7 @@ from app.schemas.card import CardRead
 from app.schemas.card_analytics import CardAnalytics
 from app.schemas.common import Pagination
 from app.schemas.ownership import CardOwnership
+from app.services import ai, entitlement_service
 from app.services.catalog import (
     canonical_card_service,
     card_catalog_service,
@@ -71,6 +72,50 @@ async def search_live(
     gracefully.
     """
     return await card_search_service.search_cards(q=q, tcg=tcg, limit=limit)
+
+
+@router.get(
+    "/search/ai",
+    summary="AI 'describe it' search (Loupe Pro)",
+    dependencies=[Depends(search_live_limit)],
+)
+async def search_ai(
+    q: str = Query(..., min_length=3, max_length=ai.QUERY_MAX_CHARS),
+    tcg: str | None = Query(
+        None,
+        pattern=game_registry.tcg_pattern(supported_only=True),
+        description="The game tag active in the search UI — biases the answer.",
+    ),
+    limit: int = Query(24, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict[str, Any]:
+    """Describe a card in plain words — "red lizard with fire" — and get REAL
+    catalog cards back, plus the assistant's one-line ``message`` for the
+    chat-bubble UI. The model only maps the description to candidate card
+    names; the results always come from our own catalog (never invented).
+
+    Loupe Pro only (402 with ``code=ai_search_pro`` opens the paywall). When
+    no model is configured or it errors, degrades to the normal search with
+    ``source="fallback"`` and a null ``message`` — the client simply renders
+    plain results without the bubble.
+    """
+    await entitlement_service.enforce_ai_search(db, user)
+    game_hint = None if tcg in (None, "all") else tcg
+    body = await ai.ai_search(q, limit=limit, game_hint=game_hint)
+    if body is not None:
+        return body
+    plain = await card_search_service.search_cards(q=q, tcg="all", limit=limit)
+    results = list(plain.get("results") or [])
+    return {
+        "query": q,
+        "message": None,
+        "candidates": [],
+        "game": None,
+        "results": results,
+        "total": len(results),
+        "source": "fallback",
+    }
 
 
 @router.get(

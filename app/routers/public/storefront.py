@@ -72,7 +72,7 @@ _BROWSE_SORTS = {"name", "newest", "price_asc", "price_desc"}
 )
 async def public_search(
     response: Response,
-    q: str = Query("", max_length=120),
+    q: str = Query("", max_length=200),
     tcg: str = Query("all", pattern=game_registry.tcg_pattern()),
     rarity: str | None = Query(None, max_length=80),
     set_name: str | None = Query(None, alias="set", max_length=120),
