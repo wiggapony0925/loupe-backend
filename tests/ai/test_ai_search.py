@@ -110,6 +110,9 @@ async def test_ai_search_resolves_candidates_and_caches_plan(
         assert tcg == "pokemon"  # the plan's game scopes the lookups
         return {"results": [_card(f"{q}-1", q), _card(f"{q}-2", q)]}
 
+    # health.available() gates the flow on a configured provider — give the
+    # test a key so it behaves the same with and without a local .env (CI).
+    monkeypatch.setattr(providers.get_settings(), "openai_api_key", "test-key")
     monkeypatch.setattr(providers, "ask", fake_ask)
     monkeypatch.setattr(card_search_service, "search_cards", fake_search)
 
@@ -150,6 +153,9 @@ async def test_game_hint_biases_prompt_and_keys_the_cache(
         lookups.append(tcg)
         return {"results": [_card(f"{tcg}-{q}", q)]}
 
+    # health.available() gates the flow on a configured provider — give the
+    # test a key so it behaves the same with and without a local .env (CI).
+    monkeypatch.setattr(providers.get_settings(), "openai_api_key", "test-key")
     monkeypatch.setattr(providers, "ask", fake_ask)
     monkeypatch.setattr(card_search_service, "search_cards", fake_search)
 
