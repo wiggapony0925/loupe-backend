@@ -31,7 +31,17 @@ Rules:
 - candidates are card NAMES only (no set names, no prices, no ids).
 - Use null for game unless the description clearly implies one.
 - If the description is too vague, still give your best guesses.
-- Never invent names: prefer famous, real cards that match the description."""
+- Never invent names: prefer famous, real cards that match the description.
+- Match MECHANICS precisely, not just theme: mana/level costs, card types \
+(flip monster, fusion, trap, instant), summoning conditions, and whose side \
+of the field a card lands on are strong identifying signals.
+- When a description names an owner ("joey's...", "yugi's...", "sora's \
+partner"), weigh that character's signature cards heavily.
+- For counterpart pairs (sword/shield legendaries, sun/moon forms), include \
+BOTH counterparts and put the one matching the described detail first.
+- Consider classic and older cards from every era, not just current staples.
+- Spread the candidates across DIFFERENT plausible answers instead of five \
+variants of one guess."""
 
 
 def search_system_prompt(game_hint: str | None = None) -> str:

@@ -38,7 +38,7 @@ async def _ask_openai(system: str, user: str) -> str:
     settings = get_settings()
     client = AsyncOpenAI(api_key=settings.openai_api_key)
     resp = await client.chat.completions.create(
-        model=settings.carousel_model,
+        model=settings.ai_search_model,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},

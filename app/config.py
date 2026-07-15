@@ -383,6 +383,11 @@ class Settings(BaseSettings):
     # curated rotating pool. Set via Secret Manager (`openai-api-key`) in prod.
     openai_api_key: str = ""
     carousel_model: str = "gpt-4o-mini"
+    #: The "describe it" AI search model. Stronger than the carousel designer
+    #: on purpose: obscure-card recall is the whole game (eval: gpt-4o 92%
+    #: hit@1 vs mini's 82%), and answers are kv-cached per unique question
+    #: for a week across ALL users, so the per-call premium is negligible.
+    ai_search_model: str = "gpt-4o"
 
     # --- Authorization ---
     # Comma-separated list of email addresses with admin privileges.
