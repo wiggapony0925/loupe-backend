@@ -45,13 +45,13 @@ def _plan_cache_key(q: str, game_hint: str | None) -> str:
     return f"{PLAN_CACHE_KEY}:{game_hint or 'all'}:{_fold(q)[:120]}"
 
 
-async def _plan_for(q: str, game_hint: str | None) -> AiSearchPlan | None:
-    """The (cached) model answer for a question; ``None`` when unavailable."""
+async def _plan_for(q: str, game_hint: str | None) -> tuple[AiSearchPlan | None, bool]:
+    """The model answer for a question, as ``(plan, was_cached)``."""
     cache_key = _plan_cache_key(q, game_hint)
     raw = await kv_get(cache_key)
     if raw:
         try:
-            return AiSearchPlan.model_validate_json(raw)
+            return AiSearchPlan.model_validate_json(raw), True
         except ValidationError:
             pass  # stale shape → re-ask
 
@@ -61,14 +61,14 @@ async def _plan_for(q: str, game_hint: str | None) -> AiSearchPlan | None:
         logger.warning("ai search model call failed: %s", exc)
         # Cool the feature down fleet-wide (quota errors hide it for hours).
         await health.record_failure(exc)
-        return None
+        return None, False
     if text is None:  # no provider configured
-        return None
+        return None, False
 
     plan = parse_plan(text)
     if plan is not None:
         await kv_set(cache_key, plan.model_dump_json(), PLAN_TTL)
-    return plan
+    return plan, False
 
 
 async def _cards_for(name: str, game: str | None) -> list[dict[str, Any]]:
@@ -118,7 +118,7 @@ async def ai_search(
     """
     if not await health.available():
         return None  # cooling down / unconfigured — router serves the fallback
-    plan = await _plan_for(q, game_hint)
+    plan, cached = await _plan_for(q, game_hint)
     if plan is None:
         return None
     lookup_game = plan.game or game_hint
@@ -134,6 +134,7 @@ async def ai_search(
         "results": results,
         "total": len(results),
         "source": "ai",
+        "cached": cached,
     }
 
 

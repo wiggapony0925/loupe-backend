@@ -10,6 +10,7 @@ instead of growing one mega-service:
 * :mod:`providers` — the model calls (OpenAI preferred, Anthropic fallback).
 * :mod:`health`    — the automatic kill switch (failures hide the feature).
 * :mod:`search`    — the "describe it" search orchestrator.
+* :mod:`telemetry` — clean ask logs, thumbs feedback, admin analytics.
 
 Routers import THIS package (``from app.services import ai``) and use the
 re-exports below; the submodules stay an implementation detail.
@@ -20,6 +21,7 @@ from app.services.ai.health import available
 from app.services.ai.providers import configured
 from app.services.ai.schemas import AiSearchPlan
 from app.services.ai.search import ai_search
+from app.services.ai.telemetry import log_ask, set_feedback
 
 __all__ = [
     "MESSAGE_MAX_CHARS",
@@ -28,4 +30,6 @@ __all__ = [
     "ai_search",
     "available",
     "configured",
+    "log_ask",
+    "set_feedback",
 ]

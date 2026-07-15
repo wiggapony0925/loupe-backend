@@ -11,8 +11,9 @@ Public read-only endpoints (no auth required):
 
 from __future__ import annotations
 
+import time
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -102,20 +103,58 @@ async def search_ai(
     """
     await entitlement_service.enforce_ai_search(db, user)
     game_hint = None if tcg in (None, "all") else tcg
+    started = time.monotonic()
     body = await ai.ai_search(q, limit=limit, game_hint=game_hint)
-    if body is not None:
-        return body
-    plain = await card_search_service.search_cards(q=q, tcg="all", limit=limit)
-    results = list(plain.get("results") or [])
-    return {
-        "query": q,
-        "message": None,
-        "candidates": [],
-        "game": None,
-        "results": results,
-        "total": len(results),
-        "source": "fallback",
-    }
+    if body is None:
+        plain = await card_search_service.search_cards(q=q, tcg="all", limit=limit)
+        results = list(plain.get("results") or [])
+        body = {
+            "query": q,
+            "message": None,
+            "candidates": [],
+            "game": None,
+            "results": results,
+            "total": len(results),
+            "source": "fallback",
+        }
+    # Flight-record the exchange; askId lets the client attach thumbs feedback.
+    ask_id = await ai.log_ask(
+        db,
+        user=user,
+        query=q,
+        game_hint=game_hint,
+        body=body,
+        latency_ms=int((time.monotonic() - started) * 1000),
+    )
+    body["askId"] = str(ask_id) if ask_id else None
+    return body
+
+
+class AiFeedbackIn(BaseModel):
+    """Thumbs verdict for one AI answer, from the buttons under the bubble."""
+
+    ask_id: uuid.UUID = Field(alias="askId")
+    verdict: Literal["up", "down"]
+
+
+@router.post(
+    "/search/ai/feedback",
+    summary="Rate an AI search answer (thumbs up/down)",
+    dependencies=[Depends(search_live_limit)],
+)
+async def search_ai_feedback(
+    payload: AiFeedbackIn,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict[str, Any]:
+    """Attach the asker's verdict to their own ask. Idempotent — tapping the
+    other thumb overwrites. The verdicts power the /admin/ai accuracy view."""
+    ok = await ai.set_feedback(
+        db, ask_id=payload.ask_id, user=user, verdict=payload.verdict
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Ask not found")
+    return {"ok": True}
 
 
 @router.get(

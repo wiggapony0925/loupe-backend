@@ -5,6 +5,15 @@
   "/metrics": [
     "GET"
   ],
+  "/v1/admin/ai/search/logs": [
+    "GET"
+  ],
+  "/v1/admin/ai/search/logs/{log_id}": [
+    "GET"
+  ],
+  "/v1/admin/ai/search/overview": [
+    "GET"
+  ],
   "/v1/admin/applications": [
     "GET"
   ],
@@ -337,6 +346,9 @@
   ],
   "/v1/cards/search/ai": [
     "GET"
+  ],
+  "/v1/cards/search/ai/feedback": [
+    "POST"
   ],
   "/v1/cards/trending": [
     "GET"

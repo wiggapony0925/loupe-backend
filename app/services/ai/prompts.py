@@ -41,7 +41,13 @@ partner"), weigh that character's signature cards heavily.
 BOTH counterparts and put the one matching the described detail first.
 - Consider classic and older cards from every era, not just current staples.
 - Spread the candidates across DIFFERENT plausible answers instead of five \
-variants of one guess."""
+variants of one guess.
+- Some asks are THEMES, not one card — the tell is a PLURAL / group ask: \
+"movie promos", "cards with eevee in the art", "shining pokemon cards". \
+Then every candidate must be a REAL card that belongs to that theme (movie \
+promos → "Ancient Mew", "Entei", "Celebi" — never an unrelated famous \
+card) and the message speaks to the collecting angle. A description of one \
+specific card is NOT a theme — answer it as a single card as usual."""
 
 
 def search_system_prompt(game_hint: str | None = None) -> str:

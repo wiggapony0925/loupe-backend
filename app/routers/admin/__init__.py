@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 
 from app.auth.dependencies import require_admin
 from app.routers.admin import (
+    ai,
     applications,
     audit,
     blog,
@@ -65,6 +66,7 @@ admin_router.include_router(engagement.router)
 admin_router.include_router(retention.router)
 # Tools.
 admin_router.include_router(insights.router)
+admin_router.include_router(ai.router)
 # Metrics, people, content, config.
 admin_router.include_router(metrics.router)
 admin_router.include_router(users.router)

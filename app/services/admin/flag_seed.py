@@ -57,6 +57,11 @@ ADMIN_PAGE_FLAGS: tuple[tuple[str, str, str], ...] = (
     ("admin_card_tree", "Admin · Card tree", "Catalog: card data-lineage tree."),
     ("admin_grades", "Admin · Grade review", "Catalog: QA graded cards."),
     ("admin_scanner", "Admin · Scanner", "Catalog: identify funnel."),
+    (
+        "admin_ai",
+        "Admin · Loupe AI",
+        "Tools: chatbot conversations, thumbs feedback, accuracy.",
+    ),
     ("admin_pulse", "Admin · Live pulse", "Growth: live activity feed."),
     ("admin_engagement", "Admin · Engagement", "Growth: retention & funnel."),
     ("admin_retention", "Admin · Retention", "Growth: cohort triangle."),

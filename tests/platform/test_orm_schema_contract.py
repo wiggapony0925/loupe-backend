@@ -30,6 +30,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 # ---------------------------------------------------------------------------
 EXPECTED_TABLES: frozenset[str] = frozenset(
     {
+        "ai_search_log",
         "api_keys",
         "application_events",
         "audit_log",

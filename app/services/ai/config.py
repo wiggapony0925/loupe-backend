@@ -32,7 +32,7 @@ GAME_LABELS: dict[str, str] = {
 #: Bump the KEY VERSION whenever the prompt changes so a new prompt takes
 #: effect immediately instead of after the TTL.
 PLAN_TTL = 7 * 24 * 60 * 60
-PLAN_CACHE_KEY = "ai_search:plan:v4"
+PLAN_CACHE_KEY = "ai_search:plan:v5"
 
 #: Cards fetched per candidate name (interleaved, deduped, then capped).
 PER_CANDIDATE = 12

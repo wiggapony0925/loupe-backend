@@ -1,5 +1,6 @@
 """SQLAlchemy ORM models for the loupe-backend domain."""
 
+from app.models.ai_search_log import AiSearchLog
 from app.models.api_key import ApiKey
 from app.models.audit import AuditLog
 from app.models.blog import BlogPost
@@ -49,6 +50,7 @@ from app.models.waitlist import WaitlistEntry
 from app.models.watchlist import WatchlistItem
 
 __all__ = [
+    "AiSearchLog",
     "ApiKey",
     "ApplicationEvent",
     "ApplicationStatusEnum",
