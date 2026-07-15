@@ -38,7 +38,9 @@ async def test_config_serves_ai_search_limits(client):
 
     resp = await client.get("/v1/app/config")
     body = resp.json()["data"]
-    assert body["aiSearch"] == {
-        "queryMaxChars": ai.QUERY_MAX_CHARS,
-        "messageMaxChars": ai.MESSAGE_MAX_CHARS,
-    }
+    assert body["aiSearch"]["queryMaxChars"] == ai.QUERY_MAX_CHARS
+    assert body["aiSearch"]["messageMaxChars"] == ai.MESSAGE_MAX_CHARS
+    # Availability depends on whether the environment has a model key (dev
+    # .env yes, CI no) — the kill-switch behaviour itself is pinned in
+    # tests/ai/test_health.py; here we only require the switch to exist.
+    assert isinstance(body["aiSearch"]["enabled"], bool)

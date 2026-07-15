@@ -103,10 +103,14 @@ async def get_app_config(
         "flags": flags,
         "homeRails": list(_DEFAULT_HOME_RAILS),
         "discoveryRails": list(_DEFAULT_DISCOVERY_RAILS),
-        # AI "describe it" search limits — served here so changing the backend
-        # constants reaches every installed client on the next config refresh
-        # (no app-store release). Clients keep baked-in fallbacks for offline.
+        # AI "describe it" search — limits AND the availability kill switch.
+        # `enabled` flips false when no model key is set or recent failures
+        # (quota, auth, outage) set a cooldown; clients HIDE the feature
+        # entirely (sparkle button, slash command, callout) until it returns.
+        # Served here so all of it reaches installed clients on the next
+        # config refresh — no release.
         "aiSearch": {
+            "enabled": await ai.available(),
             "queryMaxChars": ai.QUERY_MAX_CHARS,
             "messageMaxChars": ai.MESSAGE_MAX_CHARS,
         },

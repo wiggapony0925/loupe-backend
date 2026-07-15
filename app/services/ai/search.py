@@ -25,7 +25,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.platform.cache_l2 import kv_get, kv_set
-from app.services.ai import providers
+from app.services.ai import health, providers
 from app.services.ai.config import PER_CANDIDATE, PLAN_CACHE_KEY, PLAN_TTL
 from app.services.ai.prompts import search_system_prompt
 from app.services.ai.schemas import AiSearchPlan, parse_plan
@@ -59,6 +59,8 @@ async def _plan_for(q: str, game_hint: str | None) -> AiSearchPlan | None:
         text = await providers.ask(search_system_prompt(game_hint), q)
     except Exception as exc:  # model/network best effort — callers fall back
         logger.warning("ai search model call failed: %s", exc)
+        # Cool the feature down fleet-wide (quota errors hide it for hours).
+        await health.record_failure(exc)
         return None
     if text is None:  # no provider configured
         return None
@@ -114,6 +116,8 @@ async def ai_search(
     ``None`` when no model is configured / the model failed — the router
     falls back to the normal search so the user always gets results.
     """
+    if not await health.available():
+        return None  # cooling down / unconfigured — router serves the fallback
     plan = await _plan_for(q, game_hint)
     if plan is None:
         return None
