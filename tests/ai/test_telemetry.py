@@ -170,3 +170,42 @@ async def test_feedback_route_requires_auth(client):
         json={"askId": str(uuid.uuid4()), "verdict": "up"},
     )
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_log_ask_snapshots_the_shown_cards(db_session, created_user):
+    body = _body(
+        results=[
+            {
+                "id": "pokemontcg:base1-4",
+                "name": "Charizard",
+                "set_name": "Base",
+                "rarity": "Rare Holo",
+                "images": {"large": {"url": "https://img/charizard-lg.png"}},
+                "pricing_summary": {"market": {"amount": 420.5, "currency": "USD"}},
+            },
+            {"id": "x2", "name": "Charmeleon", "image_url": "https://img/x2.png"},
+        ],
+        total=2,
+    )
+    ask_id = await telemetry.log_ask(
+        db_session,
+        user=created_user,
+        query="red lizard",
+        game_hint=None,
+        body=body,
+        latency_ms=5,
+    )
+    assert ask_id is not None
+    detail = await telemetry.get_log(db_session, ask_id)
+    assert detail is not None
+    shown = detail["results"]
+    assert shown[0] == {
+        "id": "pokemontcg:base1-4",
+        "name": "Charizard",
+        "setName": "Base",
+        "rarity": "Rare Holo",
+        "imageUrl": "https://img/charizard-lg.png",
+        "price": 420.5,
+    }
+    assert shown[1]["imageUrl"] == "https://img/x2.png"

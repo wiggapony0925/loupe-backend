@@ -30,6 +30,30 @@ logger = get_logger("services.ai.telemetry")
 #: Asks newer than this count as an "open conversation" in the dev tool.
 OPEN_CONVERSATION_WINDOW = timedelta(minutes=30)
 
+#: How many shown cards to snapshot per ask (matches the client's shelf).
+RESULTS_SNAPSHOT_MAX = 12
+
+
+def _compact_card(card: dict[str, Any]) -> dict[str, Any]:
+    """One shown card, boiled down to what the drill-in needs to render it."""
+    images = card.get("images") or {}
+    best = None
+    for key in ("large", "normal", "small"):
+        img = images.get(key) or {}
+        if isinstance(img, dict) and img.get("url"):
+            best = img["url"]
+            break
+    pricing = card.get("pricing_summary") or {}
+    market = pricing.get("market") or {}
+    return {
+        "id": card.get("id"),
+        "name": card.get("name"),
+        "setName": card.get("set_name"),
+        "rarity": card.get("rarity"),
+        "imageUrl": best or card.get("image_url"),
+        "price": market.get("amount") if isinstance(market, dict) else None,
+    }
+
 
 async def log_ask(
     db: AsyncSession,
@@ -68,6 +92,12 @@ async def log_ask(
             cache_hit=cache_hit,
             message=body.get("message"),
             candidates=list(body.get("candidates") or []) or None,
+            results=[
+                _compact_card(c)
+                for c in list(body.get("results") or [])[:RESULTS_SNAPSHOT_MAX]
+                if isinstance(c, dict)
+            ]
+            or None,
             result_count=result_count,
             latency_ms=latency_ms,
         )
@@ -112,6 +142,7 @@ def _row_dict(row: AiSearchLog, email: str | None = None) -> dict[str, Any]:
         "cacheHit": row.cache_hit,
         "message": row.message,
         "candidates": row.candidates or [],
+        "results": row.results or [],
         "resultCount": row.result_count,
         "latencyMs": row.latency_ms,
         "feedback": row.feedback,

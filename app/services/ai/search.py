@@ -19,6 +19,7 @@ when this returns ``None`` — the user always gets results.
 from __future__ import annotations
 
 import asyncio
+import re
 import unicodedata
 from typing import Any
 
@@ -71,6 +72,23 @@ async def _plan_for(q: str, game_hint: str | None) -> tuple[AiSearchPlan | None,
     return plan, False
 
 
+def _norm_name(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _belongs_to(candidate: str, card_name: str) -> bool:
+    """Does a looked-up card actually match the candidate the model named?"""
+    e, c = _norm_name(candidate), _norm_name(card_name)
+    if not e or not c:
+        return False
+    if e in c or c in e:
+        return True
+    et, ct = set(e.split()), set(c.split())
+    return et <= ct or ct <= et
+
+
 async def _cards_for(name: str, game: str | None) -> list[dict[str, Any]]:
     from app.services.catalog import card_search_service
 
@@ -82,7 +100,20 @@ async def _cards_for(name: str, game: str | None) -> list[dict[str, Any]]:
         logger.debug("ai search candidate lookup failed name=%s: %s", name, exc)
         return []
     results = body.get("results")
-    return list(results) if isinstance(results, list) else []
+    cards = list(results) if isinstance(results, list) else []
+    # Relevance guard: the answer must contain what the model NAMED, not
+    # whatever fuzzy neighbors the search stirred up. Drop rows whose name
+    # doesn't match this candidate — but never filter down to nothing (a
+    # loose match beats an empty answer).
+    kept = [c for c in cards if _belongs_to(name, str(c.get("name") or ""))]
+    if kept and len(kept) < len(cards):
+        logger.debug(
+            "ai search relevance guard candidate=%r kept=%d/%d",
+            name,
+            len(kept),
+            len(cards),
+        )
+    return kept or cards
 
 
 def _interleave(

@@ -60,6 +60,9 @@ class AiSearchLog(Base):
     cache_hit: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     message: Mapped[str | None] = mapped_column(Text(), nullable=True)
     candidates: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
+    # Compact snapshot of the cards shown under the answer (id/name/set/
+    # rarity/image/price) — the /admin/ai drill-in replays the exact shelf.
+    results: Mapped[list[Any] | None] = mapped_column(JSON, nullable=True)
     result_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # +1 thumbs up / -1 thumbs down, set by the asker under the answer bubble.

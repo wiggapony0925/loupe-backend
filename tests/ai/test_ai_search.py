@@ -273,3 +273,39 @@ async def test_route_rejects_over_limit_query(client, created_user, auth_headers
         headers=auth_headers,
     )
     assert resp.status_code == 422  # the client inputs enforce the same cap
+
+
+def test_relevance_guard_drops_fuzzy_neighbors() -> None:
+    from app.services.ai.search import _belongs_to
+
+    assert _belongs_to("Charizard", "Charizard ex")
+    assert _belongs_to("Ancient Mew", "Ancient Mew")
+    assert _belongs_to("Trafalgar Law", "Trafalgar D. Water Law")
+    assert not _belongs_to("Ancient Mew", "Lugia")
+    assert not _belongs_to("Charizard", "Pikachu")
+
+
+@pytest.mark.asyncio
+async def test_cards_for_filters_but_never_zeroes_out(monkeypatch) -> None:
+    from app.services.ai import search as ai_search_mod
+    from app.services.catalog import card_search_service
+
+    async def fake_search(q: str, tcg: str, limit: int) -> dict[str, Any]:
+        return {
+            "results": [
+                _card("c1", "Ancient Mew"),
+                _card("c2", "Lugia"),
+                _card("c3", "Ancient Mew (Movie Promo)"),
+            ]
+        }
+
+    monkeypatch.setattr(card_search_service, "search_cards", fake_search)
+    cards = await ai_search_mod._cards_for("Ancient Mew", "pokemon")
+    assert [c["name"] for c in cards] == ["Ancient Mew", "Ancient Mew (Movie Promo)"]
+
+    async def all_noise(q: str, tcg: str, limit: int) -> dict[str, Any]:
+        return {"results": [_card("z1", "Lugia"), _card("z2", "Ho-Oh")]}
+
+    monkeypatch.setattr(card_search_service, "search_cards", all_noise)
+    cards = await ai_search_mod._cards_for("Ancient Mew", "pokemon")
+    assert len(cards) == 2  # loose beats empty
