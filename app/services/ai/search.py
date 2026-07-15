@@ -26,8 +26,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.platform.cache_l2 import kv_get, kv_set
-from app.services.ai import health, providers
-from app.services.ai.config import PER_CANDIDATE, PLAN_CACHE_KEY, PLAN_TTL
+from app.services.ai import health, providers, verify
+from app.services.ai.config import (
+    PER_CANDIDATE,
+    PER_SET,
+    PLAN_CACHE_KEY,
+    PLAN_TTL,
+    VERIFY_POOL,
+)
 from app.services.ai.prompts import search_system_prompt
 from app.services.ai.schemas import AiSearchPlan, parse_plan
 from app.utils.logger import get_logger
@@ -79,14 +85,22 @@ def _norm_name(s: str) -> str:
 
 
 def _belongs_to(candidate: str, card_name: str) -> bool:
-    """Does a looked-up card actually match the candidate the model named?"""
+    """Does a looked-up card actually match the candidate the model named?
+
+    ASYMMETRIC on purpose: the card must contain the candidate, never the
+    reverse — "Ancient Mew" accepts "Ancient Mew (Movie Promo)" but a plain
+    "Mew" must NOT ride in on the shared word (the random-Mew bug).
+    Parentheticals on the candidate are dropped first, so a chatty model
+    ("Ancient Mew (Movie Promo)") still matches the printed name.
+    """
+    candidate = re.sub(r"\(.*?\)", " ", candidate)
     e, c = _norm_name(candidate), _norm_name(card_name)
     if not e or not c:
         return False
-    if e in c or c in e:
+    if e in c:
         return True
     et, ct = set(e.split()), set(c.split())
-    return et <= ct or ct <= et
+    return et <= ct
 
 
 async def _cards_for(name: str, game: str | None) -> list[dict[str, Any]]:
@@ -116,13 +130,67 @@ async def _cards_for(name: str, game: str | None) -> list[dict[str, Any]]:
     return kept or cards
 
 
+async def _resolve_sets(phrases: list[str], game: str | None) -> list[dict[str, Any]]:
+    """The model's set names, resolved against the REAL set catalog.
+
+    Suggestions, never trusted as ids — unresolvable phrases drop out."""
+    from app.services.catalog import search_intel
+
+    async def one(phrase: str) -> dict[str, Any] | None:
+        try:
+            return await search_intel.resolve_set(phrase, game)
+        except Exception as exc:  # pragma: no cover - upstream best effort
+            logger.debug("ai search set resolve failed phrase=%r: %s", phrase, exc)
+            return None
+
+    resolved = await asyncio.gather(*(one(p) for p in phrases))
+    return [r for r in resolved if r and r.get("id")]
+
+
+async def _set_page(resolved: dict[str, Any], game: str | None) -> list[dict[str, Any]]:
+    """One page of cards FROM a resolved set — ground truth for set asks."""
+    from app.services.catalog import catalog_browse_service
+
+    try:
+        set_game = str(resolved.get("tcg") or game or "pokemon")
+        body = await catalog_browse_service.browse_catalog(
+            set_game, page=1, page_size=PER_SET, set_id=str(resolved["id"])
+        )
+    except Exception as exc:  # pragma: no cover - upstream best effort
+        logger.debug("ai search set page failed set=%r: %s", resolved.get("name"), exc)
+        return []
+    cards = body.get("cards")  # browse pages say "cards", search says "results"
+    return list(cards) if isinstance(cards, list) else []
+
+
+def _prefer_sets(
+    cards: list[dict[str, Any]], set_names: list[str]
+) -> list[dict[str, Any]]:
+    """Stable partition: cards printed in the asked-for sets come first.
+
+    For "base set charizard" the Base Set printing must lead — other
+    printings stay available below, never dropped."""
+    wanted = [_norm_name(n) for n in set_names if n]
+    if not wanted:
+        return cards
+
+    def hits(card: dict[str, Any]) -> bool:
+        s = _norm_name(str(card.get("set_name") or ""))
+        return bool(s) and any(w in s or s in w for w in wanted)
+
+    front = [c for c in cards if hits(c)]
+    back = [c for c in cards if not hits(c)]
+    return front + back
+
+
 def _interleave(
     per_candidate: list[list[dict[str, Any]]], limit: int
 ) -> list[dict[str, Any]]:
     """Round-robin merge, preserving candidate rank, deduped by card id."""
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for tier in range(PER_CANDIDATE):
+    depth = max((len(cards) for cards in per_candidate), default=0)
+    for tier in range(depth):
         for cards in per_candidate:
             if tier < len(cards):
                 card = cards[tier]
@@ -153,19 +221,49 @@ async def ai_search(
     if plan is None:
         return None
     lookup_game = plan.game or game_hint
+
+    # Retrieval: name lookups per candidate, PLUS — when the ask names
+    # sets — pages from the REAL resolved sets. Set pages are ground truth
+    # for "movie promos"-style asks, so they lead the interleave; for a
+    # single-card ask ("base set charizard") the asked-for printing leads.
+    collection = plan.intent == "collection"
+    resolved_sets = await _resolve_sets(plan.sets, lookup_game) if plan.sets else []
+    set_shelves: list[list[dict[str, Any]]] = []
+    if collection and resolved_sets:
+        set_shelves = [
+            shelf
+            for shelf in await asyncio.gather(
+                *(_set_page(r, lookup_game) for r in resolved_sets)
+            )
+            if shelf
+        ]
     per_candidate = await asyncio.gather(
         *(_cards_for(name, lookup_game) for name in plan.candidates)
     )
-    results = _interleave(list(per_candidate), limit)
+    columns = set_shelves + list(per_candidate)
+    review_worthy = collection or bool(resolved_sets)
+    pooled = _interleave(columns, max(limit, VERIFY_POOL) if review_worthy else limit)
+    if not collection and resolved_sets:
+        pooled = _prefer_sets(pooled, [str(r.get("name")) for r in resolved_sets])
+
+    # Set-flavored shelves get the review pass: the model sees the JSON of
+    # what we're about to show and drops what doesn't belong.
+    verified = False
+    if review_worthy:
+        pooled, verified = await verify.review_shelf(q, lookup_game, pooled)
+
+    results = pooled[:limit]
     return {
         "query": q,
         "message": plan.message,
         "candidates": plan.candidates,
         "game": lookup_game,
+        "intent": plan.intent,
         "results": results,
         "total": len(results),
         "source": "ai",
         "cached": cached,
+        "verified": verified,
     }
 
 

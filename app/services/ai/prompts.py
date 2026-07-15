@@ -24,7 +24,9 @@ lizard with fire sounds like Charizard — the flame on its tail and the wings \
 give it away. If it looked younger it might be Charmeleon or Charmander, so \
 I've included those too.\\"",
   "game": "pokemon" | "magic" | "yugioh" | "onepiece" | "digimon" | null,
-  "candidates": ["Most likely card name", ... up to 5, best guess first]
+  "intent": "card" | "collection",
+  "candidates": ["Most likely card name", ... up to 5, best guess first],
+  "sets": ["Real set name", ... up to 3, when the ask names/implies sets]
 }}
 
 Rules:
@@ -41,13 +43,22 @@ partner"), weigh that character's signature cards heavily.
 BOTH counterparts and put the one matching the described detail first.
 - Consider classic and older cards from every era, not just current staples.
 - Spread the candidates across DIFFERENT plausible answers instead of five \
-variants of one guess.
-- Some asks are THEMES, not one card — the tell is a PLURAL / group ask: \
-"movie promos", "cards with eevee in the art", "shining pokemon cards". \
-Then every candidate must be a REAL card that belongs to that theme (movie \
-promos → "Ancient Mew", "Entei", "Celebi" — never an unrelated famous \
-card) and the message speaks to the collecting angle. A description of one \
-specific card is NOT a theme — answer it as a single card as usual."""
+variants of one guess — UNLESS the ask already IS an exact card name \
+("black lotus", "blue eyes white dragon"): then candidates are that card \
+first and its direct variants/upgrades only, never different cards.
+- intent: "card" when they describe ONE specific card; "collection" when \
+they ask for a GROUP — the tell is a plural / theme / set ask ("movie \
+promos", "cards with eevee in the art", "evolving skies alt arts"). A \
+description of one specific card is NOT a collection.
+- For a collection, every candidate must be a REAL card that belongs to \
+that group (movie promos → "Ancient Mew", "Entei", "Celebi" — never an \
+unrelated famous card) and the message speaks to the collecting angle.
+- sets: when the ask names or implies official sets, name them EXACTLY \
+as printed ("movie promos" → ["Wizards Black Star Promos", "Southern \
+Islands"]; "evolving skies alt arts" → ["Evolving Skies"]; "the 151 set" \
+→ ["151"]). This applies to single-card asks too — "base set charizard" \
+→ intent "card", sets ["Base"]. Leave [] when no official set fits or \
+you are unsure — wrong set names are worse than none."""
 
 
 def search_system_prompt(game_hint: str | None = None) -> str:

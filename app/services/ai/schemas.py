@@ -18,7 +18,12 @@ class AiSearchPlan(BaseModel):
 
     message: str
     game: str | None = None
+    #: "card" = one specific card described; "collection" = a set/theme/group.
+    intent: str = "card"
     candidates: list[str] = Field(default_factory=list, max_length=5)
+    #: Real SET names the collection maps to ("movie promos" → Black Star
+    #: Promos) — resolved against the live set catalog, never trusted as-is.
+    sets: list[str] = Field(default_factory=list, max_length=3)
 
 
 def clip_message(message: str) -> str:
@@ -57,7 +62,10 @@ def parse_plan(text: str) -> AiSearchPlan | None:
     plan.message = clip_message(plan.message)
     if plan.game not in GAMES:
         plan.game = None
+    if plan.intent not in ("card", "collection"):
+        plan.intent = "card"
     plan.candidates = [c.strip() for c in plan.candidates if c and c.strip()][:5]
+    plan.sets = [x.strip() for x in plan.sets if x and x.strip()][:3]
     return plan if plan.candidates and plan.message else None
 
 

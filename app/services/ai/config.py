@@ -32,7 +32,7 @@ GAME_LABELS: dict[str, str] = {
 #: Bump the KEY VERSION whenever the prompt changes so a new prompt takes
 #: effect immediately instead of after the TTL.
 PLAN_TTL = 7 * 24 * 60 * 60
-PLAN_CACHE_KEY = "ai_search:plan:v5"
+PLAN_CACHE_KEY = "ai_search:plan:v6"
 
 #: Cards fetched per candidate name (interleaved, deduped, then capped).
 PER_CANDIDATE = 12
@@ -40,13 +40,38 @@ PER_CANDIDATE = 12
 #: Token budget for the plan call (2-3 sentences + five names).
 PLAN_MAX_TOKENS = 500
 
+#: Cards fetched per resolved SET when the ask is a collection ("movie
+#: promos", "evolving skies alt arts") — set pages are the ground truth for
+#: those, so they outrank name-lookup guesses in the interleave.
+PER_SET = 16
+
+#: ── Shelf verification (the answer reviews itself before serving) ──
+#: For collection asks the model gets the JSON of what we're ABOUT to show
+#: (index/name/set) and returns the indexes that truly belong, best first.
+#: Runs on the cheap model — verification is far easier than recall.
+VERIFY_ENABLED = True
+VERIFY_MODEL = "gpt-4o-mini"
+VERIFY_MAX_TOKENS = 200
+#: How many pooled cards the reviewer sees (and may keep).
+VERIFY_POOL = 24
+#: Verified orders are cached per (query, game, shelf fingerprint).
+VERIFY_TTL = 24 * 60 * 60
+VERIFY_CACHE_KEY = "ai_search:verify:v1"
+
 __all__ = [
     "GAMES",
     "GAME_LABELS",
     "MESSAGE_MAX_CHARS",
     "PER_CANDIDATE",
+    "PER_SET",
     "PLAN_CACHE_KEY",
     "PLAN_MAX_TOKENS",
     "PLAN_TTL",
     "QUERY_MAX_CHARS",
+    "VERIFY_CACHE_KEY",
+    "VERIFY_ENABLED",
+    "VERIFY_MAX_TOKENS",
+    "VERIFY_MODEL",
+    "VERIFY_POOL",
+    "VERIFY_TTL",
 ]

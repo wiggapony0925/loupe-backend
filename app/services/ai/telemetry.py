@@ -73,11 +73,14 @@ async def log_ask(
     cache_hit = bool(body.get("cached"))
     result_count = int(body.get("total") or 0)
     logger.info(
-        "ai.search ask user=%s game=%s source=%s cached=%s results=%d took=%dms q=%r",
+        "ai.search ask user=%s game=%s intent=%s source=%s cached=%s "
+        "verified=%s results=%d took=%dms q=%r",
         user.id,
         body.get("game") or game_hint or "all",
+        body.get("intent") or "card",
         source,
         cache_hit,
+        bool(body.get("verified")),
         result_count,
         latency_ms,
         query[:120],

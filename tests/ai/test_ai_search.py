@@ -309,3 +309,124 @@ async def test_cards_for_filters_but_never_zeroes_out(monkeypatch) -> None:
     monkeypatch.setattr(card_search_service, "search_cards", all_noise)
     cards = await ai_search_mod._cards_for("Ancient Mew", "pokemon")
     assert len(cards) == 2  # loose beats empty
+
+
+def test_belongs_to_is_asymmetric() -> None:
+    from app.services.ai.search import _belongs_to
+
+    # The card must contain the candidate — never the reverse.
+    assert _belongs_to("Ancient Mew", "Ancient Mew (Movie Promo)")
+    assert not _belongs_to("Ancient Mew", "Mew")
+    assert not _belongs_to("Ancient Mew", "Mew ex")
+    # Parentheticals on a chatty candidate are ignored.
+    assert _belongs_to("Ancient Mew (Movie Promo)", "Ancient Mew")
+
+
+def test_prefer_sets_partitions_stably() -> None:
+    from app.services.ai.search import _prefer_sets
+
+    cards = [
+        {"id": "1", "name": "Charizard", "set_name": "Secret Wonders"},
+        {"id": "2", "name": "Charizard", "set_name": "Base"},
+        {"id": "3", "name": "Charizard", "set_name": "Arceus"},
+        {"id": "4", "name": "Charizard", "set_name": "Base Set 2"},
+    ]
+    ordered = _prefer_sets(cards, ["Base"])
+    assert [c["id"] for c in ordered] == ["2", "4", "1", "3"]
+    # No set names → untouched.
+    assert _prefer_sets(cards, []) == cards
+
+
+@pytest.mark.asyncio
+async def test_collection_ask_leads_with_set_pages_and_reviews(
+    db_engine, monkeypatch
+) -> None:
+    from app.services.ai import search as search_mod
+    from app.services.ai import verify as verify_mod
+
+    async def fake_ask(system: str, user: str, **kwargs: Any) -> str:
+        return (
+            '{"message": "Movie promos!", "game": "pokemon",'
+            ' "intent": "collection",'
+            ' "candidates": ["Ancient Mew"],'
+            ' "sets": ["Wizards Black Star Promos"]}'
+        )
+
+    async def fake_resolve(phrases, game):
+        return [
+            {
+                "id": "pokemontcg:basep",
+                "name": "Wizards Black Star Promos",
+                "tcg": "pokemon",
+            }
+        ]
+
+    async def fake_page(resolved, game):
+        return [
+            _card("p1", "Pikachu"),
+            _card("p2", "Mewtwo"),
+        ]
+
+    async def fake_cards(name, game):
+        return [_card("c1", "Ancient Mew")]
+
+    async def fake_review(query, game, cards):
+        return list(reversed(cards)), True
+
+    monkeypatch.setattr(providers.get_settings(), "openai_api_key", "test-key")
+    monkeypatch.setattr(providers, "ask", fake_ask)
+    monkeypatch.setattr(search_mod, "_resolve_sets", fake_resolve)
+    monkeypatch.setattr(search_mod, "_set_page", fake_page)
+    monkeypatch.setattr(search_mod, "_cards_for", fake_cards)
+    monkeypatch.setattr(verify_mod, "review_shelf", fake_review)
+    monkeypatch.setattr(search_mod.verify, "review_shelf", fake_review)
+
+    body = await search_mod.ai_search("movie promos", limit=10, game_hint="pokemon")
+    assert body is not None
+    assert body["intent"] == "collection"
+    assert body["verified"] is True
+    # Set-page cards led the interleave (p1 first pre-review).
+    ids = [c["id"] for c in body["results"]]
+    assert set(ids) == {"p1", "p2", "c1"}
+    assert ids[-1] == "p1"  # our fake review reversed the pool
+
+
+@pytest.mark.asyncio
+async def test_card_ask_with_set_prefers_that_printing(db_engine, monkeypatch) -> None:
+    from app.services.ai import search as search_mod
+    from app.services.ai import verify as verify_mod
+
+    async def fake_ask(system: str, user: str, **kwargs: Any) -> str:
+        return (
+            '{"message": "Base Set Charizard!", "game": "pokemon",'
+            ' "intent": "card",'
+            ' "candidates": ["Charizard"],'
+            ' "sets": ["Base"]}'
+        )
+
+    async def fake_resolve(phrases, game):
+        return [{"id": "pokemontcg:base1", "name": "Base", "tcg": "pokemon"}]
+
+    async def fake_cards(name, game):
+        return [
+            {"id": "1", "name": "Charizard", "set_name": "Secret Wonders"},
+            {"id": "2", "name": "Charizard", "set_name": "Base"},
+        ]
+
+    async def fake_review(query, game, cards):
+        return cards, True
+
+    monkeypatch.setattr(providers.get_settings(), "openai_api_key", "test-key")
+    monkeypatch.setattr(providers, "ask", fake_ask)
+    monkeypatch.setattr(search_mod, "_resolve_sets", fake_resolve)
+    monkeypatch.setattr(search_mod, "_cards_for", fake_cards)
+    monkeypatch.setattr(search_mod.verify, "review_shelf", fake_review)
+    monkeypatch.setattr(verify_mod, "review_shelf", fake_review)
+
+    body = await search_mod.ai_search(
+        "base set charizard", limit=10, game_hint="pokemon"
+    )
+    assert body is not None
+    assert body["intent"] == "card"
+    # The Base printing leads even though the lookup returned it second.
+    assert [c["id"] for c in body["results"]] == ["2", "1"]
