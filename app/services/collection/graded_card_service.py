@@ -27,7 +27,7 @@ from app.schemas.grade import GradedCardCreate, GradedCardRead, GradedCardUpdate
 from app.schemas.ownership import CardHolding, CardOwnership
 from app.services import entitlement_service
 from app.services.catalog import card_resolver_service
-from app.services.collection import collection_service
+from app.services.collection import collection_service, holding_valuation_service
 from app.utils.time import utcnow
 
 
@@ -350,6 +350,17 @@ async def create(db: AsyncSession, user: User, payload: GradedCardCreate) -> Gra
         await db.flush()
         card_id = local.id
 
+    # Seed the holding's value from live market data when the caller didn't
+    # supply one. Without this a quick-add (card + grade + condition, no price)
+    # stored NULL, so the row rendered with no price and the vault total never
+    # moved off $0 — the single most visible bug in the add flow.
+    card_row = await db.get(Card, card_id)
+    estimated_value = holding_valuation_service.derive_estimated_value(
+        card_row,
+        condition=payload.condition,
+        explicit=payload.estimated_value_usd,
+    )
+
     row = GradedCard(
         user_id=user.id,
         card_id=card_id,
@@ -358,7 +369,7 @@ async def create(db: AsyncSession, user: User, payload: GradedCardCreate) -> Gra
         house=payload.house,
         condition=payload.condition,
         subgrades=payload.subgrades,
-        estimated_value_usd=payload.estimated_value_usd,
+        estimated_value_usd=estimated_value,
         purchase_price_usd=payload.purchase_price_usd,
         purchase_date=payload.purchase_date,
         notes=payload.notes,
@@ -443,6 +454,16 @@ async def update(
         row.notes = payload.notes
     if "estimated_value_usd" in fields:
         row.estimated_value_usd = payload.estimated_value_usd
+    elif row.estimated_value_usd is None:
+        # Condition may have just changed, or the holding predates valuation
+        # on create. Only fill a NULL — never silently overwrite a value the
+        # owner set, and never re-derive one we already derived (that would
+        # make every edit quietly re-price the card).
+        row.estimated_value_usd = holding_valuation_service.derive_estimated_value(
+            await db.get(Card, row.card_id),
+            condition=row.condition,
+            explicit=None,
+        )
     if "purchase_price_usd" in fields:
         row.purchase_price_usd = payload.purchase_price_usd
     if "purchase_date" in fields:
