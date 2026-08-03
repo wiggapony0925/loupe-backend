@@ -28,6 +28,7 @@ from app.models.price import PriceSnapshot
 from app.models.user import User
 from app.services import email_service, push_service
 from app.services.catalog import card_resolver_service, card_search_service
+from app.services.collection import holding_valuation_service
 from app.services.market import price_alert_service
 from app.utils.logger import get_logger
 
@@ -214,11 +215,20 @@ async def backfill_prices(
     # so a one-shot worker process doesn't exit with mail still pending.
     await email_service.drain()
 
+    # Holdings created before valuation-on-create — and every quick-add that
+    # predates it — stored a NULL value, so those vaults read $0. Prices have
+    # just been refreshed above, so this is the right moment to heal them.
+    # Only ever fills NULLs; owner-set values (including 0) are untouched.
+    valued = 0
+    async with get_sessionmaker()() as session:
+        valued = await holding_valuation_service.backfill_missing_values(session)
+
     result = {
         "scanned": scanned,
         "updated": updated,
         "missed": missed,
         "alerts_fired": alerts_fired,
+        "holdings_valued": valued,
     }
     logger.info("price_backfill complete: %s", result)
     return result

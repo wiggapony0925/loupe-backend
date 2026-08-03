@@ -1,0 +1,6 @@
+# TEMPORARY local-dev override (not for commit).
+# postgres:16-alpine has no pgvector, which migration 0037_card_embeddings
+# requires. Same PG major, so the existing data volume is reused as-is.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16

@@ -110,13 +110,17 @@ def area_chart(series: list[SeriesPoint], *, up: bool) -> str:
 
     grad = _uid("perfGrad")
     parts: list[str] = [
-        f'<svg viewBox="0 0 {int(W)} {int(H)}" width="100%" '
-        f'xmlns="http://www.w3.org/2000/svg" '
-        f'font-family="Liberation Sans, Arial, sans-serif" role="img">',
-        f'<defs><linearGradient id="{grad}" x1="0" y1="0" x2="0" y2="1">'
-        f'<stop offset="0" stop-color="{tone}" stop-opacity="0.22"/>'
-        f'<stop offset="1" stop-color="{tone}" stop-opacity="0"/>'
-        f"</linearGradient></defs>",
+        (
+            f'<svg viewBox="0 0 {int(W)} {int(H)}" width="100%" '
+            f'xmlns="http://www.w3.org/2000/svg" '
+            f'font-family="Liberation Sans, Arial, sans-serif" role="img">'
+        ),
+        (
+            f'<defs><linearGradient id="{grad}" x1="0" y1="0" x2="0" y2="1">'
+            f'<stop offset="0" stop-color="{tone}" stop-opacity="0.22"/>'
+            f'<stop offset="1" stop-color="{tone}" stop-opacity="0"/>'
+            f"</linearGradient></defs>"
+        ),
     ]
 
     # Horizontal gridlines + $ labels (5 bands).
@@ -192,9 +196,11 @@ def donut_chart(breakdown: list[tuple[str, float]], total: float) -> str:
     total_val = sum(values) or 1.0
 
     parts: list[str] = [
-        f'<svg viewBox="0 0 {int(W)} {int(H)}" width="100%" '
-        f'xmlns="http://www.w3.org/2000/svg" '
-        f'font-family="Liberation Sans, Arial, sans-serif" role="img">'
+        (
+            f'<svg viewBox="0 0 {int(W)} {int(H)}" width="100%" '
+            f'xmlns="http://www.w3.org/2000/svg" '
+            f'font-family="Liberation Sans, Arial, sans-serif" role="img">'
+        )
     ]
 
     # A single slice (100%) can't be drawn as an SVG arc (start == end); draw
@@ -287,9 +293,11 @@ def bar_chart(buckets: list[tuple[str, int]]) -> str:
     bar_w = min(slot * 0.52, 74.0)
 
     parts: list[str] = [
-        f'<svg viewBox="0 0 {int(W)} {int(H)}" width="100%" '
-        f'xmlns="http://www.w3.org/2000/svg" '
-        f'font-family="Liberation Sans, Arial, sans-serif" role="img">'
+        (
+            f'<svg viewBox="0 0 {int(W)} {int(H)}" width="100%" '
+            f'xmlns="http://www.w3.org/2000/svg" '
+            f'font-family="Liberation Sans, Arial, sans-serif" role="img">'
+        )
     ]
     # Baseline.
     base_y = pad_t + ph
