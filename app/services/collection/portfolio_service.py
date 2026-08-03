@@ -25,7 +25,7 @@ from app.models.grade import GradedCard
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.sealed import SealedHolding
 from app.models.user import User
-from app.services.collection import collection_service
+from app.services.collection import collection_service, holding_valuation_service
 from app.utils.logger import get_logger
 
 _log = get_logger("portfolio")
@@ -360,6 +360,18 @@ async def summary(
     db: AsyncSession, user: User, collection_id: uuid.UUID | None = None
 ) -> dict:
     """Aggregate the user's vault into a single hero card payload."""
+    # Self-heal before aggregating. The total below is a SQL SUM over
+    # ``estimated_value_usd``, so a holding with NULL there contributes $0 and
+    # the vault reads low (or $0 outright) — which is exactly what a quick-add
+    # produced before valuation-on-create existed. The daily price worker also
+    # backfills, but a user opening the app should not have to wait a day to
+    # see their own collection's worth.
+    #
+    # Bounded, idempotent, and NULL-only: it never touches a value the owner
+    # set, and once a vault is healed the guard query matches nothing and this
+    # costs one indexed lookup.
+    await holding_valuation_service.backfill_missing_values(db, limit=500)
+
     where = [GradedCard.user_id == user.id, GradedCard.deleted_at.is_(None)]
     scope = collection_service.holdings_scope(collection_id, user)
     if scope is not None:

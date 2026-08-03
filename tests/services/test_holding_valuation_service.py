@@ -170,3 +170,130 @@ def test_condition_factors_are_all_positive_fractions() -> None:
 def test_every_condition_has_a_factor() -> None:
     """A new RawCondition must not silently value holdings at NM."""
     assert set(hv.CONDITION_FACTORS) == set(RawConditionEnum)
+
+
+# ── backfill: the heal path ────────────────────────────────────────────────
+
+
+async def _seed_card(db_session, *, name: str, market: object) -> Card:
+    """A persisted Card carrying a pricing summary (needs a CardSet FK)."""
+    from app.models.card import CardSet
+
+    card_set = CardSet(name="Test Set", tcg="pokemon", code=f"ts-{name[:6].lower()}")
+    db_session.add(card_set)
+    await db_session.flush()
+    card = Card(name=name, tcg="pokemon", set_id=card_set.id)
+    card.card_metadata = (
+        {"pricing_summary": {"market": {"amount": market}}}
+        if market is not None
+        else {}
+    )
+    db_session.add(card)
+    await db_session.flush()
+    return card
+
+
+@pytest.mark.asyncio
+async def test_backfill_fills_null_values(db_session, created_user) -> None:
+    """A holding stored with no value picks one up from the card's price."""
+    from app.models.grade import GradedCard
+
+    user = created_user
+    card = await _seed_card(db_session, name="Umbreon VMAX", market="100.00")
+
+    holding = GradedCard(
+        user_id=user.id,
+        card_id=card.id,
+        grade=Decimal("0"),
+        house="loupe",
+        condition=RawConditionEnum.nm,
+        estimated_value_usd=None,
+    )
+    db_session.add(holding)
+    await db_session.commit()
+
+    updated = await hv.backfill_missing_values(db_session)
+
+    assert updated == 1
+    await db_session.refresh(holding)
+    assert holding.estimated_value_usd == Decimal("100.00")
+
+
+@pytest.mark.asyncio
+async def test_backfill_never_overwrites_an_owner_set_value(
+    db_session, created_user
+) -> None:
+    """Including a deliberate 0 — that's a statement, not a missing value."""
+    from app.models.grade import GradedCard
+
+    user = created_user
+    card = await _seed_card(db_session, name="Bulk Common", market="100.00")
+
+    priced = GradedCard(
+        user_id=user.id,
+        card_id=card.id,
+        grade=Decimal("0"),
+        house="loupe",
+        condition=RawConditionEnum.nm,
+        estimated_value_usd=Decimal("0"),
+    )
+    db_session.add(priced)
+    await db_session.commit()
+
+    updated = await hv.backfill_missing_values(db_session)
+
+    assert updated == 0
+    await db_session.refresh(priced)
+    assert priced.estimated_value_usd == Decimal("0")
+
+
+@pytest.mark.asyncio
+async def test_backfill_is_idempotent(db_session, created_user) -> None:
+    """Running twice must not double-apply or thrash rows."""
+    from app.models.grade import GradedCard
+
+    user = created_user
+    card = await _seed_card(db_session, name="Charizard", market="50.00")
+    db_session.add(
+        GradedCard(
+            user_id=user.id,
+            card_id=card.id,
+            grade=Decimal("0"),
+            house="loupe",
+            condition=RawConditionEnum.lp,
+            estimated_value_usd=None,
+        )
+    )
+    await db_session.commit()
+
+    first = await hv.backfill_missing_values(db_session)
+    second = await hv.backfill_missing_values(db_session)
+
+    assert first == 1
+    assert second == 0
+
+
+@pytest.mark.asyncio
+async def test_backfill_leaves_unpriced_cards_null_for_a_later_run(
+    db_session, created_user
+) -> None:
+    from app.models.grade import GradedCard
+
+    user = created_user
+    card = await _seed_card(db_session, name="No Price Yet", market=None)
+    holding = GradedCard(
+        user_id=user.id,
+        card_id=card.id,
+        grade=Decimal("0"),
+        house="loupe",
+        condition=RawConditionEnum.nm,
+        estimated_value_usd=None,
+    )
+    db_session.add(holding)
+    await db_session.commit()
+
+    updated = await hv.backfill_missing_values(db_session)
+
+    assert updated == 0
+    await db_session.refresh(holding)
+    assert holding.estimated_value_usd is None
