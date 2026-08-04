@@ -12,9 +12,10 @@ background dispatch, and provider plumbing live in
 | `theme.py` | The "CSS": palette, typography, reusable inline-style snippets. Mail clients strip `<style>` tags, so styles must be inlined — this file is the single place to change them. |
 | `base.py` | `render_email(heading, body_html, cta, preheader=…, footer_html=…)` → the full HTML document (Outlook-safe tables, hidden preheader, dark-mode meta) **and** the plain-text part in one call. Also the shared helpers: `esc`, `paragraphs`, `usd`, `display_name`, `app_url`. |
 | `account.py` | Welcome (with optional confirm-email CTA), verify-email resend, ban notice, admin granted. |
-| `security.py` | Password changed/reset, reset-unavailable (social accounts), 2FA on/off. |
-| `billing.py` | Pro activated / ended (transition-only — renewals stay silent). |
+| `security.py` | Password changed/reset, reset-unavailable (social accounts), 2FA on/off, new-device sign-in, brute-force lockout. |
+| `billing.py` | Pro activated / ended (transition-only — renewals stay silent), payment failed (dunning), Pro ending soon. All four reuse one membership card in different states. |
 | `alerts.py` | Price alert fired, statement ready. |
+| `engagement.py` | Free-vault ceiling, recurring portfolio digest, set-completed milestone. |
 | `waitlist.py` | Scanner waitlist confirmation + invite. |
 | `announcements.py` | Blog + admin-composed announcements (with the unsubscribe footer) and one-to-one support messages (without it). |
 
@@ -39,7 +40,11 @@ background dispatch, and provider plumbing live in
 
 - **Plain text part is automatic** — `render_email` derives it, links become
   `label (url)`. Never hand-write it.
-- **Announcement-class mail** (goes to everyone) must pass
+- **Announcement-class mail** (anything recurring or non-transactional —
+  announcements and the portfolio digest) must pass
   `footer_html=unsubscribe_footer(url)` and be sent with per-recipient
   one-click `List-Unsubscribe` headers. Transactional mail must not.
 - **No raw HTML from input** — plain-text bodies go through `paragraphs()`.
+- **Clients never send email.** Web and mobile only *call backend APIs*; every
+  provider credential, template, and send decision lives here. A client that
+  needs to trigger mail gets an endpoint, not an SMTP/Resend key.

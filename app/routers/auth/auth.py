@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.apple import verify_apple_identity_token
@@ -43,6 +44,7 @@ from app.schemas.auth import (
 from app.schemas.user import UserRead
 from app.services import email_service
 from app.services.auth import (
+    device_notice_service,
     email_verify_service,
     mfa_service,
     password_reset_service,
@@ -144,6 +146,7 @@ async def register(
 )
 async def login(
     payload: EmailSignInRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
     _throttle: None = Depends(login_limit),
@@ -167,6 +170,8 @@ async def login(
     # Password OK. If the account has two-factor enabled, withhold the tokens
     # and hand back a short-lived challenge for /auth/mfa/verify.
     if user.mfa_enabled:
+        # Not signed in yet — the device notice belongs on /mfa/verify, where
+        # a session actually gets issued.
         mfa_token, _ = issue_mfa_token(user.id)
         return LoginResult(mfa_required=True, mfa_token=mfa_token)
     pair = _issue(
@@ -175,7 +180,27 @@ async def login(
         UserRead.model_validate(user),
         token_version=user.token_version,
     )
+    await _notify_device(request, user)
     return LoginResult.model_validate(pair, from_attributes=True)
+
+
+async def _notify_device(request: Request, user: User) -> None:
+    """Fire the new-device notice for a session that was just issued."""
+    created = getattr(user, "created_at", None)
+    age: float | None = None
+    if created is not None:
+        # SQLite drops tzinfo on round-trip; treat naive timestamps as UTC.
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - created).total_seconds()
+    await device_notice_service.notify_if_new_device(
+        user,
+        user_agent=request.headers.get("user-agent"),
+        ip=device_notice_service.client_ip(
+            dict(request.headers), request.client.host if request.client else None
+        ),
+        account_age_seconds=age,
+    )
 
 
 @router.post(
@@ -425,6 +450,7 @@ async def reset_password(
 )
 async def mfa_verify(
     payload: MfaVerifyRequest,
+    request: Request,
     response: Response,
     db: AsyncSession = Depends(get_db),
     _throttle: None = Depends(mfa_verify_limit),
@@ -451,12 +477,14 @@ async def mfa_verify(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="That code didn't match.",
         )
-    return _issue(
+    pair = _issue(
         response,
         user.id,
         UserRead.model_validate(user),
         token_version=user.token_version,
     )
+    await _notify_device(request, user)
+    return pair
 
 
 @router.get(

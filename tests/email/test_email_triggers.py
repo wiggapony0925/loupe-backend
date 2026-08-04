@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 import pytest
 
@@ -291,3 +292,81 @@ async def test_statement_ready_email_fires_after_generation(db_session, monkeypa
     assert len(ready.calls) == 1
     assert ready.calls[0][1]["title"] == "May 2026 statement"
     assert ready.calls[0][1]["idempotency_key"] == f"statement-ready-{row.id}"
+
+
+# ── Brute-force lockout ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_lockout_notifies_once_on_the_transition(client, monkeypatch):
+    """The owner hears about the lock exactly when it trips — not on every
+    subsequent rejected attempt (which would be a mail-bomb vector)."""
+    locked = _Recorder()
+    monkeypatch.setattr(email_service, "send_account_locked", locked)
+
+    email = f"lock+{uuid.uuid4().hex[:8]}@example.com"
+    resp = await client.post(
+        "/v1/auth/register",
+        json={"email": email, "password": "correct-horse-9", "display_name": "Lock"},
+    )
+    assert resp.status_code == 201
+
+    attempts = get_settings().login_max_attempts
+    for _ in range(attempts):
+        await client.post(
+            "/v1/auth/login", json={"email": email, "password": "wrong-password"}
+        )
+    assert len(locked.calls) == 1
+    assert locked.calls[0][1]["attempts"] == attempts
+    assert locked.calls[0][1]["minutes"] >= 1
+
+    # Further attempts while already locked must stay silent.
+    for _ in range(3):
+        await client.post(
+            "/v1/auth/login", json={"email": email, "password": "wrong-password"}
+        )
+    assert len(locked.calls) == 1
+
+
+# ── Dunning (Stripe invoice.payment_failed) ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_payment_failure_notifies_the_subscriber(db_session, monkeypatch):
+    failed = _Recorder()
+    monkeypatch.setattr(email_service, "send_payment_failed", failed)
+
+    user = await make_user(db_session)
+    user.stripe_customer_id = "cus_dunning"
+    await db_session.commit()
+
+    await billing_service._handle_payment_failed(
+        db_session,
+        {
+            "id": "in_123",
+            "customer": "cus_dunning",
+            "amount_due": 999,
+            "attempt_count": 2,
+            "next_payment_attempt": 1786000000,
+        },
+    )
+    assert len(failed.calls) == 1
+    kwargs = failed.calls[0][1]
+    assert kwargs["amount_usd"] == Decimal("9.99")  # cents → dollars
+    assert kwargs["attempt"] == 2
+    # Keyed per attempt: a redelivered webhook for attempt 2 can't double-send,
+    # but attempt 3 is a genuinely new notice.
+    assert kwargs["idempotency_key"] == "payment-failed-in_123-2"
+
+
+@pytest.mark.asyncio
+async def test_payment_failure_for_an_unknown_customer_is_a_no_op(
+    db_session, monkeypatch
+):
+    failed = _Recorder()
+    monkeypatch.setattr(email_service, "send_payment_failed", failed)
+
+    await billing_service._handle_payment_failed(
+        db_session, {"id": "in_x", "customer": "cus_nobody", "amount_due": 100}
+    )
+    assert failed.calls == []

@@ -26,8 +26,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Coroutine, Sequence
+from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 import httpx
 
@@ -40,18 +41,25 @@ from app.services import email_log_service
 from app.services.email_templates import *  # noqa: F403
 from app.services.email_templates import (
     EmailContent,
+    build_account_locked,
     build_admin_granted,
     build_ban_notice,
     build_blog_announcement,
     build_custom_announcement,
+    build_free_limit_reached,
     build_mfa_disabled,
     build_mfa_enabled,
+    build_new_sign_in,
     build_password_changed,
     build_password_reset,
+    build_payment_failed,
+    build_portfolio_digest,
     build_price_alert,
     build_pro_activated,
     build_pro_canceled,
+    build_pro_expiring,
     build_reset_unavailable,
+    build_set_completed,
     build_statement_ready,
     build_support_message,
     build_verify_email,
@@ -402,6 +410,29 @@ async def send_reset_unavailable(user: User) -> bool:
     )
 
 
+async def send_new_sign_in(
+    user: User,
+    *,
+    device: str | None = None,
+    location: str | None = None,
+    ip: str | None = None,
+    when: datetime | None = None,
+) -> bool:
+    c = build_new_sign_in(user, device=device, location=location, ip=ip, when=when)
+    return await queue_content(
+        user.email, c, category="security", user_id=getattr(user, "id", None)
+    )
+
+
+async def send_account_locked(
+    user: User, *, minutes: int, attempts: int, when: datetime | None = None
+) -> bool:
+    c = build_account_locked(user, minutes=minutes, attempts=attempts, when=when)
+    return await queue_content(
+        user.email, c, category="security", user_id=getattr(user, "id", None)
+    )
+
+
 async def send_pro_activated(user: User, *, idempotency_key: str | None = None) -> bool:
     c = build_pro_activated(user)
     return await queue_content(
@@ -419,6 +450,104 @@ async def send_pro_canceled(user: User, *, idempotency_key: str | None = None) -
         user.email,
         c,
         category="billing",
+        idempotency_key=idempotency_key,
+        user_id=getattr(user, "id", None),
+    )
+
+
+async def send_payment_failed(
+    user: User,
+    *,
+    amount_usd: Decimal | float | None = None,
+    attempt: int = 1,
+    max_attempts: int = 4,
+    next_attempt: datetime | None = None,
+    grace_days: int | None = None,
+    idempotency_key: str | None = None,
+) -> bool:
+    """Dunning notice. Keyed on the Stripe invoice+attempt by the caller so a
+    replayed webhook can't double-send."""
+    c = build_payment_failed(
+        user,
+        amount_usd=amount_usd,
+        attempt=attempt,
+        max_attempts=max_attempts,
+        next_attempt=next_attempt,
+        grace_days=grace_days,
+    )
+    return await queue_content(
+        user.email,
+        c,
+        category="billing",
+        idempotency_key=idempotency_key,
+        user_id=getattr(user, "id", None),
+    )
+
+
+async def send_pro_expiring(
+    user: User,
+    *,
+    ends_on: datetime,
+    days_left: int,
+    idempotency_key: str | None = None,
+) -> bool:
+    c = build_pro_expiring(user, ends_on=ends_on, days_left=days_left)
+    return await queue_content(
+        user.email,
+        c,
+        category="billing",
+        idempotency_key=idempotency_key,
+        user_id=getattr(user, "id", None),
+    )
+
+
+#: Once per account — guarded with ``email_log_service.has_ever_sent`` on this
+#: category, so it must not be shared with any other email.
+CATEGORY_VAULT_FULL = "vault-full"
+#: Once per (user, set) — guarded with ``email_log_service.has_sent_key`` on
+#: the idempotency key, since the milestone recurs for every set completed.
+CATEGORY_SET_COMPLETE = "set-complete"
+
+
+async def send_free_limit_reached(
+    user: User, *, card_count: int, limit: int, idempotency_key: str | None = None
+) -> bool:
+    """The free-vault ceiling notice. One-shot — the caller guards with
+    ``email_log_service.has_ever_sent(db, user.id, CATEGORY_VAULT_FULL)``."""
+    c = build_free_limit_reached(user, card_count=card_count, limit=limit)
+    return await queue_content(
+        user.email,
+        c,
+        category=CATEGORY_VAULT_FULL,
+        idempotency_key=idempotency_key,
+        user_id=getattr(user, "id", None),
+    )
+
+
+async def send_set_completed(
+    user: User,
+    *,
+    set_name: str,
+    set_total: int,
+    series_name: str | None = None,
+    set_id: str | None = None,
+    image_url: str | None = None,
+    total_value_usd: Decimal | float | None = None,
+    idempotency_key: str | None = None,
+) -> bool:
+    c = build_set_completed(
+        user,
+        set_name=set_name,
+        set_total=set_total,
+        series_name=series_name,
+        set_id=set_id,
+        image_url=image_url,
+        total_value_usd=total_value_usd,
+    )
+    return await queue_content(
+        user.email,
+        c,
+        category=CATEGORY_SET_COMPLETE,
         idempotency_key=idempotency_key,
         user_id=getattr(user, "id", None),
     )
@@ -608,20 +737,84 @@ async def send_custom_announcement(
     return sent
 
 
+class DigestRecipient(NamedTuple):
+    """One user's slice of a digest run — everything the template needs.
+
+    The caller (the digest cron) computes these from the portfolio snapshots
+    it already reads, so the fan-out itself does no database work.
+    """
+
+    user: User
+    unsub_url: str
+    total_value_usd: Decimal | float
+    delta_pct: float
+    delta_usd: Decimal | float
+    card_count: int
+    series: list[float] | None = None
+    top_movers: list[tuple[str, float]] | None = None
+
+
+async def send_portfolio_digest(
+    recipients: Sequence[DigestRecipient], *, period_label: str = "This week"
+) -> int:
+    """Batch-send the recurring portfolio digest.
+
+    Digest mail is recurring and non-transactional, so — like announcements —
+    every message carries a one-click ``List-Unsubscribe`` header plus the
+    footer opt-out link. Returns how many messages the provider accepted.
+    """
+    messages: list[dict[str, Any]] = []
+    for r in recipients:
+        c = build_portfolio_digest(
+            r.user,
+            period_label=period_label,
+            total_value_usd=r.total_value_usd,
+            delta_pct=r.delta_pct,
+            delta_usd=r.delta_usd,
+            card_count=r.card_count,
+            unsub_url=r.unsub_url,
+            series=r.series,
+            top_movers=r.top_movers,
+        )
+        messages.append(
+            _payload(
+                r.user.email,
+                c.subject,
+                c.html,
+                c.text,
+                category="digest",
+                headers=_one_click_headers(r.unsub_url),
+            )
+        )
+    sent = await send_batch(messages)
+    logger.info("portfolio digest (%s) → %d/%d", period_label, sent, len(recipients))
+    return sent
+
+
 __all__ = [
+    "CATEGORY_SET_COMPLETE",
+    "CATEGORY_VAULT_FULL",
+    "DigestRecipient",
     "EmailContent",
+    "build_account_locked",
     "build_admin_granted",
     "build_ban_notice",
     "build_blog_announcement",
     "build_custom_announcement",
+    "build_free_limit_reached",
     "build_mfa_disabled",
     "build_mfa_enabled",
+    "build_new_sign_in",
     "build_password_changed",
     "build_password_reset",
+    "build_payment_failed",
+    "build_portfolio_digest",
     "build_price_alert",
     "build_pro_activated",
     "build_pro_canceled",
+    "build_pro_expiring",
     "build_reset_unavailable",
+    "build_set_completed",
     "build_statement_ready",
     "build_support_message",
     "build_verify_email",
@@ -632,20 +825,27 @@ __all__ = [
     "drain",
     "queue_content",
     "render_email",
+    "send_account_locked",
     "send_admin_granted",
     "send_ban_notice",
     "send_batch",
     "send_blog_announcement",
     "send_custom_announcement",
     "send_email",
+    "send_free_limit_reached",
     "send_mfa_disabled",
     "send_mfa_enabled",
+    "send_new_sign_in",
     "send_password_changed",
     "send_password_reset",
+    "send_payment_failed",
+    "send_portfolio_digest",
     "send_price_alert",
     "send_pro_activated",
     "send_pro_canceled",
+    "send_pro_expiring",
     "send_reset_unavailable",
+    "send_set_completed",
     "send_statement_ready",
     "send_support_message",
     "send_verify_email",

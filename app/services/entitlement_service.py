@@ -25,6 +25,9 @@ from app.models.grade import GradedCard
 from app.models.user import User
 from app.schemas.entitlement import EntitlementsRead, PlanFeatures, PlanLimits
 from app.services import site_config_service
+from app.utils.logger import get_logger
+
+logger = get_logger("entitlement")
 
 #: Default free card cap — the seeded value the admin can change live in the
 #: portal (the live value is read from SiteConfig, never this constant).
@@ -196,7 +199,9 @@ async def enforce_can_add_card(db: AsyncSession, user: User) -> None:
     limit = cfg.free_card_limit
     if limit is None:
         return
-    if await count_cards(db, user) >= limit:
+    count = await count_cards(db, user)
+    if count >= limit:
+        await _notify_limit_reached(db, user, card_count=count, limit=limit)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail={
@@ -208,6 +213,29 @@ async def enforce_can_add_card(db: AsyncSession, user: User) -> None:
                 ),
             },
         )
+
+
+async def _notify_limit_reached(
+    db: AsyncSession, user: User, *, card_count: int, limit: int
+) -> None:
+    """Email the ceiling notice the first time a user is blocked by the cap.
+
+    A full vault *stays* full, so this path runs on every subsequent add
+    attempt — the delivery-log guard is what keeps it to one email. Failures
+    here must never turn a clean 402 into a 500, so everything is swallowed.
+    """
+    from app.services import email_log_service, email_service
+
+    try:
+        already = await email_log_service.has_ever_sent(
+            db, user.id, email_service.CATEGORY_VAULT_FULL
+        )
+        if not already:
+            await email_service.send_free_limit_reached(
+                user, card_count=card_count, limit=limit
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("vault-full notice failed for user=%s (%s)", user.id, exc)
 
 
 __all__ = [

@@ -68,6 +68,45 @@ async def record_queued(
         return None
 
 
+async def has_ever_sent(db: AsyncSession, user_id: uuid.UUID, category: str) -> bool:
+    """True if this user already has a log row for ``category``.
+
+    The once-per-*account* guard, for mail whose triggering condition stays
+    true forever after (a full vault stays full). Use :func:`has_sent_key`
+    instead whenever the event can recur for different objects — one category
+    per user would silence every set completion after the first.
+
+    Uses the delivery log rather than a cache so the guarantee survives a
+    cache flush, and reads on the caller's session because the check happens
+    inside a request. Rows in any state count, including ``failed``:
+    re-sending on every subsequent request would be worse than missing one.
+    """
+    return (
+        await db.execute(
+            select(EmailLog.id)
+            .where(EmailLog.user_id == user_id, EmailLog.category == category)
+            .limit(1)
+        )
+    ).scalar_one_or_none() is not None
+
+
+async def has_sent_key(db: AsyncSession, idempotency_key: str) -> bool:
+    """True if a log row already carries ``idempotency_key``.
+
+    The once-per-*thing* guard: key on the entity (``set-complete-{user}-{set}``)
+    and a collector gets one trophy per set rather than one per lifetime.
+    Complements Resend's own 24h idempotency window, which is far too short
+    for milestones that are re-evaluated on every page view.
+    """
+    return (
+        await db.execute(
+            select(EmailLog.id)
+            .where(EmailLog.idempotency_key == idempotency_key)
+            .limit(1)
+        )
+    ).scalar_one_or_none() is not None
+
+
 async def _update(log_id: uuid.UUID | None, **values: Any) -> None:
     if log_id is None:
         return
@@ -228,6 +267,7 @@ async def get_log(db: AsyncSession, log_id: uuid.UUID) -> EmailLog | None:
 __all__ = [
     "apply_provider_event",
     "get_log",
+    "has_ever_sent",
     "list_logs",
     "mark_failed",
     "mark_sent",

@@ -72,6 +72,20 @@ async def price_snapshot(ctx: dict[str, Any]) -> dict[str, Any]:
     return await snapshot_prices(ctx)
 
 
+async def portfolio_digest(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Weekly collection recap to every subscribed user."""
+    from app.tasks.lifecycle_email import send_portfolio_digests
+
+    return await send_portfolio_digests(ctx)
+
+
+async def pro_expiry_notices(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Daily heads-up for Pro memberships about to lapse."""
+    from app.tasks.lifecycle_email import send_pro_expiry_notices
+
+    return await send_pro_expiry_notices(ctx)
+
+
 def _redis_settings() -> Any:
     if RedisSettings is None:  # pragma: no cover
         return None
@@ -93,6 +107,8 @@ class WorkerSettings:
         price_backfill,
         price_snapshot,
         image_index,
+        portfolio_digest,
+        pro_expiry_notices,
     ]
     cron_jobs = (
         [
@@ -102,6 +118,12 @@ class WorkerSettings:
             # whatever upstream refresh landed at 04:00.
             cron(price_snapshot, hour={4}, minute={30}),
             cron(image_index, hour={5}, minute={0}),
+            # Expiry notices run after the nightly price work so a Pro user's
+            # last emails aren't built on yesterday's numbers.
+            cron(pro_expiry_notices, hour={13}, minute={0}),
+            # Monday mid-morning UTC — the digest reports the week just ended,
+            # and lands in business hours across US/EU rather than overnight.
+            cron(portfolio_digest, weekday={0}, hour={14}, minute={0}),
         ]
         if cron is not None
         else []
@@ -117,8 +139,10 @@ __all__ = [
     "WorkerSettings",
     "catalog_sync",
     "image_index",
+    "portfolio_digest",
     "price_backfill",
     "price_snapshot",
+    "pro_expiry_notices",
     "process_scan",
     "shutdown",
     "startup",

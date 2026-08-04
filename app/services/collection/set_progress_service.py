@@ -27,6 +27,9 @@ from app.models.catalog_mirror import CatalogMirrorCard, CatalogMirrorSet
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.services.collection.portfolio_service import current_market_value
+from app.utils.logger import get_logger
+
+logger = get_logger("set_progress")
 
 
 @dataclass(slots=True)
@@ -347,6 +350,8 @@ async def set_checklist(
 
     owned_count = sum(1 for c in cards if c["owned"])
     total = len(cards) or int(cs.total_cards or 0)
+    if total > 0 and owned_count >= total:
+        await _notify_set_completed(db, user, cs, total=total)
     return {
         "setId": str(cs.id),
         "setName": cs.name,
@@ -354,6 +359,40 @@ async def set_checklist(
         "owned": owned_count,
         "cards": cards,
     }
+
+
+async def _notify_set_completed(
+    db: AsyncSession, user: User, cs: CardSet, *, total: int
+) -> None:
+    """Send the set-completion trophy once, ever.
+
+    Completion is only computed authoritatively here (per set, against the
+    mirror), so this read is the trigger — checking on every card add would
+    mean a full-vault set scan per add. The trade-off is honest: the email
+    lands when the collector next opens that set's checklist, not the instant
+    the last card lands. The delivery-log guard makes the repeat reads free.
+
+    Never raises: a checklist GET must not 500 because mail is misconfigured.
+    """
+    from app.services import email_log_service, email_service
+
+    try:
+        # Keyed per (user, set) — a collector gets one trophy per set, not one
+        # per lifetime, and the repeat checklist reads cost a single indexed row.
+        key = f"set-complete-{user.id}-{cs.id}"
+        if await email_log_service.has_sent_key(db, key):
+            return
+        await email_service.send_set_completed(
+            user,
+            set_name=cs.name,
+            set_total=total,
+            series_name=getattr(cs, "series", None),
+            set_id=str(cs.id),
+            image_url=getattr(cs, "logo_url", None) or getattr(cs, "image_url", None),
+            idempotency_key=key,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("set-complete notice failed for user=%s (%s)", user.id, exc)
 
 
 __all__ = ["SetProgress", "list_progress", "set_checklist"]

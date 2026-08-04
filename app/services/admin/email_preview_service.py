@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.config import get_settings
@@ -21,6 +22,9 @@ from app.services.portal import notifications
 
 # Unpersisted stand-in for "a user" in previews — never added to a session.
 _SAMPLE_USER = User(email="sam@collector.example", display_name="Sam")
+
+# Fixed "now" for previews so timestamped templates render deterministically.
+_SAMPLE_NOW = datetime(2026, 8, 4, 18, 42, tzinfo=UTC)
 
 
 def _sample_unsub_url() -> str:
@@ -71,8 +75,56 @@ _RENDERERS = {
     "password_changed": lambda: email_service.build_password_changed(_SAMPLE_USER),
     "mfa_enabled": lambda: email_service.build_mfa_enabled(_SAMPLE_USER),
     "mfa_disabled": lambda: email_service.build_mfa_disabled(_SAMPLE_USER),
+    "new_sign_in": lambda: email_service.build_new_sign_in(
+        _SAMPLE_USER,
+        device="iPhone 16 Pro · Safari",
+        location="Austin, TX, United States",
+        ip="203.0.113.42",
+        when=_SAMPLE_NOW,
+    ),
+    "account_locked": lambda: email_service.build_account_locked(
+        _SAMPLE_USER, minutes=15, attempts=5, when=_SAMPLE_NOW
+    ),
     "pro_activated": lambda: email_service.build_pro_activated(_SAMPLE_USER),
     "pro_canceled": lambda: email_service.build_pro_canceled(_SAMPLE_USER),
+    "payment_failed": lambda: email_service.build_payment_failed(
+        _SAMPLE_USER,
+        amount_usd=Decimal("9.99"),
+        attempt=2,
+        max_attempts=4,
+        next_attempt=_SAMPLE_NOW + timedelta(days=3),
+        grace_days=11,
+    ),
+    "pro_expiring": lambda: email_service.build_pro_expiring(
+        _SAMPLE_USER, ends_on=_SAMPLE_NOW + timedelta(days=3), days_left=3
+    ),
+    "free_limit_reached": lambda: email_service.build_free_limit_reached(
+        _SAMPLE_USER, card_count=50, limit=50
+    ),
+    "portfolio_digest": lambda: email_service.build_portfolio_digest(
+        _SAMPLE_USER,
+        period_label="This week",
+        total_value_usd=Decimal("12480.50"),
+        delta_pct=4.2,
+        delta_usd=Decimal("503.20"),
+        card_count=147,
+        unsub_url=_sample_unsub_url(),
+        series=[11975, 12040, 11890, 12110, 12260, 12180, 12480.50],
+        top_movers=[
+            ("Charizard ex #125", 12.4),
+            ("Umbreon VMAX #215", 8.1),
+            ("Pikachu VMAX #044", -3.6),
+        ],
+    ),
+    "set_completed": lambda: email_service.build_set_completed(
+        _SAMPLE_USER,
+        set_name="Evolving Skies",
+        set_total=237,
+        series_name="Sword &amp; Shield",
+        set_id="swsh7",
+        image_url="https://images.pokemontcg.io/swsh7/logo.png",
+        total_value_usd=Decimal("4820.00"),
+    ),
     "price_alert": lambda: email_service.build_price_alert(
         card_name="Charizard ex #125",
         set_name="Obsidian Flames",
@@ -191,6 +243,18 @@ TEMPLATES: tuple[TemplateSpec, ...] = (
         "Sent when two-factor is turned off.",
     ),
     TemplateSpec(
+        "new_sign_in",
+        "New sign-in",
+        "Security",
+        "Sent when an account is accessed from an unrecognized device.",
+    ),
+    TemplateSpec(
+        "account_locked",
+        "Account locked",
+        "Security",
+        "Sent when brute-force lockout trips after repeated failed sign-ins.",
+    ),
+    TemplateSpec(
         "pro_activated",
         "Pro activated",
         "Billing",
@@ -201,6 +265,37 @@ TEMPLATES: tuple[TemplateSpec, ...] = (
         "Pro ended",
         "Billing",
         "Sent once when a subscription lapses back to the free plan.",
+    ),
+    TemplateSpec(
+        "payment_failed",
+        "Payment failed",
+        "Billing",
+        "Dunning notice on a declined charge — Pro is at risk until the card "
+        "is updated.",
+    ),
+    TemplateSpec(
+        "pro_expiring",
+        "Pro ending soon",
+        "Billing",
+        "Heads-up before a scheduled cancellation takes effect.",
+    ),
+    TemplateSpec(
+        "free_limit_reached",
+        "Vault full",
+        "Lifecycle",
+        "Sent once when a free-plan vault hits its card ceiling.",
+    ),
+    TemplateSpec(
+        "portfolio_digest",
+        "Portfolio digest",
+        "Engagement",
+        "Recurring collection recap with movers; one-click unsubscribe.",
+    ),
+    TemplateSpec(
+        "set_completed",
+        "Set completed",
+        "Engagement",
+        "Milestone email when every card in a set is owned.",
     ),
     TemplateSpec(
         "price_alert",

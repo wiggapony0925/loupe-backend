@@ -222,7 +222,8 @@ async def authenticate_with_password(
 
     if not verify_password(password, user.password_hash):
         user.failed_login_count = (user.failed_login_count or 0) + 1
-        if user.failed_login_count >= settings.login_max_attempts:
+        just_locked = user.failed_login_count >= settings.login_max_attempts
+        if just_locked:
             user.locked_until = now + timedelta(seconds=settings.login_lockout_seconds)
             user.failed_login_count = 0  # reset; the lock is the deterrent now
             logger.warning(
@@ -231,6 +232,17 @@ async def authenticate_with_password(
                 user.email,
             )
         await db.commit()
+        if just_locked:
+            # Only on the transition into the lock — the owner needs to know
+            # someone is guessing, and the attacker learns nothing new.
+            from app.services import email_service
+
+            await email_service.send_account_locked(
+                user,
+                minutes=max(1, settings.login_lockout_seconds // 60),
+                attempts=settings.login_max_attempts,
+                when=now,
+            )
         return None
 
     # Success — clear any failure state and opportunistically upgrade the hash.

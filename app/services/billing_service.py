@@ -19,6 +19,7 @@ plan directly with no Stripe object, for testers and support.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import stripe
@@ -418,6 +419,44 @@ def _as_uuid(value: str) -> Any:
         return value
 
 
+async def _handle_payment_failed(db: AsyncSession, invoice: Any) -> None:
+    """Tell the user a charge was declined, before Stripe gives up on it.
+
+    Stripe retries a failed invoice several times over ~2 weeks and only then
+    cancels the subscription (which arrives as ``subscription.deleted`` and
+    sends the Pro-ended email). Without this notice the whole dunning window
+    passes silently and the first thing the user notices is a locked feature.
+    """
+    user = await _user_by_customer(db, invoice.get("customer"))
+    if user is None:
+        return
+    amount = invoice.get("amount_due")
+    next_ts = invoice.get("next_payment_attempt")
+    period_end = _as_aware_ts(user.pro_expires_at)
+    now = datetime.now(UTC)
+    await email_service.send_payment_failed(
+        user,
+        amount_usd=(Decimal(amount) / 100) if amount else None,
+        attempt=int(invoice.get("attempt_count") or 1),
+        next_attempt=(datetime.fromtimestamp(next_ts, tz=UTC) if next_ts else None),
+        grace_days=(
+            max(0, (period_end - now).days) if period_end and period_end > now else None
+        ),
+        # Per invoice *and* attempt: each retry is a distinct notice, but a
+        # redelivered webhook for the same attempt is not.
+        idempotency_key=(
+            f"payment-failed-{invoice.get('id')}-{invoice.get('attempt_count')}"
+        ),
+    )
+
+
+def _as_aware_ts(value: datetime | None) -> datetime | None:
+    """SQLite drops tzinfo on round-trip; treat naive timestamps as UTC."""
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
 async def handle_event(db: AsyncSession, event: stripe.Event) -> None:
     """Dispatch a verified Stripe event to the right plan-sync handler."""
     _client()
@@ -431,6 +470,8 @@ async def handle_event(db: AsyncSession, event: stripe.Event) -> None:
         "customer.subscription.deleted",
     ):
         await _apply_subscription(db, obj)
+    elif etype == "invoice.payment_failed":
+        await _handle_payment_failed(db, obj)
     # Other events (invoice.paid, etc.) are no-ops: the subscription.* events
     # already carry the period end we need.
 
