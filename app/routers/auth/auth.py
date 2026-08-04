@@ -162,6 +162,14 @@ async def login(
             detail="Too many failed attempts. Try again later.",
             headers={"Retry-After": str(exc.retry_after)},
         ) from exc
+    except user_service.SsoOnlyAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "This account signs in with Apple or Google — use those "
+                "buttons. To add a password, use “Forgot password?”."
+            ),
+        ) from exc
     if user is None or user.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

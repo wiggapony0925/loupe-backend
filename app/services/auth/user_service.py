@@ -37,6 +37,13 @@ class AccountLockedError(Exception):
         self.retry_after = retry_after
 
 
+class SsoOnlyAccountError(Exception):
+    """Raised when a password sign-in hits an account that has no password
+    (created via Apple/Google). Telling the user is safe — the register
+    endpoint already discloses account existence — and without it every
+    attempt reads as "wrong password", which looks like a glitch."""
+
+
 async def get_by_id(db: AsyncSession, user_id) -> User | None:
     return (
         await db.execute(select(User).where(User.id == user_id))
@@ -210,6 +217,11 @@ async def authenticate_with_password(
         _ = verify_password(
             password, "$argon2id$v=19$m=65536,t=3,p=4$ZmFrZXNhbHQ$ZmFrZWhhc2g"
         )
+        # A real account that signs in with Apple/Google gets told so —
+        # otherwise the correct owner can never "guess right" and the
+        # failure loop looks like a broken login form.
+        if user is not None and (user.apple_subject or user.google_subject):
+            raise SsoOnlyAccountError()
         return None
 
     settings = get_settings()

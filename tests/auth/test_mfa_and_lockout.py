@@ -150,3 +150,29 @@ async def test_mfa_backup_code_consumed_once(client, no_rate_limit):
         json={"mfa_token": await login_challenge(), "code": code},
     )
     assert_envelope_error(reused, expected_status=401)
+
+
+@pytest.mark.asyncio
+async def test_sso_only_account_gets_a_helpful_login_message(
+    client, created_user, no_rate_limit
+):
+    """An Apple/Google account has no password — a password attempt must say
+    so instead of the generic "wrong password" (which reads as a glitch to
+    the legitimate owner, who can never guess right)."""
+    # `created_user` is an SSO account (apple_subject set, password_hash None).
+    resp = await client.post(
+        "/v1/auth/login",
+        json={"email": created_user.email, "password": "AnythingAtAll1"},
+    )
+    body = resp.json()
+    assert resp.status_code == 401
+    assert "Apple or Google" in body["error"]["message"]
+
+    # A NONEXISTENT email keeps the generic message (no account enumeration).
+    resp = await client.post(
+        "/v1/auth/login",
+        json={"email": "ghost@example.com", "password": "AnythingAtAll1"},
+    )
+    body = resp.json()
+    assert resp.status_code == 401
+    assert "Apple or Google" not in body["error"]["message"]
