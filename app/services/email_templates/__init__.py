@@ -32,12 +32,21 @@ from app.services.email_templates.base import (
     render_email,
 )
 from app.services.email_templates.billing import (
+    build_payment_failed,
     build_pro_activated,
     build_pro_canceled,
+    build_pro_expiring,
+)
+from app.services.email_templates.engagement import (
+    build_free_limit_reached,
+    build_portfolio_digest,
+    build_set_completed,
 )
 from app.services.email_templates.security import (
+    build_account_locked,
     build_mfa_disabled,
     build_mfa_enabled,
+    build_new_sign_in,
     build_password_changed,
     build_password_reset,
     build_reset_unavailable,
@@ -49,18 +58,25 @@ from app.services.email_templates.waitlist import (
 
 __all__ = [
     "EmailContent",
+    "build_account_locked",
     "build_admin_granted",
     "build_ban_notice",
     "build_blog_announcement",
     "build_custom_announcement",
+    "build_free_limit_reached",
     "build_mfa_disabled",
     "build_mfa_enabled",
+    "build_new_sign_in",
     "build_password_changed",
     "build_password_reset",
+    "build_payment_failed",
+    "build_portfolio_digest",
     "build_price_alert",
     "build_pro_activated",
     "build_pro_canceled",
+    "build_pro_expiring",
     "build_reset_unavailable",
+    "build_set_completed",
     "build_statement_ready",
     "build_support_message",
     "build_verify_email",

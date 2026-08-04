@@ -1,12 +1,15 @@
-"""Security notices: password changed/reset, 2FA on/off.
+"""Security notices: password changed/reset, 2FA on/off, sign-in, lockout.
 
-One family, four moods, each with a visual: the reset carries a dark
-"authorization" tile, the change notice a what/when event panel, and the 2FA
-pair show your protection level as a meter that fills (or empties). All share
-the SECURITY eyebrow so they're instantly recognizable in a crowded inbox.
+One family, several moods, each with a visual: the reset carries a dark
+"authorization" tile, the change notice a what/when event panel, the 2FA
+pair show your protection level as a meter that fills (or empties), and the
+sign-in/lockout pair report on access itself. All share the SECURITY eyebrow
+so they're instantly recognizable in a crowded inbox.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
 
 from app.models.user import User
 from app.services.email_templates import theme
@@ -191,9 +194,118 @@ def build_reset_unavailable(user: User) -> EmailContent:
     return EmailContent("How to sign in to Loupe", html, text)
 
 
+def _stamp(when: datetime | None) -> str:
+    """Human, unambiguous, timezone-explicit — '4 Aug 2026 at 18:42 UTC'."""
+    moment = (when or datetime.now(UTC)).astimezone(UTC)
+    return moment.strftime("%-d %b %Y at %H:%M UTC")
+
+
+def _device_tile(device: str, location: str) -> str:
+    """A dark access tile — the 'who just opened the vault' moment."""
+    return (
+        f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" '
+        f'border="0" style="margin:18px 0 8px;"><tr>'
+        f'<td align="center" style="background:{theme.BAND_BG};border-radius:14px;'
+        f'padding:22px 20px;">'
+        f'<p style="margin:0;font-size:19px;font-weight:600;color:#f5f5f7;'
+        f'letter-spacing:-0.01em;font-family:{theme.FONT_SERIF};">{esc(device)}</p>'
+        f'<p style="margin:8px 0 0;font-size:10px;font-weight:700;'
+        f"letter-spacing:0.18em;text-transform:uppercase;color:{theme.BAND_MUTED};"
+        f'font-family:{theme.FONT};">{esc(location)}</p>'
+        f"</td></tr></table>"
+    )
+
+
+def build_new_sign_in(
+    user: User,
+    *,
+    device: str | None = None,
+    location: str | None = None,
+    ip: str | None = None,
+    when: datetime | None = None,
+) -> EmailContent:
+    """'A new device just signed in' — the notice that turns a silent account
+    takeover into a caught one. Every field is optional because the request
+    context doesn't always carry a parseable user-agent or geo-IP."""
+    body = (
+        f"<p>Hi {esc(display_name(user))} — your Loupe account was just signed "
+        "into from a device we haven't seen before.</p>"
+        + _device_tile(device or "Unrecognized device", location or "Location unknown")
+        + panel(
+            [
+                ("When", esc(_stamp(when))),
+                ("Device", esc(device or "Unknown")),
+                ("Location", esc(location or "Unknown")),
+                ("IP address", esc(ip or "Unknown")),
+            ]
+        )
+        + callout(
+            "Recognize this? No action needed — this is just a heads-up.",
+            tone="mint",
+        )
+        + callout(_WASNT_YOU.format(settings_url=_settings_url()), tone="rose")
+    )
+    html, text = render_email(
+        "New sign-in to your account.",
+        body,
+        ("Review your devices", _settings_url()),
+        preheader=f"New sign-in from {device or 'a new device'}.",
+        eyebrow="Security notice",
+        eyebrow_color=theme.ROSE,
+    )
+    return EmailContent("New sign-in to your Loupe account", html, text)
+
+
+def build_account_locked(
+    user: User, *, minutes: int, attempts: int, when: datetime | None = None
+) -> EmailContent:
+    """Sent when brute-force lockout trips. Two audiences in one email: the
+    real owner (who mistyped and needs to know the wait is temporary) and the
+    owner under attack (who needs to know someone is guessing)."""
+    window = f"{minutes} minute{'s' if minutes != 1 else ''}"
+    body = (
+        f"<p>Hi {esc(display_name(user))} — we temporarily locked sign-in on "
+        f"your account after <strong>{attempts} failed password attempts</strong>."
+        "</p>"
+        f'<p style="margin:14px 0 4px;text-align:center;">'
+        f"{chip(f'Locked for {window}', tone='amber')}"
+        f"&nbsp;{chip('Password unchanged', tone='neutral')}</p>"
+        + panel(
+            [
+                ("When", esc(_stamp(when))),
+                ("Failed attempts", str(attempts)),
+                ("Unlocks in", esc(window)),
+            ]
+        )
+        + callout(
+            "This lock clears itself — just try again once the window passes. "
+            "Nothing in your vault changed.",
+            tone="amber",
+        )
+        + callout(
+            "If this wasn't you, someone is guessing your password. Reset it "
+            "now and turn on two-factor authentication from "
+            f'<a href="{_settings_url()}" target="_blank" '
+            f'style="{theme.QUIET_LINK_STYLE}">Settings</a>.',
+            tone="rose",
+        )
+    )
+    html, text = render_email(
+        "Sign-in temporarily locked.",
+        body,
+        ("Reset your password", f"{app_url()}/forgot-password"),
+        preheader=f"Too many failed attempts — locked for {window}.",
+        eyebrow="Security alert",
+        eyebrow_color=theme.ROSE,
+    )
+    return EmailContent("Your Loupe account was temporarily locked", html, text)
+
+
 __all__ = [
+    "build_account_locked",
     "build_mfa_disabled",
     "build_mfa_enabled",
+    "build_new_sign_in",
     "build_password_changed",
     "build_password_reset",
     "build_reset_unavailable",
