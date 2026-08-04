@@ -49,6 +49,10 @@ from app.models.user_report import UserReport
 from app.models.waitlist import WaitlistEntry
 from app.models.watchlist import WatchlistItem
 
+# The social layer lives as a vertical slice in app/social; its models are
+# re-exported here so alembic env + the test schema pick them up with the rest.
+from app.social.models import SocialFollow, SocialFollowRequest, SocialProfile
+
 __all__ = [
     "AiSearchLog",
     "ApiKey",
@@ -96,6 +100,9 @@ __all__ = [
     "SealedProduct",
     "SealedProductTypeEnum",
     "SiteConfig",
+    "SocialFollow",
+    "SocialFollowRequest",
+    "SocialProfile",
     "TcgEnum",
     "User",
     "UserRecents",

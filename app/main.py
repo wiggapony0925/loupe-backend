@@ -37,6 +37,7 @@ from app.routers.public import share as public_share
 from app.routers.public import storefront as public
 from app.routers.public import unsubscribe as public_unsubscribe
 from app.routers.public import verify_email as public_verify_email
+from app.social.router import router as social_router
 
 
 def create_app() -> FastAPI:
@@ -133,6 +134,8 @@ def create_app() -> FastAPI:
     app.include_router(portal_blog.router, prefix=api_prefix)
     app.include_router(portal_waitlist.router, prefix=api_prefix)
     app.include_router(flags.router, prefix=api_prefix)
+    # Community layer (follows, profiles, shared collections) — app/social.
+    app.include_router(social_router, prefix=api_prefix)
     app.include_router(announcement.router, prefix=api_prefix)
     app.include_router(billing.router, prefix=api_prefix)
     app.include_router(email_webhook.router, prefix=api_prefix)

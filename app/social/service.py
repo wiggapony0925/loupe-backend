@@ -1,0 +1,621 @@
+"""Business logic for the social layer.
+
+Instagram semantics throughout:
+
+* Following a **public** profile takes effect immediately.
+* Following a **private** profile creates a pending request the owner must
+  accept; until then the viewer sees the profile header but not the
+  collection or follower lists.
+* Switching a private profile to public auto-accepts everything pending
+  (those people asked to follow; on a public profile a follow is instant).
+* Existing followers survive a switch to private (matching Instagram).
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from fastapi import HTTPException
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.card import Card, CardSet
+from app.models.grade import GradedCard
+from app.models.user import User
+from app.social import avatars
+from app.social.models import SocialFollow, SocialFollowRequest, SocialProfile
+from app.social.schemas import (
+    FollowRequestRead,
+    FollowStateRead,
+    RelationshipState,
+    SocialCollectionItem,
+    SocialCollectionRead,
+    SocialMeRead,
+    SocialProfileRead,
+    SocialProfileUpsert,
+    SocialProfileView,
+    SocialUserCard,
+)
+
+# Handles that would collide with product surfaces or invite impersonation.
+RESERVED_USERNAMES = {
+    "admin",
+    "administrator",
+    "api",
+    "help",
+    "loupe",
+    "loupe_official",
+    "me",
+    "moderator",
+    "official",
+    "root",
+    "settings",
+    "support",
+    "system",
+}
+
+MAX_PAGE_SIZE = 100
+
+
+# ── Internal helpers ──
+
+
+def _profile_read(profile: SocialProfile) -> SocialProfileRead:
+    out = SocialProfileRead.model_validate(profile)
+    out.avatar_url = avatars.avatar_url(profile)
+    return out
+
+
+def _is_pro(user: User) -> bool:
+    """Raw plan, not effective entitlement — see the schema note on is_pro."""
+    return (user.plan or "").lower() == "pro"
+
+
+def _user_card(
+    profile: SocialProfile, user: User, relationship: RelationshipState
+) -> SocialUserCard:
+    return SocialUserCard(
+        user_id=profile.user_id,
+        username=profile.username,
+        display_name=user.display_name,
+        avatar_url=avatars.avatar_url(profile),
+        location=profile.location,
+        is_private=profile.is_private,
+        is_pro=_is_pro(user),
+        relationship=relationship,
+    )
+
+
+async def _get_profile(db: AsyncSession, user_id: uuid.UUID) -> SocialProfile | None:
+    return (
+        await db.execute(select(SocialProfile).where(SocialProfile.user_id == user_id))
+    ).scalar_one_or_none()
+
+
+async def _resolve_username(
+    db: AsyncSession, username: str
+) -> tuple[SocialProfile, User]:
+    """Profile + account row for a handle, 404 when absent/banned/deleted."""
+    row = (
+        await db.execute(
+            select(SocialProfile, User)
+            .join(User, User.id == SocialProfile.user_id)
+            .where(
+                SocialProfile.username == username.strip().lower(),
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return row[0], row[1]
+
+
+async def _relationship(
+    db: AsyncSession, viewer_id: uuid.UUID, target_id: uuid.UUID
+) -> RelationshipState:
+    if viewer_id == target_id:
+        return "self"
+    followed = (
+        await db.execute(
+            select(SocialFollow.follower_id).where(
+                SocialFollow.follower_id == viewer_id,
+                SocialFollow.followee_id == target_id,
+            )
+        )
+    ).first()
+    if followed:
+        return "following"
+    requested = (
+        await db.execute(
+            select(SocialFollowRequest.id).where(
+                SocialFollowRequest.requester_id == viewer_id,
+                SocialFollowRequest.target_id == target_id,
+            )
+        )
+    ).first()
+    return "requested" if requested else "none"
+
+
+def _can_view(profile: SocialProfile, relationship: RelationshipState) -> bool:
+    return (not profile.is_private) or relationship in ("self", "following")
+
+
+async def _count(db: AsyncSession, stmt) -> int:
+    return int((await db.execute(stmt)).scalar_one() or 0)
+
+
+# ── My profile ──
+
+
+async def get_me(db: AsyncSession, user: User) -> SocialMeRead:
+    profile = await _get_profile(db, user.id)
+    if profile is None:
+        return SocialMeRead(profile=None, incoming_request_count=0)
+    pending = await _count(
+        db,
+        select(func.count())
+        .select_from(SocialFollowRequest)
+        .where(SocialFollowRequest.target_id == user.id),
+    )
+    return SocialMeRead(profile=_profile_read(profile), incoming_request_count=pending)
+
+
+async def upsert_me(
+    db: AsyncSession, user: User, payload: SocialProfileUpsert
+) -> SocialProfileRead:
+    username = payload.username.strip().lower()
+    if username in RESERVED_USERNAMES:
+        raise HTTPException(status_code=409, detail="That username is reserved")
+
+    taken = (
+        await db.execute(
+            select(SocialProfile.user_id).where(
+                SocialProfile.username == username,
+                SocialProfile.user_id != user.id,
+            )
+        )
+    ).first()
+    if taken:
+        raise HTTPException(status_code=409, detail="That username is taken")
+
+    profile = await _get_profile(db, user.id)
+    was_private = bool(profile.is_private) if profile else False
+    if profile is None:
+        profile = SocialProfile(user_id=user.id, username=username)
+        db.add(profile)
+    profile.username = username
+    profile.bio = payload.bio
+    profile.location = payload.location
+    profile.is_private = payload.is_private
+
+    # Going public honours everyone who already asked to follow.
+    if was_private and not payload.is_private:
+        pending = (
+            (
+                await db.execute(
+                    select(SocialFollowRequest).where(
+                        SocialFollowRequest.target_id == user.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for req in pending:
+            db.add(SocialFollow(follower_id=req.requester_id, followee_id=user.id))
+            await db.delete(req)
+
+    await db.commit()
+    await db.refresh(profile)
+    return _profile_read(profile)
+
+
+async def set_avatar(
+    db: AsyncSession, user: User, body: bytes, content_type: str
+) -> SocialProfileRead:
+    """Store a new profile picture (payload already validated by the router)."""
+    profile = await _get_profile(db, user.id)
+    if profile is None:
+        raise HTTPException(
+            status_code=409, detail="Claim a username before adding a picture"
+        )
+    await avatars.store_avatar(profile, body, content_type)
+    await db.commit()
+    await db.refresh(profile)
+    return _profile_read(profile)
+
+
+async def avatar_bytes(
+    db: AsyncSession, user_id: uuid.UUID
+) -> tuple[bytes, str] | None:
+    """Picture bytes + content type for the public serving endpoint."""
+    profile = await _get_profile(db, user_id)
+    if profile is None or not profile.avatar_key:
+        return None
+    body = await avatars.load_avatar(user_id)
+    if body is None:
+        return None
+    return body, profile.avatar_content_type or "image/jpeg"
+
+
+# ── Viewing profiles ──
+
+
+async def view_profile(
+    db: AsyncSession, viewer: User, username: str
+) -> SocialProfileView:
+    profile, account = await _resolve_username(db, username)
+    rel = await _relationship(db, viewer.id, profile.user_id)
+    follower_count = await _count(
+        db,
+        select(func.count())
+        .select_from(SocialFollow)
+        .where(SocialFollow.followee_id == profile.user_id),
+    )
+    following_count = await _count(
+        db,
+        select(func.count())
+        .select_from(SocialFollow)
+        .where(SocialFollow.follower_id == profile.user_id),
+    )
+    card_count = await _count(
+        db,
+        select(func.count())
+        .select_from(GradedCard)
+        .where(
+            GradedCard.user_id == profile.user_id,
+            GradedCard.deleted_at.is_(None),
+        ),
+    )
+    return SocialProfileView(
+        user_id=profile.user_id,
+        username=profile.username,
+        display_name=account.display_name,
+        avatar_url=avatars.avatar_url(profile),
+        bio=profile.bio,
+        location=profile.location,
+        is_private=profile.is_private,
+        is_pro=_is_pro(account),
+        joined_at=profile.created_at,
+        follower_count=follower_count,
+        following_count=following_count,
+        card_count=card_count,
+        relationship=rel,
+        can_view_collection=_can_view(profile, rel),
+    )
+
+
+# ── Follow graph ──
+
+
+async def follow(db: AsyncSession, viewer: User, username: str) -> FollowStateRead:
+    profile, _ = await _resolve_username(db, username)
+    if profile.user_id == viewer.id:
+        raise HTTPException(status_code=400, detail="You can't follow yourself")
+
+    # The graph only contains collectors with claimed handles — otherwise
+    # follower COUNTS would include people the follower LIST (a profiles
+    # join) can't show. Clients catch this 409 and open the claim sheet.
+    if await _get_profile(db, viewer.id) is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Claim a username before following collectors",
+        )
+
+    rel = await _relationship(db, viewer.id, profile.user_id)
+    if rel in ("following", "requested"):
+        return FollowStateRead(relationship=rel)  # idempotent
+
+    if profile.is_private:
+        db.add(SocialFollowRequest(requester_id=viewer.id, target_id=profile.user_id))
+        await db.commit()
+        return FollowStateRead(relationship="requested")
+
+    db.add(SocialFollow(follower_id=viewer.id, followee_id=profile.user_id))
+    await db.commit()
+    return FollowStateRead(relationship="following")
+
+
+async def unfollow(db: AsyncSession, viewer: User, username: str) -> FollowStateRead:
+    """Remove the follow edge OR cancel a pending request — both roads to 'none'."""
+    profile, _ = await _resolve_username(db, username)
+    await db.execute(
+        delete(SocialFollow).where(
+            SocialFollow.follower_id == viewer.id,
+            SocialFollow.followee_id == profile.user_id,
+        )
+    )
+    await db.execute(
+        delete(SocialFollowRequest).where(
+            SocialFollowRequest.requester_id == viewer.id,
+            SocialFollowRequest.target_id == profile.user_id,
+        )
+    )
+    await db.commit()
+    return FollowStateRead(relationship="none")
+
+
+# ── Follow requests (private accounts) ──
+
+
+async def incoming_requests(db: AsyncSession, user: User) -> list[FollowRequestRead]:
+    rows = (
+        await db.execute(
+            select(SocialFollowRequest, SocialProfile, User)
+            .join(
+                SocialProfile, SocialProfile.user_id == SocialFollowRequest.requester_id
+            )
+            .join(User, User.id == SocialFollowRequest.requester_id)
+            .where(
+                SocialFollowRequest.target_id == user.id,
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+            )
+            .order_by(SocialFollowRequest.created_at.desc())
+        )
+    ).all()
+    return [
+        FollowRequestRead(
+            id=req.id,
+            requester=_user_card(profile, account, "none"),
+            created_at=req.created_at,
+        )
+        for req, profile, account in rows
+    ]
+
+
+async def _load_my_request(
+    db: AsyncSession, user: User, request_id: uuid.UUID
+) -> SocialFollowRequest:
+    req = (
+        await db.execute(
+            select(SocialFollowRequest).where(
+                SocialFollowRequest.id == request_id,
+                SocialFollowRequest.target_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if req is None:
+        raise HTTPException(status_code=404, detail="Follow request not found")
+    return req
+
+
+async def accept_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> None:
+    req = await _load_my_request(db, user, request_id)
+    already = (
+        await db.execute(
+            select(SocialFollow.follower_id).where(
+                SocialFollow.follower_id == req.requester_id,
+                SocialFollow.followee_id == user.id,
+            )
+        )
+    ).first()
+    if not already:
+        db.add(SocialFollow(follower_id=req.requester_id, followee_id=user.id))
+    await db.delete(req)
+    await db.commit()
+
+
+async def decline_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> None:
+    req = await _load_my_request(db, user, request_id)
+    await db.delete(req)
+    await db.commit()
+
+
+# ── Lists (followers / following) ──
+
+
+async def _guard_list_access(
+    db: AsyncSession, viewer: User, username: str
+) -> SocialProfile:
+    profile, _ = await _resolve_username(db, username)
+    rel = await _relationship(db, viewer.id, profile.user_id)
+    if not _can_view(profile, rel):
+        raise HTTPException(status_code=403, detail="This account is private")
+    return profile
+
+
+async def followers(
+    db: AsyncSession, viewer: User, username: str, limit: int, offset: int
+) -> list[SocialUserCard]:
+    profile = await _guard_list_access(db, viewer, username)
+    rows = (
+        await db.execute(
+            select(SocialProfile, User)
+            .join(SocialFollow, SocialFollow.follower_id == SocialProfile.user_id)
+            .join(User, User.id == SocialProfile.user_id)
+            .where(
+                SocialFollow.followee_id == profile.user_id,
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+            )
+            .order_by(SocialFollow.created_at.desc())
+            .limit(min(limit, MAX_PAGE_SIZE))
+            .offset(offset)
+        )
+    ).all()
+    return [
+        _user_card(p, u, await _relationship(db, viewer.id, p.user_id)) for p, u in rows
+    ]
+
+
+async def following(
+    db: AsyncSession, viewer: User, username: str, limit: int, offset: int
+) -> list[SocialUserCard]:
+    profile = await _guard_list_access(db, viewer, username)
+    rows = (
+        await db.execute(
+            select(SocialProfile, User)
+            .join(SocialFollow, SocialFollow.followee_id == SocialProfile.user_id)
+            .join(User, User.id == SocialProfile.user_id)
+            .where(
+                SocialFollow.follower_id == profile.user_id,
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+            )
+            .order_by(SocialFollow.created_at.desc())
+            .limit(min(limit, MAX_PAGE_SIZE))
+            .offset(offset)
+        )
+    ).all()
+    return [
+        _user_card(p, u, await _relationship(db, viewer.id, p.user_id)) for p, u in rows
+    ]
+
+
+# ── Search ──
+
+
+async def search(
+    db: AsyncSession, viewer: User, q: str, limit: int = 20
+) -> list[SocialUserCard]:
+    """Find collectors by handle or display name (prefix matches rank first)."""
+    needle = q.strip().lower()
+    if len(needle) < 2:
+        return []
+    like = f"%{needle}%"
+    prefix = f"{needle}%"
+    rows = (
+        await db.execute(
+            select(SocialProfile, User)
+            .join(User, User.id == SocialProfile.user_id)
+            .where(
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+                or_(
+                    SocialProfile.username.like(like),
+                    func.lower(func.coalesce(User.display_name, "")).like(like),
+                ),
+            )
+            .order_by(
+                # Handle prefix hits first (what a typeahead expects).
+                SocialProfile.username.like(prefix).desc(),
+                SocialProfile.username.asc(),
+            )
+            .limit(min(limit, MAX_PAGE_SIZE))
+        )
+    ).all()
+    return [
+        _user_card(p, u, await _relationship(db, viewer.id, p.user_id)) for p, u in rows
+    ]
+
+
+async def suggested(
+    db: AsyncSession, viewer: User, limit: int = 10
+) -> list[SocialUserCard]:
+    """Collectors to show on an empty Community page (Collectr-style list).
+
+    Newest claimed profiles the viewer doesn't already follow (or have a
+    pending request with), self excluded. Private profiles are included —
+    following one simply becomes a request.
+    """
+    followed = select(SocialFollow.followee_id).where(
+        SocialFollow.follower_id == viewer.id
+    )
+    requested = select(SocialFollowRequest.target_id).where(
+        SocialFollowRequest.requester_id == viewer.id
+    )
+    rows = (
+        await db.execute(
+            select(SocialProfile, User)
+            .join(User, User.id == SocialProfile.user_id)
+            .where(
+                SocialProfile.user_id != viewer.id,
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+                SocialProfile.user_id.not_in(followed),
+                SocialProfile.user_id.not_in(requested),
+            )
+            .order_by(SocialProfile.created_at.desc())
+            .limit(min(limit, MAX_PAGE_SIZE))
+        )
+    ).all()
+    # Exclusions above guarantee the relationship is "none".
+    return [_user_card(p, u, "none") for p, u in rows]
+
+
+# ── The privacy-gated collection view ──
+
+
+async def collection(
+    db: AsyncSession, viewer: User, username: str, limit: int, offset: int
+) -> SocialCollectionRead:
+    profile, _ = await _resolve_username(db, username)
+    rel = await _relationship(db, viewer.id, profile.user_id)
+    if not _can_view(profile, rel):
+        raise HTTPException(status_code=403, detail="This account is private")
+
+    owner_alive = (
+        GradedCard.user_id == profile.user_id,
+        GradedCard.deleted_at.is_(None),
+    )
+    total = await _count(
+        db, select(func.count()).select_from(GradedCard).where(*owner_alive)
+    )
+    # Same valuation basis as /v1/grades/summary: the grade-aware
+    # estimated_value_usd (holding value), never the raw market price.
+    value = (
+        await db.execute(
+            select(func.sum(GradedCard.estimated_value_usd)).where(*owner_alive)
+        )
+    ).scalar_one()
+
+    rows = (
+        await db.execute(
+            select(GradedCard, Card, CardSet)
+            .join(Card, Card.id == GradedCard.card_id)
+            .outerjoin(CardSet, CardSet.id == Card.set_id)
+            .where(*owner_alive)
+            .order_by(
+                GradedCard.estimated_value_usd.desc().nulls_last(),
+                GradedCard.id.desc(),
+            )
+            .limit(min(limit, MAX_PAGE_SIZE))
+            .offset(offset)
+        )
+    ).all()
+
+    items = [
+        SocialCollectionItem(
+            id=grade.id,
+            card_id=grade.card_id,
+            card_name=card.name if card else None,
+            card_image_url=card.image_url if card else None,
+            card_set_name=card_set.name if card_set else None,
+            card_number=card.number if card else None,
+            card_tcg=(card.tcg.value if card and hasattr(card.tcg, "value") else None),
+            grade=grade.grade,
+            house=grade.house.value
+            if hasattr(grade.house, "value")
+            else str(grade.house),
+            condition=(
+                grade.condition.value
+                if grade.condition is not None and hasattr(grade.condition, "value")
+                else None
+            ),
+            estimated_value_usd=grade.estimated_value_usd,
+            graded_at=grade.graded_at,
+        )
+        for grade, card, card_set in rows
+    ]
+    return SocialCollectionRead(
+        total_cards=total, estimated_value_usd=value, items=items
+    )
+
+
+__all__ = [
+    "accept_request",
+    "collection",
+    "decline_request",
+    "follow",
+    "followers",
+    "following",
+    "get_me",
+    "incoming_requests",
+    "search",
+    "unfollow",
+    "upsert_me",
+    "view_profile",
+]

@@ -620,6 +620,47 @@
   "/v1/sets/{set_id}/checklist": [
     "GET"
   ],
+  "/v1/social/avatar/{user_id}": [
+    "GET"
+  ],
+  "/v1/social/me": [
+    "GET",
+    "PUT"
+  ],
+  "/v1/social/me/avatar": [
+    "POST"
+  ],
+  "/v1/social/requests": [
+    "GET"
+  ],
+  "/v1/social/requests/{request_id}/accept": [
+    "POST"
+  ],
+  "/v1/social/requests/{request_id}/decline": [
+    "POST"
+  ],
+  "/v1/social/search": [
+    "GET"
+  ],
+  "/v1/social/suggested": [
+    "GET"
+  ],
+  "/v1/social/users/{username}": [
+    "GET"
+  ],
+  "/v1/social/users/{username}/collection": [
+    "GET"
+  ],
+  "/v1/social/users/{username}/follow": [
+    "DELETE",
+    "POST"
+  ],
+  "/v1/social/users/{username}/followers": [
+    "GET"
+  ],
+  "/v1/social/users/{username}/following": [
+    "GET"
+  ],
   "/v1/waitlist": [
     "POST"
   ],
