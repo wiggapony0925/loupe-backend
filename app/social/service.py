@@ -17,10 +17,11 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import Card, CardSet
+from app.models.collection import Collection, CollectionItem
 from app.models.grade import GradedCard
 from app.models.user import User
 from app.social import avatars
@@ -41,6 +42,7 @@ from app.social.schemas import (
     SocialCollectionRead,
     SocialCollectionSet,
     SocialMeRead,
+    SocialPortfolioRead,
     SocialProfileRead,
     SocialProfileUpsert,
     SocialProfileView,
@@ -772,6 +774,55 @@ async def collection(
         )
     ).scalar_one()
 
+    # The collector's CURATED portfolios (binders) — what users mean by
+    # "my collections". Counts/values only over living holdings.
+    live_item = and_(
+        GradedCard.id == CollectionItem.graded_card_id,
+        GradedCard.deleted_at.is_(None),
+    )
+    port_rows = (
+        await db.execute(
+            select(
+                Collection,
+                func.count(GradedCard.id),
+                func.sum(GradedCard.estimated_value_usd),
+            )
+            .outerjoin(CollectionItem, CollectionItem.collection_id == Collection.id)
+            .outerjoin(GradedCard, live_item)
+            .where(Collection.user_id == profile.user_id)
+            .group_by(Collection.id)
+            .order_by(func.sum(GradedCard.estimated_value_usd).desc().nulls_last())
+        )
+    ).all()
+    port_covers: dict[uuid.UUID, str] = {}
+    if port_rows:
+        cover_q = (
+            await db.execute(
+                select(CollectionItem.collection_id, Card.image_url)
+                .join(GradedCard, live_item)
+                .join(Card, Card.id == GradedCard.card_id)
+                .where(
+                    CollectionItem.collection_id.in_([c.id for c, _, _ in port_rows]),
+                    Card.image_url.is_not(None),
+                )
+                .order_by(GradedCard.estimated_value_usd.desc().nulls_last())
+            )
+        ).all()
+        for coll_id, img in cover_q:
+            if coll_id not in port_covers and img:
+                port_covers[coll_id] = img
+    portfolios = [
+        SocialPortfolioRead(
+            id=coll.id,
+            name=coll.name,
+            color=coll.color,
+            count=int(n or 0),
+            estimated_value_usd=v,
+            cover_image_url=port_covers.get(coll.id),
+        )
+        for coll, n, v in port_rows
+    ]
+
     # Whole-collection set breakdown (page-independent): "5 Evolving Skies".
     set_name = func.coalesce(CardSet.name, "Other")
     set_rows = (
@@ -853,7 +904,11 @@ async def collection(
         for grade, card, card_set in rows
     ]
     return SocialCollectionRead(
-        sets=sets, total_cards=total, estimated_value_usd=value, items=items
+        portfolios=portfolios,
+        sets=sets,
+        total_cards=total,
+        estimated_value_usd=value,
+        items=items,
     )
 
 

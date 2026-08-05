@@ -153,6 +153,18 @@ class SocialCollectionItem(BaseModel):
     graded_at: datetime
 
 
+class SocialPortfolioRead(BaseModel):
+    """One of the collector's CURATED collections (binders/decks) — the
+    thing users mean by "my collections", distinct from catalog sets."""
+
+    id: uuid.UUID
+    name: str
+    color: str | None = None
+    count: int = 0
+    estimated_value_usd: Decimal | None = None
+    cover_image_url: str | None = None
+
+
 class SocialCollectionSet(BaseModel):
     """One set within a shared collection — "they have 5 Evolving Skies"."""
 
@@ -169,6 +181,8 @@ class SocialCollectionRead(BaseModel):
     total_cards: int = 0
     # Sum of grade-aware holding values (same basis as /v1/grades/summary).
     estimated_value_usd: Decimal | None = None
+    # The collector's curated portfolios (binders), largest value first.
+    portfolios: list[SocialPortfolioRead] = []
     # Whole-collection set breakdown (not page-scoped), largest value first.
     sets: list[SocialCollectionSet] = []
     items: list[SocialCollectionItem] = []
@@ -184,6 +198,7 @@ __all__ = [
     "SocialCollectionRead",
     "SocialCollectionSet",
     "SocialMeRead",
+    "SocialPortfolioRead",
     "SocialProfileRead",
     "SocialProfileUpsert",
     "SocialProfileView",

@@ -277,3 +277,48 @@ async def test_collection_includes_set_breakdown(
     # Cover = the set's most valuable card's art.
     assert sets[0]["cover_image_url"].endswith("Umbreon.png")
     assert float(sets[0]["estimated_value_usd"]) == 690.0
+
+
+@pytest.mark.asyncio
+async def test_collection_includes_curated_portfolios(
+    client, db_session, created_user, second_user
+):
+    """Profiles surface the user's CURATED collections (binders), which is
+    what collectors mean by "my collections" — not catalog sets."""
+    from decimal import Decimal as _D
+
+    from app.models.collection import Collection, CollectionItem
+    from app.models.grade import GradedCard as _GC
+    from tests.factories import make_card
+
+    await _claim(client, created_user, "binderowner")
+    await _claim(client, second_user, "binderviewer")
+
+    binder = Collection(user_id=created_user.id, name="PC Binder", color="#7cf")
+    empty = Collection(user_id=created_user.id, name="For Trade")
+    db_session.add_all([binder, empty])
+    await db_session.flush()
+
+    card = await make_card(db_session, name="Cover Star")
+    card.image_url = "https://img.example/cover-star.png"
+    row = _GC(
+        user_id=created_user.id,
+        card_id=card.id,
+        grade=_D("9.5"),
+        estimated_value_usd=_D("250"),
+    )
+    db_session.add(row)
+    await db_session.flush()
+    db_session.add(CollectionItem(collection_id=binder.id, graded_card_id=row.id))
+    await db_session.commit()
+
+    resp = await client.get(
+        "/v1/social/users/binderowner/collection", headers=_headers(second_user)
+    )
+    data = assert_envelope_ok(resp)
+    ports = data["portfolios"]
+    assert [p["name"] for p in ports] == ["PC Binder", "For Trade"]
+    assert ports[0]["count"] == 1
+    assert float(ports[0]["estimated_value_usd"]) == 250.0
+    assert ports[0]["cover_image_url"].endswith("cover-star.png")
+    assert ports[1]["count"] == 0
