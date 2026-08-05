@@ -186,6 +186,9 @@ async def test_broadcast_dedupes_per_user(db_session):
     """Publishing the same article twice must not notify anyone twice — and
     must not be blocked wholesale either, since the key is per-user."""
     user = await make_user(db_session)
+    # Capture before broadcasting: the duplicate path rolls back, which expires
+    # every instance in this session — including `user`.
+    user_id = user.id
     first = await notification_service.broadcast(
         db_session,
         category="news",
@@ -204,7 +207,7 @@ async def test_broadcast_dedupes_per_user(db_session):
     )
     assert first >= 1
     assert second == 0
-    assert await notification_service.unread_count(db_session, user.id) == 1
+    assert await notification_service.unread_count(db_session, user_id) == 1
 
 
 @pytest.mark.asyncio

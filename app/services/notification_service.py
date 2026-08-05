@@ -139,6 +139,12 @@ async def broadcast(
     Banned and deleted accounts are excluded. ``only_push_enabled`` narrows to
     users who accept push; the default is False because the in-app inbox
     should still receive it even when the phone shouldn't buzz.
+
+    .. warning::
+       On a duplicate this rolls the session back to retry row-by-row, which
+       **expires every instance the caller is holding** in that session. Read
+       any attribute you still need (ids especially) *before* calling, or pass
+       a session you don't mind losing state on.
     """
     stmt = select(User.id).where(User.deleted_at.is_(None), User.banned_at.is_(None))
     if only_push_enabled:
