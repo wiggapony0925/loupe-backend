@@ -87,7 +87,9 @@ async def test_unlike_removes_it_and_is_idempotent(client, created_user, second_
 @pytest.mark.anyio
 async def test_cannot_like_your_own_profile(client, created_user):
     await _claim(client, created_user, "ash")
-    resp = await client.post("/v1/social/users/ash/like", headers=_headers(created_user))
+    resp = await client.post(
+        "/v1/social/users/ash/like", headers=_headers(created_user)
+    )
     # A stat you can raise by yourself is not a stat.
     assert_envelope_error(resp, expected_status=400)
 
