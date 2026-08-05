@@ -34,6 +34,7 @@ from app.social.models import (
 from app.social.schemas import (
     FollowRequestRead,
     FollowStateRead,
+    FriendOwnerRead,
     ProfileLikeRead,
     RelationshipState,
     SocialCollectionItem,
@@ -478,6 +479,71 @@ async def unfollow(db: AsyncSession, viewer: User, username: str) -> FollowState
     )
     await db.commit()
     return FollowStateRead(relationship="none")
+
+
+async def remove_follower(db: AsyncSession, user: User, username: str) -> None:
+    """Kick a follower off MY list (Instagram's "Remove") — deletes only the
+    edge pointing at me. They aren't blocked and can follow again; on a
+    private profile that means going back through a request."""
+    profile, _ = await _resolve_username(db, username)
+    edge = (
+        await db.execute(
+            select(SocialFollow).where(
+                SocialFollow.follower_id == profile.user_id,
+                SocialFollow.followee_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if edge is None:
+        raise HTTPException(status_code=404, detail="They aren't following you")
+    await db.delete(edge)
+    await db.commit()
+
+
+async def friend_owners(
+    db: AsyncSession, viewer: User, card_ref: str, limit: int = 50
+) -> list[FriendOwnerRead]:
+    """Collectors the viewer FOLLOWS who own this card — the "2 of your
+    friends own this card" strip on card detail.
+
+    Following already grants collection visibility (public, or an accepted
+    request on private), so showing these owners leaks nothing new. People
+    the viewer doesn't follow never appear, whatever their privacy setting.
+    ``card_ref`` accepts a local UUID or a composite upstream id — a card
+    that isn't local yet can't be owned, so a miss is an empty list.
+    """
+    from app.services.collection.graded_card_service import _resolve_local_card_id
+
+    local_id = await _resolve_local_card_id(db, card_ref)
+    if local_id is None:
+        return []
+
+    copies = func.count(GradedCard.id)
+    rows = (
+        await db.execute(
+            select(SocialProfile, User, copies)
+            .join(SocialFollow, SocialFollow.followee_id == SocialProfile.user_id)
+            .join(User, User.id == SocialProfile.user_id)
+            .join(GradedCard, GradedCard.user_id == SocialProfile.user_id)
+            .where(
+                SocialFollow.follower_id == viewer.id,
+                GradedCard.card_id == local_id,
+                GradedCard.deleted_at.is_(None),
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+            )
+            .group_by(SocialProfile.user_id, User.id)
+            .order_by(copies.desc(), SocialProfile.username.asc())
+            .limit(min(limit, MAX_PAGE_SIZE))
+        )
+    ).all()
+    return [
+        FriendOwnerRead(
+            **_user_card(profile, account, "following").model_dump(),
+            copies=int(n or 1),
+        )
+        for profile, account, n in rows
+    ]
 
 
 # ── Follow requests (private accounts) ──

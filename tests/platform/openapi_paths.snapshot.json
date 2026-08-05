@@ -644,6 +644,9 @@
   "/v1/social/avatar/{user_id}": [
     "GET"
   ],
+  "/v1/social/cards/{card_ref}/owners": [
+    "GET"
+  ],
   "/v1/social/me": [
     "DELETE",
     "GET",
@@ -651,6 +654,9 @@
   ],
   "/v1/social/me/avatar": [
     "POST"
+  ],
+  "/v1/social/me/followers/{username}": [
+    "DELETE"
   ],
   "/v1/social/requests": [
     "GET"

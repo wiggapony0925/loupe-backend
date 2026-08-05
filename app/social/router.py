@@ -20,6 +20,7 @@ from app.social import avatars, service
 from app.social.schemas import (
     FollowRequestRead,
     FollowStateRead,
+    FriendOwnerRead,
     ProfileLikeRead,
     SocialCollectionRead,
     SocialMeRead,
@@ -60,6 +61,38 @@ async def put_me(
     db: AsyncSession = Depends(get_db),
 ) -> SocialProfileRead:
     return await service.upsert_me(db, user, payload)
+
+
+@router.delete(
+    "/me/followers/{username}",
+    status_code=204,
+    summary="Remove one of my followers",
+    dependencies=[Depends(follow_limit)],
+)
+async def remove_my_follower(
+    username: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Instagram's "Remove": they stop following me but aren't blocked —
+    following again is open (or a request, if my profile is private)."""
+    await service.remove_follower(db, user, username)
+
+
+@router.get(
+    "/cards/{card_ref}/owners",
+    response_model=list[FriendOwnerRead],
+    summary="Collectors I follow who own this card",
+)
+async def card_friend_owners(
+    card_ref: str,
+    limit: int = Query(20, ge=1, le=50),
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[FriendOwnerRead]:
+    """Card refs accept a local UUID or a composite upstream id
+    (`pokemontcg:base1-4`). Only people the viewer follows appear."""
+    return await service.friend_owners(db, user, card_ref, limit)
 
 
 @router.delete(

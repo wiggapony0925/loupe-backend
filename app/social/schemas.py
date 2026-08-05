@@ -71,6 +71,13 @@ class SocialUserCard(BaseModel):
     relationship: RelationshipState = "none"
 
 
+class FriendOwnerRead(SocialUserCard):
+    """A collector the viewer follows who owns the card in question —
+    powers the "N of your friends own this card" strip on card detail."""
+
+    copies: int = 1
+
+
 class SocialProfileView(BaseModel):
     """``GET /v1/social/users/{username}`` — a profile as seen by the viewer."""
 
@@ -159,6 +166,7 @@ __all__ = [
     "USERNAME_PATTERN",
     "FollowRequestRead",
     "FollowStateRead",
+    "FriendOwnerRead",
     "RelationshipState",
     "SocialCollectionItem",
     "SocialCollectionRead",

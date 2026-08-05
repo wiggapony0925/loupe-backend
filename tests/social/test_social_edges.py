@@ -146,3 +146,78 @@ async def test_deactivate_severs_everything_and_frees_the_handle(
     # Deactivating twice is a clean 404, not a 500.
     resp = await client.delete("/v1/social/me", headers=_headers(created_user))
     assert_envelope_error(resp, expected_status=404)
+
+
+@pytest.mark.asyncio
+async def test_remove_follower_kicks_but_does_not_block(
+    client, created_user, second_user
+):
+    await _claim(client, created_user, "kicker")
+    await _claim(client, second_user, "clingy")
+    await client.post("/v1/social/users/kicker/follow", headers=_headers(second_user))
+
+    resp = await client.delete(
+        "/v1/social/me/followers/clingy", headers=_headers(created_user)
+    )
+    assert resp.status_code == 204
+
+    # The edge is gone from both sides…
+    resp = await client.get("/v1/social/users/kicker", headers=_headers(second_user))
+    view = assert_envelope_ok(resp)
+    assert view["follower_count"] == 0
+    assert view["relationship"] == "none"
+
+    # …but they aren't blocked: following again works instantly.
+    resp = await client.post(
+        "/v1/social/users/kicker/follow", headers=_headers(second_user)
+    )
+    assert assert_envelope_ok(resp)["relationship"] == "following"
+
+    # Removing someone who doesn't follow you is a clean 404.
+    resp = await client.delete(
+        "/v1/social/me/followers/kicker", headers=_headers(created_user)
+    )
+    assert_envelope_error(resp, expected_status=404)
+
+
+@pytest.mark.asyncio
+async def test_friend_owners_shows_only_people_i_follow(
+    client, db_session, created_user, second_user
+):
+    from tests.factories import make_user
+
+    await _claim(client, created_user, "browser1")
+    await _claim(client, second_user, "friendly")
+    stranger = await make_user(db_session)
+    stranger_headers = _headers(stranger)
+    await client.put(
+        "/v1/social/me", json={"username": "stranger9"}, headers=stranger_headers
+    )
+
+    # friendly (followed) owns TWO copies; stranger9 (not followed) owns one.
+    row = await _add_graded_card(db_session, second_user)
+    from decimal import Decimal as _D
+
+    from app.models.grade import GradedCard as _GC
+
+    db_session.add(_GC(user_id=second_user.id, card_id=row.card_id, grade=_D("8.0")))
+    db_session.add(_GC(user_id=stranger.id, card_id=row.card_id, grade=_D("7.0")))
+    await db_session.commit()
+
+    await client.post(
+        "/v1/social/users/friendly/follow", headers=_headers(created_user)
+    )
+
+    resp = await client.get(
+        f"/v1/social/cards/{row.card_id}/owners", headers=_headers(created_user)
+    )
+    owners = assert_envelope_ok(resp)
+    assert [o["username"] for o in owners] == ["friendly"]
+    assert owners[0]["copies"] == 2
+    assert owners[0]["relationship"] == "following"
+
+    # Unknown ref → empty list, not an error.
+    resp = await client.get(
+        "/v1/social/cards/nosuch:ref-123/owners", headers=_headers(created_user)
+    )
+    assert assert_envelope_ok(resp) == []
