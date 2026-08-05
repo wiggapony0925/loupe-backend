@@ -39,6 +39,7 @@ from app.social.schemas import (
     RelationshipState,
     SocialCollectionItem,
     SocialCollectionRead,
+    SocialCollectionSet,
     SocialMeRead,
     SocialProfileRead,
     SocialProfileUpsert,
@@ -771,6 +772,48 @@ async def collection(
         )
     ).scalar_one()
 
+    # Whole-collection set breakdown (page-independent): "5 Evolving Skies".
+    set_name = func.coalesce(CardSet.name, "Other")
+    set_rows = (
+        await db.execute(
+            select(
+                set_name,
+                func.count(GradedCard.id),
+                func.sum(GradedCard.estimated_value_usd),
+            )
+            .select_from(GradedCard)
+            .join(Card, Card.id == GradedCard.card_id)
+            .outerjoin(CardSet, CardSet.id == Card.set_id)
+            .where(*owner_alive)
+            .group_by(set_name)
+            .order_by(func.sum(GradedCard.estimated_value_usd).desc().nulls_last())
+        )
+    ).all()
+    # Cover art = each set's most valuable card, resolved in one ordered scan.
+    cover_rows = (
+        await db.execute(
+            select(set_name, Card.image_url)
+            .select_from(GradedCard)
+            .join(Card, Card.id == GradedCard.card_id)
+            .outerjoin(CardSet, CardSet.id == Card.set_id)
+            .where(*owner_alive, Card.image_url.is_not(None))
+            .order_by(GradedCard.estimated_value_usd.desc().nulls_last())
+        )
+    ).all()
+    covers: dict[str, str] = {}
+    for name, img in cover_rows:
+        if name not in covers and img:
+            covers[name] = img
+    sets = [
+        SocialCollectionSet(
+            name=name,
+            count=int(n or 0),
+            estimated_value_usd=v,
+            cover_image_url=covers.get(name),
+        )
+        for name, n, v in set_rows
+    ]
+
     rows = (
         await db.execute(
             select(GradedCard, Card, CardSet)
@@ -810,7 +853,7 @@ async def collection(
         for grade, card, card_set in rows
     ]
     return SocialCollectionRead(
-        total_cards=total, estimated_value_usd=value, items=items
+        sets=sets, total_cards=total, estimated_value_usd=value, items=items
     )
 
 

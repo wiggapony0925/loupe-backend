@@ -153,12 +153,24 @@ class SocialCollectionItem(BaseModel):
     graded_at: datetime
 
 
+class SocialCollectionSet(BaseModel):
+    """One set within a shared collection — "they have 5 Evolving Skies"."""
+
+    name: str
+    count: int = 0
+    estimated_value_usd: Decimal | None = None
+    # Art of the set's most valuable card — the rail tile's cover.
+    cover_image_url: str | None = None
+
+
 class SocialCollectionRead(BaseModel):
     """``GET /v1/social/users/{username}/collection`` — privacy-gated vault."""
 
     total_cards: int = 0
     # Sum of grade-aware holding values (same basis as /v1/grades/summary).
     estimated_value_usd: Decimal | None = None
+    # Whole-collection set breakdown (not page-scoped), largest value first.
+    sets: list[SocialCollectionSet] = []
     items: list[SocialCollectionItem] = []
 
 
@@ -170,6 +182,7 @@ __all__ = [
     "RelationshipState",
     "SocialCollectionItem",
     "SocialCollectionRead",
+    "SocialCollectionSet",
     "SocialMeRead",
     "SocialProfileRead",
     "SocialProfileUpsert",

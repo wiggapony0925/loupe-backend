@@ -221,3 +221,59 @@ async def test_friend_owners_shows_only_people_i_follow(
         "/v1/social/cards/nosuch:ref-123/owners", headers=_headers(created_user)
     )
     assert assert_envelope_ok(resp) == []
+
+
+@pytest.mark.asyncio
+async def test_collection_includes_set_breakdown(
+    client, db_session, created_user, second_user
+):
+    """Sets ride the collection payload — "they have 5 Evolving Skies"."""
+    from decimal import Decimal as _D
+
+    from app.models.card import Card, CardSet
+    from app.models.enums import TcgEnum
+    from app.models.grade import GradedCard as _GC
+
+    await _claim(client, created_user, "setowner")
+    await _claim(client, second_user, "setviewer")
+
+    async def add(set_row, name, value):
+        card = Card(
+            set_id=set_row.id if set_row else None,
+            tcg=TcgEnum.pokemon,
+            name=name,
+            image_url=f"https://img.example/{name}.png",
+        )
+        db_session.add(card)
+        await db_session.flush()
+        db_session.add(
+            _GC(
+                user_id=created_user.id,
+                card_id=card.id,
+                grade=_D("9.0"),
+                estimated_value_usd=_D(value),
+            )
+        )
+
+    skies = CardSet(tcg=TcgEnum.pokemon, name="Evolving Skies", code="EVS")
+    base = CardSet(tcg=TcgEnum.pokemon, name="Base Set", code="BS")
+    promos = CardSet(tcg=TcgEnum.pokemon, name="Promos", code="PR")
+    db_session.add_all([skies, base, promos])
+    await db_session.flush()
+    await add(skies, "Umbreon", "600")
+    await add(skies, "Sylveon", "90")
+    await add(base, "Charizard", "400")
+    await add(promos, "Mystery", "10")
+    await db_session.commit()
+
+    resp = await client.get(
+        "/v1/social/users/setowner/collection", headers=_headers(second_user)
+    )
+    data = assert_envelope_ok(resp)
+    sets = data["sets"]
+    # Ordered by set value: Skies (690) > Base (400) > Promos (10).
+    assert [s["name"] for s in sets] == ["Evolving Skies", "Base Set", "Promos"]
+    assert [s["count"] for s in sets] == [2, 1, 1]
+    # Cover = the set's most valuable card's art.
+    assert sets[0]["cover_image_url"].endswith("Umbreon.png")
+    assert float(sets[0]["estimated_value_usd"]) == 690.0
