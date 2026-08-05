@@ -65,6 +65,8 @@ EXPECTED_TABLES: frozenset[str] = frozenset(
         "social_follow_requests",
         "social_follows",
         "social_profiles",
+        "social_profile_likes",
+        "social_profile_visits",
         "user_recents",
         "user_reports",
         "user_settings",

@@ -661,6 +661,10 @@
   "/v1/social/users/{username}/following": [
     "GET"
   ],
+  "/v1/social/users/{username}/like": [
+    "DELETE",
+    "POST"
+  ],
   "/v1/waitlist": [
     "POST"
   ],

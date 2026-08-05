@@ -86,10 +86,30 @@ class SocialProfileView(BaseModel):
     follower_count: int = 0
     following_count: int = 0
     card_count: int = 0
+    #: Collectors who have appreciated this collection.
+    like_count: int = 0
+    #: DISTINCT collectors who have opened this profile — not raw page hits,
+    #: and never the owner's own visits. See SocialProfileVisit.
+    view_count: int = 0
+    #: Whether the *requesting* viewer has liked it (drives the filled heart).
+    viewer_has_liked: bool = False
     relationship: RelationshipState = "none"
     # Whether the viewer may see the collection / follower lists (public
     # account, own profile, or an accepted follower of a private one).
     can_view_collection: bool = False
+
+
+class ProfileLikeRead(BaseModel):
+    """Result of a like/unlike — the new state plus the fresh total.
+
+    Returning the count means the client never has to guess or refetch the
+    profile to keep the heart and the number in agreement.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    liked: bool
+    like_count: int = 0
 
 
 class FollowStateRead(BaseModel):

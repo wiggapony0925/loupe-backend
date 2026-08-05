@@ -20,6 +20,7 @@ from app.social import avatars, service
 from app.social.schemas import (
     FollowRequestRead,
     FollowStateRead,
+    ProfileLikeRead,
     SocialCollectionRead,
     SocialMeRead,
     SocialProfileRead,
@@ -223,6 +224,34 @@ async def unfollow_user(
     db: AsyncSession = Depends(get_db),
 ) -> FollowStateRead:
     return await service.unfollow(db, user, username)
+
+
+@router.post(
+    "/users/{username}/like",
+    response_model=ProfileLikeRead,
+    summary="Appreciate a collector's collection",
+    dependencies=[Depends(follow_limit)],
+)
+async def like_user(
+    username: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProfileLikeRead:
+    return await service.like(db, user, username)
+
+
+@router.delete(
+    "/users/{username}/like",
+    response_model=ProfileLikeRead,
+    summary="Withdraw a like",
+    dependencies=[Depends(follow_limit)],
+)
+async def unlike_user(
+    username: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> ProfileLikeRead:
+    return await service.unlike(db, user, username)
 
 
 @router.get(

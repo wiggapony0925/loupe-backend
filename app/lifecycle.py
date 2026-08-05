@@ -108,6 +108,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         _log.warning("admin flag seed skipped: %s", exc)
 
+    # Give Community someone to follow on day one. An empty "Suggested for
+    # you" reads as a broken feature, not as an early one. Idempotent and
+    # non-destructive; never blocks startup.
+    try:
+        from app.config import get_settings
+        from app.db.session import get_sessionmaker
+        from app.social.seed import seed_demo_collectors
+
+        if not get_settings().is_test:
+            async with get_sessionmaker()() as db:
+                await seed_demo_collectors(db)
+    except Exception as exc:
+        _log.warning("demo collector seed skipped: %s", exc)
+
     # Warm the catalog art-hash index in the background so the FIRST scan on
     # a fresh instance doesn't pay the ~130k-row load. Never blocks startup.
     async def _warm_hash_index() -> None:

@@ -125,4 +125,81 @@ class SocialFollowRequest(Base):
     )
 
 
-__all__ = ["SocialFollow", "SocialFollowRequest", "SocialProfile"]
+class SocialProfileLike(Base):
+    """One collector's appreciation of another's collection.
+
+    A like is an edge, not a counter, so it can be un-done, attributed, and
+    counted honestly. Storing a running integer on the profile instead would
+    have made "unlike" unimplementable without a second source of truth about
+    who had already liked.
+    """
+
+    __tablename__ = "social_profile_likes"
+    __table_args__ = (
+        CheckConstraint("liker_id != profile_user_id", name="ck_social_like_not_self"),
+        # PK is (liker → profile); this serves the count/`has_liked` direction.
+        Index("ix_social_profile_likes_profile", "profile_user_id"),
+    )
+
+    liker_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    profile_user_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class SocialProfileVisit(Base):
+    """A distinct collector who has looked at this profile.
+
+    Deliberately *unique viewers*, not hits: one row per (viewer, profile),
+    upserted on conflict. Counting raw page loads would let a single curious
+    user — or the owner's own refreshes — inflate the number into something
+    meaningless, and it would grow this table without bound. Unique viewers
+    stays bounded by the follow graph's realistic size and is the figure a
+    collector actually wants ("how many people have seen my vault").
+
+    ``last_seen_at`` is refreshed on repeat visits so the row can support
+    "recent visitors" later without a schema change.
+    """
+
+    __tablename__ = "social_profile_visits"
+    __table_args__ = (
+        CheckConstraint(
+            "viewer_id != profile_user_id", name="ck_social_visit_not_self"
+        ),
+        Index("ix_social_profile_visits_profile", "profile_user_id"),
+    )
+
+    viewer_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    profile_user_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+__all__ = [
+    "SocialFollow",
+    "SocialFollowRequest",
+    "SocialProfile",
+    "SocialProfileLike",
+    "SocialProfileVisit",
+]
