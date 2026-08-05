@@ -16,6 +16,7 @@ from app.lifecycle import lifespan
 from app.platform.observability import init_otel, init_sentry
 from app.platform.startup_checks import validate_production_config
 from app.routers import billing, email_webhook
+from app.routers import notifications as me_notifications
 from app.routers.admin import admin_router
 from app.routers.analytics import home_feed as home
 from app.routers.analytics import portfolio_overview as analytics
@@ -106,6 +107,8 @@ def create_app() -> FastAPI:
     api_prefix = "/v1"
     app.include_router(auth.router, prefix=api_prefix)
     app.include_router(users.router, prefix=api_prefix)
+    # The signed-in user's inbox (/v1/me/notifications).
+    app.include_router(me_notifications.router, prefix=api_prefix)
     app.include_router(scanners.router, prefix=api_prefix)
     app.include_router(scans.router, prefix=api_prefix)
     app.include_router(cards.router, prefix=api_prefix)

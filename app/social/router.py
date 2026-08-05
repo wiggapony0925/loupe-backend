@@ -62,6 +62,20 @@ async def put_me(
     return await service.upsert_me(db, user, payload)
 
 
+@router.delete(
+    "/me",
+    status_code=204,
+    summary="Deactivate my community profile",
+)
+async def deactivate_me(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Removes the profile and severs every follow/request/like/visit edge.
+    The Loupe account itself is untouched — rejoining is claiming a handle."""
+    await service.deactivate(db, user)
+
+
 @router.post(
     "/me/avatar",
     response_model=SocialProfileRead,

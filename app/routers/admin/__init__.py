@@ -31,6 +31,7 @@ from app.routers.admin import (
     integrations,
     jobs,
     metrics,
+    notifications,
     pricecharting,
     pulse,
     retention,
@@ -49,6 +50,7 @@ admin_router.include_router(cloud.router)
 admin_router.include_router(audit.router)
 admin_router.include_router(env.router)
 admin_router.include_router(email.router)
+admin_router.include_router(notifications.router)
 admin_router.include_router(integrations.router)
 # Monetization.
 admin_router.include_router(revenue.router)

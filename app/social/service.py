@@ -220,6 +220,53 @@ async def upsert_me(
     return _profile_read(profile)
 
 
+async def deactivate(db: AsyncSession, user: User) -> None:
+    """Leave the community entirely.
+
+    Deletes the profile and severs EVERY social edge in both directions —
+    follows, pending requests, likes given and received, visit records —
+    so the account vanishes from search, lists, and counts at once and the
+    handle is immediately claimable again. The Loupe account itself (vault,
+    settings, billing) is untouched; rejoining is just claiming a handle.
+    """
+    profile = await _get_profile(db, user.id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No community profile")
+
+    uid = user.id
+    await db.execute(
+        delete(SocialFollow).where(
+            or_(SocialFollow.follower_id == uid, SocialFollow.followee_id == uid)
+        )
+    )
+    await db.execute(
+        delete(SocialFollowRequest).where(
+            or_(
+                SocialFollowRequest.requester_id == uid,
+                SocialFollowRequest.target_id == uid,
+            )
+        )
+    )
+    await db.execute(
+        delete(SocialProfileLike).where(
+            or_(
+                SocialProfileLike.liker_id == uid,
+                SocialProfileLike.profile_user_id == uid,
+            )
+        )
+    )
+    await db.execute(
+        delete(SocialProfileVisit).where(
+            or_(
+                SocialProfileVisit.viewer_id == uid,
+                SocialProfileVisit.profile_user_id == uid,
+            )
+        )
+    )
+    await db.delete(profile)
+    await db.commit()
+
+
 async def set_avatar(
     db: AsyncSession, user: User, body: bytes, content_type: str
 ) -> SocialProfileRead:

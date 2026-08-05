@@ -34,6 +34,7 @@ from app.models.fingerprint import Fingerprint
 from app.models.grade import GradedCard
 from app.models.identification import CardIdentification, IdentificationFeedback
 from app.models.kv_cache import KvCacheEntry
+from app.models.notification import Notification
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.price import PriceSnapshot
 from app.models.price_alert import PriceAlert
@@ -81,6 +82,7 @@ __all__ = [
     "JobPosting",
     "JobStatusEnum",
     "KvCacheEntry",
+    "Notification",
     "PortfolioSnapshot",
     "PriceAlert",
     "PriceAlertCondition",

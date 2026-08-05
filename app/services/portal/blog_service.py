@@ -12,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.blog import BlogPost
 from app.models.enums import BlogStatusEnum
 from app.schemas.portal import BlogPostCreate, BlogPostUpdate, slugify
+from app.utils.logger import get_logger
+
+logger = get_logger("services.blog")
 
 
 async def _unique_slug(
@@ -108,7 +111,38 @@ async def create(db: AsyncSession, payload: BlogPostCreate) -> BlogPost:
     db.add(row)
     await db.commit()
     await db.refresh(row)
+    if row.status == BlogStatusEnum.published.value:
+        await announce_published(db, row)
     return row
+
+
+async def announce_published(db: AsyncSession, row: BlogPost) -> int:
+    """Put a newly published article in every user's inbox (and on their phone).
+
+    Publishing used to reach nobody: the mobile inbox derived a "news" item by
+    polling the public post list, so an article only appeared if the user
+    happened to open the app and refresh. Now it's a real notification per
+    user, keyed ``blog:<post_id>`` so a post that's edited, unpublished and
+    republished can still only ever announce itself once.
+
+    Never raises — a notification failure must not fail the publish.
+    """
+    from app.services import notification_service
+
+    try:
+        return await notification_service.broadcast(
+            db,
+            category="news",
+            kind="blog_post",
+            title=row.title,
+            body=row.excerpt,
+            href=f"/blog/{row.slug}",
+            image_url=row.cover_image_url,
+            dedupe_prefix=f"blog:{row.id}",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("blog announce failed post=%s (%s)", row.id, exc)
+        return 0
 
 
 async def update(
@@ -116,6 +150,7 @@ async def update(
 ) -> BlogPost:
     row = await admin_get(db, post_id)
     data = payload.model_dump(exclude_unset=True)
+    just_published = False
 
     if data.get("slug"):
         row.slug = await _unique_slug(db, data.pop("slug"), exclude_id=row.id)
@@ -132,6 +167,7 @@ async def update(
         # First publish stamps published_at; never clobber an existing one.
         if row.status == BlogStatusEnum.published.value and row.published_at is None:
             row.published_at = datetime.now(UTC)
+            just_published = True
         data.pop("status")
 
     for key, value in data.items():
@@ -139,6 +175,8 @@ async def update(
 
     await db.commit()
     await db.refresh(row)
+    if just_published:
+        await announce_published(db, row)
     return row
 
 

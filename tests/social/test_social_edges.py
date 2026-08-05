@@ -111,3 +111,38 @@ async def test_unfollow_when_not_following_is_noop(client, created_user, second_
         "/v1/social/users/stranger2/follow", headers=_headers(created_user)
     )
     assert assert_envelope_ok(resp)["relationship"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_deactivate_severs_everything_and_frees_the_handle(
+    client, created_user, second_user
+):
+    await _claim(client, created_user, "leaver")
+    await _claim(client, second_user, "stayer")
+
+    # Build edges in both directions.
+    await client.post("/v1/social/users/stayer/follow", headers=_headers(created_user))
+    await client.post("/v1/social/users/leaver/follow", headers=_headers(second_user))
+
+    resp = await client.delete("/v1/social/me", headers=_headers(created_user))
+    assert resp.status_code == 204
+
+    # Gone from search; the other side's counts no longer include them.
+    resp = await client.get(
+        "/v1/social/search", params={"q": "leaver"}, headers=_headers(second_user)
+    )
+    assert assert_envelope_ok(resp) == []
+    resp = await client.get("/v1/social/users/stayer", headers=_headers(second_user))
+    view = assert_envelope_ok(resp)
+    assert view["follower_count"] == 0
+    assert view["following_count"] == 0
+
+    # The handle is claimable again — by anyone.
+    resp = await client.put(
+        "/v1/social/me", json={"username": "leaver"}, headers=_headers(second_user)
+    )
+    assert assert_envelope_ok(resp)["username"] == "leaver"
+
+    # Deactivating twice is a clean 404, not a 500.
+    resp = await client.delete("/v1/social/me", headers=_headers(created_user))
+    assert_envelope_error(resp, expected_status=404)

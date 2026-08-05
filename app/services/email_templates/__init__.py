@@ -51,6 +51,12 @@ from app.services.email_templates.security import (
     build_password_reset,
     build_reset_unavailable,
 )
+from app.services.email_templates.social import (
+    build_follow_accepted,
+    build_follow_request,
+    build_new_follower,
+    build_profile_likes,
+)
 from app.services.email_templates.waitlist import (
     build_waitlist_confirmation,
     build_waitlist_invite,
@@ -63,9 +69,12 @@ __all__ = [
     "build_ban_notice",
     "build_blog_announcement",
     "build_custom_announcement",
+    "build_follow_accepted",
+    "build_follow_request",
     "build_free_limit_reached",
     "build_mfa_disabled",
     "build_mfa_enabled",
+    "build_new_follower",
     "build_new_sign_in",
     "build_password_changed",
     "build_password_reset",
@@ -75,6 +84,7 @@ __all__ = [
     "build_pro_activated",
     "build_pro_canceled",
     "build_pro_expiring",
+    "build_profile_likes",
     "build_reset_unavailable",
     "build_set_completed",
     "build_statement_ready",

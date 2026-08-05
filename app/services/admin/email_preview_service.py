@@ -196,6 +196,22 @@ _RENDERERS = {
         _SAMPLE_USER, "Marketplace spam"
     ),
     "admin_granted": lambda: email_service.build_admin_granted(_SAMPLE_USER),
+    "new_follower": lambda: email_service.build_new_follower(
+        follower_name="Mika Tan",
+        follower_username="mikacollects",
+        follower_collection_count=412,
+    ),
+    "follow_request": lambda: email_service.build_follow_request(
+        requester_name="Mika Tan", requester_username="mikacollects"
+    ),
+    "follow_accepted": lambda: email_service.build_follow_accepted(
+        owner_name="Mika Tan", owner_username="mikacollects"
+    ),
+    "profile_likes": lambda: email_service.build_profile_likes(
+        unsub_url=_sample_unsub_url(),
+        total_likes=18,
+        recent_names=["Mika Tan", "Ade O.", "Priya R."],
+    ),
     "careers_update": _careers_preview,
 }
 
@@ -338,6 +354,30 @@ TEMPLATES: tuple[TemplateSpec, ...] = (
         "Admin granted",
         "Account",
         "Sent when a user is given developer-portal access.",
+    ),
+    TemplateSpec(
+        "new_follower",
+        "New follower",
+        "Community",
+        "Sent when someone follows a public profile.",
+    ),
+    TemplateSpec(
+        "follow_request",
+        "Follow request",
+        "Community",
+        "Sent when someone asks to follow a PRIVATE profile — needs approval.",
+    ),
+    TemplateSpec(
+        "follow_accepted",
+        "Follow accepted",
+        "Community",
+        "Sent to the requester when a private account approves them.",
+    ),
+    TemplateSpec(
+        "profile_likes",
+        "Profile likes digest",
+        "Community",
+        "Periodic summary of profile likes (never one email per like).",
     ),
     TemplateSpec(
         "careers_update",

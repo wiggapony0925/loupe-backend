@@ -52,6 +52,7 @@ EXPECTED_TABLES: frozenset[str] = frozenset(
         "job_applications",
         "job_postings",
         "kv_cache",
+        "notifications",
         "portfolio_snapshots",
         "price_alerts",
         "price_snapshots",
