@@ -39,7 +39,7 @@ OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 )
-OVERPASS_TIMEOUT_S = 20.0
+OVERPASS_TIMEOUT_S = 12.0
 #: OSM fair-use etiquette: identify the app with a contactable User-Agent.
 USER_AGENT = "Loupe/1.0 (card-shop locator; https://loupe.app)"
 CACHE_TTL_S = 24 * 3600
