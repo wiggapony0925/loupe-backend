@@ -682,6 +682,9 @@
   "/v1/social/users/{username}/collection": [
     "GET"
   ],
+  "/v1/social/users/{username}/collections/{collection_id}": [
+    "GET"
+  ],
   "/v1/social/users/{username}/follow": [
     "DELETE",
     "POST"

@@ -25,6 +25,7 @@ from app.social.schemas import (
     ProfileLikeRead,
     SocialCollectionRead,
     SocialMeRead,
+    SocialPortfolioItemsRead,
     SocialProfileRead,
     SocialProfileUpsert,
     SocialProfileView,
@@ -360,6 +361,24 @@ async def view_collection(
     db: AsyncSession = Depends(get_db),
 ) -> SocialCollectionRead:
     return await service.collection(db, user, username, limit, offset)
+
+
+@router.get(
+    "/users/{username}/collections/{collection_id}",
+    response_model=SocialPortfolioItemsRead,
+    summary="One of a collector's portfolios, drilled into (privacy-gated)",
+)
+async def view_portfolio(
+    username: str,
+    collection_id: uuid.UUID,
+    limit: int = Query(60, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> SocialPortfolioItemsRead:
+    return await service.portfolio_items(
+        db, user, username, collection_id, limit, offset
+    )
 
 
 __all__ = ["router"]

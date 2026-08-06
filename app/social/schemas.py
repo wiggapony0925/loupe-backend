@@ -187,19 +187,53 @@ class SocialCollectionSet(BaseModel):
     cover_image_url: str | None = None
 
 
+class SocialSealedItem(BaseModel):
+    """One sealed SKU a collector holds (boxes, ETBs, bundles…)."""
+
+    product_id: uuid.UUID
+    name: str
+    set_name: str | None = None
+    product_type: str
+    tcg: str
+    image_url: str | None = None
+    quantity: int = 1
+    # TOTAL for the row (unit value x quantity) — matches /v1/grades/summary.
+    estimated_value_usd: Decimal | None = None
+
+
 class SocialCollectionRead(BaseModel):
     """``GET /v1/social/users/{username}/collection`` — privacy-gated vault."""
 
     total_cards: int = 0
     # Sum of grade-aware holding values (same basis as /v1/grades/summary).
     estimated_value_usd: Decimal | None = None
+    # Sealed rollup: UNOPENED holdings only, value = unit x quantity — the
+    # exact combinedValueUsd basis the vault summary uses.
+    sealed_count: int = 0
+    sealed_value_usd: Decimal | None = None
+    # Cards + sealed — the headline number a profile should show.
+    total_value_usd: Decimal | None = None
     # The collector's curated portfolios (binders), largest value first.
     portfolios: list[SocialPortfolioRead] = []
+    # Sealed products shelf, largest value first (server-capped like sets).
+    sealed: list[SocialSealedItem] = []
     # How many sets the vault spans in total — ``sets`` is capped to the top
     # few by value, so the client can say "+N more" without math.
     total_sets: int = 0
     # Whole-collection set breakdown (not page-scoped), largest value first.
     sets: list[SocialCollectionSet] = []
+    items: list[SocialCollectionItem] = []
+
+
+class SocialPortfolioItemsRead(BaseModel):
+    """``GET /v1/social/users/{username}/collections/{id}`` — one binder,
+    drilled into: the cards inside a single curated portfolio."""
+
+    id: uuid.UUID
+    name: str
+    color: str | None = None
+    count: int = 0
+    estimated_value_usd: Decimal | None = None
     items: list[SocialCollectionItem] = []
 
 
@@ -214,9 +248,11 @@ __all__ = [
     "SocialCollectionRead",
     "SocialCollectionSet",
     "SocialMeRead",
+    "SocialPortfolioItemsRead",
     "SocialPortfolioRead",
     "SocialProfileRead",
     "SocialProfileUpsert",
     "SocialProfileView",
+    "SocialSealedItem",
     "SocialUserCard",
 ]

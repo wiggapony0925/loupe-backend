@@ -378,3 +378,134 @@ async def test_at_me_alias_resolves_server_side(client, created_user, second_use
     await _claim(client, second_user, "notme")
     resp = await client.get("/v1/social/users/me", headers=_headers(second_user))
     assert assert_envelope_ok(resp)["username"] == "notme"
+
+
+@pytest.mark.asyncio
+async def test_collection_includes_sealed_category(
+    client, db_session, created_user, second_user
+):
+    """Sealed products are a first-class category on shared profiles, valued
+    exactly like /v1/grades/summary: unopened only, unit value x quantity —
+    and the combined headline (cards + sealed) rides the payload."""
+    from datetime import UTC, datetime
+    from decimal import Decimal as _D
+
+    from app.models.enums import SealedProductTypeEnum, TcgEnum
+    from app.models.sealed import SealedHolding, SealedProduct
+
+    await _claim(client, created_user, "sealedowner")
+    await _claim(client, second_user, "sealedviewer")
+    await _add_graded_card(db_session, created_user, "100.00")
+
+    product = SealedProduct(
+        tcg=TcgEnum.pokemon,
+        product_type=SealedProductTypeEnum.booster_box,
+        name="151 Booster Box",
+        set_name="Scarlet & Violet 151",
+        image_url="https://img.example/151-bb.png",
+    )
+    db_session.add(product)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            SealedHolding(  # 2 x $200 → $400 in the rollup
+                user_id=created_user.id,
+                product_id=product.id,
+                quantity=2,
+                purchase_price_usd=_D("150.00"),
+                estimated_value_usd=_D("200.00"),
+            ),
+            SealedHolding(  # opened → excluded
+                user_id=created_user.id,
+                product_id=product.id,
+                quantity=1,
+                estimated_value_usd=_D("500.00"),
+                opened_at=datetime.now(UTC),
+            ),
+            SealedHolding(  # deleted → excluded
+                user_id=created_user.id,
+                product_id=product.id,
+                quantity=1,
+                estimated_value_usd=_D("900.00"),
+                deleted_at=datetime.now(UTC),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/v1/social/users/sealedowner/collection", headers=_headers(second_user)
+    )
+    data = assert_envelope_ok(resp)
+    assert data["sealed_count"] == 2
+    assert float(data["sealed_value_usd"]) == 400.0
+    # Headline = cards ($100) + sealed ($400).
+    assert float(data["total_value_usd"]) == 500.0
+    assert len(data["sealed"]) == 1
+    tile = data["sealed"][0]
+    assert tile["name"] == "151 Booster Box"
+    assert tile["product_type"] == "booster_box"
+    assert tile["quantity"] == 2
+    assert float(tile["estimated_value_usd"]) == 400.0
+    # Cost basis stays private, exactly like card items.
+    assert "purchase_price_usd" not in tile
+
+
+@pytest.mark.asyncio
+async def test_portfolio_drilldown_endpoint(
+    client, db_session, created_user, second_user
+):
+    """GET /users/{u}/collections/{id} — one binder's cards, value-first;
+    404 on foreign/unknown binder ids, 403 behind the privacy gate."""
+    import uuid as _uuid
+
+    from app.models.collection import Collection, CollectionItem
+
+    await _claim(client, created_user, "drillowner")
+    await _claim(client, second_user, "drillviewer")
+
+    binder = Collection(user_id=created_user.id, name="Eeveelutions", color="#7cf")
+    other = Collection(user_id=created_user.id, name="Everything Else")
+    db_session.add_all([binder, other])
+    await db_session.flush()
+
+    cheap = await _add_graded_card(db_session, created_user, "50.00")
+    pricey = await _add_graded_card(db_session, created_user, "300.00")
+    stray = await _add_graded_card(db_session, created_user, "999.00")
+    db_session.add_all(
+        [
+            CollectionItem(collection_id=binder.id, graded_card_id=cheap.id),
+            CollectionItem(collection_id=binder.id, graded_card_id=pricey.id),
+            CollectionItem(collection_id=other.id, graded_card_id=stray.id),
+        ]
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/v1/social/users/drillowner/collections/{binder.id}",
+        headers=_headers(second_user),
+    )
+    data = assert_envelope_ok(resp)
+    assert data["name"] == "Eeveelutions"
+    assert data["count"] == 2
+    assert float(data["estimated_value_usd"]) == 350.0
+    values = [float(i["estimated_value_usd"]) for i in data["items"]]
+    assert values == [300.0, 50.0]  # value-first, the stray card absent
+
+    missing = await client.get(
+        f"/v1/social/users/drillowner/collections/{_uuid.uuid4()}",
+        headers=_headers(second_user),
+    )
+    assert_envelope_error(missing, expected_status=404)
+
+    # Private + not following → the binder is invisible too.
+    await client.put(
+        "/v1/social/me",
+        json={"username": "drillowner", "is_private": True},
+        headers=_headers(created_user),
+    )
+    gated = await client.get(
+        f"/v1/social/users/drillowner/collections/{binder.id}",
+        headers=_headers(second_user),
+    )
+    assert_envelope_error(gated, expected_status=403)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, select
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.card import Card, CardSet
 from app.models.collection import Collection, CollectionItem
 from app.models.grade import GradedCard
+from app.models.sealed import SealedHolding, SealedProduct
 from app.models.user import User
 from app.social.models import (
     SocialFollow,
@@ -21,7 +23,9 @@ from app.social.schemas import (
     SocialCollectionItem,
     SocialCollectionRead,
     SocialCollectionSet,
+    SocialPortfolioItemsRead,
     SocialPortfolioRead,
+    SocialSealedItem,
 )
 from app.social.services._common import (
     MAX_PAGE_SIZE,
@@ -84,6 +88,11 @@ async def friend_owners(
 
 
 MAX_SET_TILES = 8
+MAX_SEALED_TILES = 12
+
+
+def _enum_value(v: object) -> str:
+    return v.value if hasattr(v, "value") else str(v)
 
 
 async def collection(
@@ -156,6 +165,49 @@ async def collection(
             cover_image_url=port_covers.get(coll.id),
         )
         for coll, n, v in port_rows
+    ]
+
+    # Sealed shelf — boxes/ETBs are a first-class category, valued exactly
+    # like /v1/grades/summary: UNOPENED holdings only, unit value x quantity.
+    sealed_alive = (
+        SealedHolding.user_id == profile.user_id,
+        SealedHolding.deleted_at.is_(None),
+        SealedHolding.opened_at.is_(None),
+    )
+    row_value = SealedHolding.estimated_value_usd * SealedHolding.quantity
+    sealed_count, sealed_value = (
+        await db.execute(
+            select(
+                func.coalesce(func.sum(SealedHolding.quantity), 0),
+                func.sum(row_value),
+            ).where(*sealed_alive)
+        )
+    ).one()
+    sealed_rows = (
+        await db.execute(
+            select(SealedHolding, SealedProduct)
+            .join(SealedProduct, SealedProduct.id == SealedHolding.product_id)
+            .where(*sealed_alive)
+            .order_by(row_value.desc().nulls_last(), SealedProduct.name.asc())
+            .limit(MAX_SEALED_TILES)
+        )
+    ).all()
+    sealed = [
+        SocialSealedItem(
+            product_id=product.id,
+            name=product.name,
+            set_name=product.set_name,
+            product_type=_enum_value(product.product_type),
+            tcg=_enum_value(product.tcg),
+            image_url=product.image_url,
+            quantity=holding.quantity,
+            estimated_value_usd=(
+                holding.estimated_value_usd * holding.quantity
+                if holding.estimated_value_usd is not None
+                else None
+            ),
+        )
+        for holding, product in sealed_rows
     ]
 
     # Whole-collection set breakdown (page-independent): "5 Evolving Skies".
@@ -241,11 +293,114 @@ async def collection(
         )
         for grade, card, card_set in rows
     ]
+    total_value = None
+    if value is not None or sealed_value is not None:
+        total_value = (value or Decimal(0)) + (sealed_value or Decimal(0))
     return SocialCollectionRead(
         portfolios=portfolios,
+        sealed=sealed,
+        sealed_count=int(sealed_count or 0),
+        sealed_value_usd=sealed_value,
+        total_value_usd=total_value,
         sets=sets,
         total_sets=len(all_sets),
         total_cards=total,
+        estimated_value_usd=value,
+        items=items,
+    )
+
+
+async def portfolio_items(
+    db: AsyncSession,
+    viewer: User,
+    username: str,
+    collection_id: uuid.UUID,
+    limit: int,
+    offset: int,
+) -> SocialPortfolioItemsRead:
+    """One curated binder, drilled into — the cards inside it, value-first.
+
+    Same privacy gate as the whole-collection view; a binder id that isn't
+    this collector's is a 404 (no probing other people's binder ids).
+    """
+    profile, _ = await resolve_username(db, username, viewer)
+    rel = await relationship_between(db, viewer.id, profile.user_id)
+    if not can_view(profile, rel):
+        raise HTTPException(status_code=403, detail="This account is private")
+
+    coll = (
+        await db.execute(
+            select(Collection).where(
+                Collection.id == collection_id,
+                Collection.user_id == profile.user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if coll is None:
+        raise HTTPException(status_code=404, detail="No such collection")
+
+    live = (
+        CollectionItem.collection_id == coll.id,
+        GradedCard.deleted_at.is_(None),
+    )
+    total = await count(
+        db,
+        select(func.count())
+        .select_from(CollectionItem)
+        .join(GradedCard, GradedCard.id == CollectionItem.graded_card_id)
+        .where(*live),
+    )
+    value = (
+        await db.execute(
+            select(func.sum(GradedCard.estimated_value_usd))
+            .select_from(CollectionItem)
+            .join(GradedCard, GradedCard.id == CollectionItem.graded_card_id)
+            .where(*live)
+        )
+    ).scalar_one()
+
+    rows = (
+        await db.execute(
+            select(GradedCard, Card, CardSet)
+            .select_from(CollectionItem)
+            .join(GradedCard, GradedCard.id == CollectionItem.graded_card_id)
+            .join(Card, Card.id == GradedCard.card_id)
+            .outerjoin(CardSet, CardSet.id == Card.set_id)
+            .where(*live)
+            .order_by(
+                GradedCard.estimated_value_usd.desc().nulls_last(),
+                GradedCard.id.desc(),
+            )
+            .limit(min(limit, MAX_PAGE_SIZE))
+            .offset(offset)
+        )
+    ).all()
+    items = [
+        SocialCollectionItem(
+            id=grade.id,
+            card_id=grade.card_id,
+            card_name=card.name if card else None,
+            card_image_url=card.image_url if card else None,
+            card_set_name=card_set.name if card_set else None,
+            card_number=card.number if card else None,
+            card_tcg=(card.tcg.value if card and hasattr(card.tcg, "value") else None),
+            grade=grade.grade,
+            house=_enum_value(grade.house),
+            condition=(
+                grade.condition.value
+                if grade.condition is not None and hasattr(grade.condition, "value")
+                else None
+            ),
+            estimated_value_usd=grade.estimated_value_usd,
+            graded_at=grade.graded_at,
+        )
+        for grade, card, card_set in rows
+    ]
+    return SocialPortfolioItemsRead(
+        id=coll.id,
+        name=coll.name,
+        color=coll.color,
+        count=total,
         estimated_value_usd=value,
         items=items,
     )

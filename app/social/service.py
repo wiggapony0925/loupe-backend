@@ -11,7 +11,7 @@ from app.social.services._common import (
     MAX_PAGE_SIZE,
     RESERVED_USERNAMES,
 )
-from app.social.services.collections import collection, friend_owners
+from app.social.services.collections import collection, friend_owners, portfolio_items
 from app.social.services.discovery import discover, search, suggested
 from app.social.services.engagement import like, unlike, view_profile
 from app.social.services.graph import (
@@ -48,6 +48,7 @@ __all__ = [
     "get_me",
     "incoming_requests",
     "like",
+    "portfolio_items",
     "remove_follower",
     "search",
     "set_avatar",
