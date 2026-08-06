@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any
 
 import httpx
@@ -32,8 +33,15 @@ from app.utils.logger import get_logger
 
 logger = get_logger("services.stores")
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-OVERPASS_TIMEOUT_S = 12.0
+#: Tried in order — the main instance 504s under load; Kumi is a large
+#: community mirror. Both are free.
+OVERPASS_URLS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+)
+OVERPASS_TIMEOUT_S = 20.0
+#: OSM fair-use etiquette: identify the app with a contactable User-Agent.
+USER_AGENT = "Loupe/1.0 (card-shop locator; https://loupe.app)"
 CACHE_TTL_S = 24 * 3600
 MAX_RESULTS = 60
 
@@ -42,18 +50,14 @@ CORE_SHOP_TAGS = {"games", "collector", "trading_cards", "video_games"}
 #: …and tags that often carry cards (toy stores, comic shops, hobby shops).
 LIKELY_SHOP_TAGS = {"toys", "hobby", "comics", "anime", "books", "stationery"}
 
-#: Name substrings that mark a card shop regardless of its shop tag.
-NAME_HINTS = (
-    "card",
-    "tcg",
-    "pokemon",
-    "pokémon",
-    "magic",
-    "yugioh",
-    "yu-gi-oh",
-    "collectible",
-    "comic",
-    "game",
+#: WORD-BOUNDED name matching — substring checks classed "Cardullo's
+#: Gourmet Shoppe" and "Riccardi" (a boutique) as card stores. A strong
+#: match promotes any shop to a card store; a likely match keeps it as a
+#: probable carrier.
+STRONG_NAME_RE = re.compile(r"\bcards?\b|\btcg\b|trading.?cards?", re.IGNORECASE)
+LIKELY_NAME_RE = re.compile(
+    r"pok[eé]mon|yu.?gi.?oh|collectib|\bcomics?\b|\bgames?\b|\bhobby\b",
+    re.IGNORECASE,
 )
 
 
@@ -83,22 +87,21 @@ def _overpass_query(lat: float, lng: float, radius_m: int) -> str:
   nwr["shop"~"^({shops})$"](around:{radius_m},{lat},{lng});
   nwr["shop"]["name"~"{name_re}",i](around:{radius_m},{lat},{lng});
 );
-out center tags {MAX_RESULTS * 3};
+out center {MAX_RESULTS * 3};
 """.strip()
 
 
 def _category_for(shop_tag: str, name: str) -> str | None:
     """The label a client renders under the pin — backend-owned wording."""
-    lowered = name.lower()
-    if shop_tag in CORE_SHOP_TAGS or "tcg" in lowered or "card" in lowered:
+    if shop_tag in CORE_SHOP_TAGS or STRONG_NAME_RE.search(name):
         return "Card & game store"
-    if shop_tag == "comics" or "comic" in lowered:
+    if shop_tag == "comics":
         return "Comic shop"
     if shop_tag == "toys":
         return "Toy store"
     if shop_tag in ("hobby", "anime"):
         return "Hobby shop"
-    if any(h in lowered for h in NAME_HINTS):
+    if LIKELY_NAME_RE.search(name):
         return "May carry cards"
     return None  # not plausibly a card carrier → dropped
 
@@ -160,12 +163,20 @@ def _parse_elements(
 async def _fetch_overpass(
     lat: float, lng: float, radius_m: int
 ) -> list[dict[str, Any]]:
-    async with httpx.AsyncClient(timeout=OVERPASS_TIMEOUT_S + 3) as client:
-        resp = await client.post(
-            OVERPASS_URL, data={"data": _overpass_query(lat, lng, radius_m)}
-        )
-        resp.raise_for_status()
-        return resp.json().get("elements", [])
+    query = _overpass_query(lat, lng, radius_m)
+    last_error: Exception | None = None
+    async with httpx.AsyncClient(
+        timeout=OVERPASS_TIMEOUT_S + 5, headers={"User-Agent": USER_AGENT}
+    ) as client:
+        for url in OVERPASS_URLS:
+            try:
+                resp = await client.post(url, data={"data": query})
+                resp.raise_for_status()
+                return resp.json().get("elements", [])
+            except Exception as exc:  # try the next mirror
+                last_error = exc
+                logger.warning("Overpass endpoint %s failed: %s", url, exc)
+    raise last_error if last_error else RuntimeError("no overpass endpoints")
 
 
 async def nearby_stores(
