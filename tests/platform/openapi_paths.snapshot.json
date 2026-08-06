@@ -563,6 +563,9 @@
   "/v1/public/sparklines": [
     "GET"
   ],
+  "/v1/public/stores/nearby": [
+    "GET"
+  ],
   "/v1/public/trending": [
     "GET"
   ],

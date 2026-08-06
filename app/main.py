@@ -36,6 +36,7 @@ from app.routers.portal import careers as portal_careers
 from app.routers.portal import waitlist as portal_waitlist
 from app.routers.public import share as public_share
 from app.routers.public import storefront as public
+from app.routers.public import stores as public_stores
 from app.routers.public import unsubscribe as public_unsubscribe
 from app.routers.public import verify_email as public_verify_email
 from app.social.router import router as social_router
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(scans.router, prefix=api_prefix)
     app.include_router(cards.router, prefix=api_prefix)
     app.include_router(public.router, prefix=api_prefix)
+    app.include_router(public_stores.router, prefix=api_prefix)
     app.include_router(public_share.router, prefix=api_prefix)
     app.include_router(public_unsubscribe.router, prefix=api_prefix)
     app.include_router(public_verify_email.router, prefix=api_prefix)
