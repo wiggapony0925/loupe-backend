@@ -1,4 +1,4 @@
-"""Profile-picture storage on the blob store (S3-compatible, stub in tests).
+"""Profile-picture storage on the unified blob store (GCS in prod).
 
 Avatars are small public images, so they skip the presigned-URL dance the
 scan/report pipelines use: bytes live at a deterministic key and are served
@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 
 from app.config import get_settings
-from app.platform.s3 import get_s3_client
+from app.platform import blob_store
 from app.social.models import SocialProfile
 
 # Conservative caps: plenty for a square profile picture, small enough that
@@ -23,6 +23,12 @@ ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 def _key(user_id: uuid.UUID) -> str:
     return f"social/avatars/{user_id}"
+
+
+def _bucket() -> str:
+    """GCS bucket in prod (``GCS_BUCKET``), S3/stub bucket elsewhere."""
+    s = get_settings()
+    return s.gcs_bucket or s.s3_bucket
 
 
 def avatar_url(profile: SocialProfile) -> str | None:
@@ -45,9 +51,8 @@ async def store_avatar(profile: SocialProfile, body: bytes, content_type: str) -
     key, is what invalidates client caches. Caller commits.
     """
     key = _key(profile.user_id)
-    s3 = get_s3_client()
-    await s3.put_object(
-        bucket=get_settings().s3_bucket,
+    await blob_store.put_object(
+        bucket=_bucket(),
         key=key,
         body=body,
         content_type=content_type,
@@ -59,8 +64,7 @@ async def store_avatar(profile: SocialProfile, body: bytes, content_type: str) -
 
 async def load_avatar(user_id: uuid.UUID) -> bytes | None:
     """Raw picture bytes for the serving endpoint (None = never uploaded)."""
-    s3 = get_s3_client()
-    return await s3.get_object(bucket=get_settings().s3_bucket, key=_key(user_id))
+    return await blob_store.get_object(bucket=_bucket(), key=_key(user_id))
 
 
 __all__ = [
