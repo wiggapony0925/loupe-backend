@@ -273,6 +273,7 @@ async def test_collection_includes_set_breakdown(
     sets = data["sets"]
     # Ordered by set value: Skies (690) > Base (400) > Promos (10).
     assert [s["name"] for s in sets] == ["Evolving Skies", "Base Set", "Promos"]
+    assert data["total_sets"] == 3  # server-side cap metadata
     assert [s["count"] for s in sets] == [2, 1, 1]
     # Cover = the set's most valuable card's art.
     assert sets[0]["cover_image_url"].endswith("Umbreon.png")
@@ -322,3 +323,58 @@ async def test_collection_includes_curated_portfolios(
     assert float(ports[0]["estimated_value_usd"]) == 250.0
     assert ports[0]["cover_image_url"].endswith("cover-star.png")
     assert ports[1]["count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_discover_is_ranked_and_disjoint(
+    client, db_session, created_user, second_user
+):
+    """/discover composes the Community page server-side: most-followed
+    first, featured/more disjoint, followed collectors excluded."""
+    from tests.factories import make_user
+
+    await _claim(client, created_user, "watcher")
+    await _claim(client, second_user, "popular")
+    third = await make_user(db_session)
+    await client.put(
+        "/v1/social/me", json={"username": "quiet"}, headers=_headers(third)
+    )
+    # Make "popular" popular: quiet follows them.
+    await client.post("/v1/social/users/popular/follow", headers=_headers(third))
+
+    resp = await client.get("/v1/social/discover", headers=_headers(created_user))
+    data = assert_envelope_ok(resp)
+    names = [u["username"] for u in data["featured"]] + [
+        u["username"] for u in data["more"]
+    ]
+    assert names[0] == "popular"  # ranked by follower count first
+    assert "watcher" not in names  # never yourself
+    assert len(names) == len(set(names))  # disjoint + unique
+
+    # Following someone removes them from the next compose.
+    await client.post("/v1/social/users/popular/follow", headers=_headers(created_user))
+    resp = await client.get("/v1/social/discover", headers=_headers(created_user))
+    data = assert_envelope_ok(resp)
+    names = [u["username"] for u in data["featured"]] + [
+        u["username"] for u in data["more"]
+    ]
+    assert "popular" not in names
+
+
+@pytest.mark.asyncio
+async def test_at_me_alias_resolves_server_side(client, created_user, second_user):
+    """`/users/@me` (and `me`) resolve to the caller's own profile — clients
+    never need to learn their own handle before linking to it."""
+    resp = await client.get("/v1/social/users/@me", headers=_headers(created_user))
+    assert_envelope_error(resp, expected_status=404)  # unclaimed yet
+
+    await _claim(client, created_user, "aliasme")
+    resp = await client.get("/v1/social/users/@me", headers=_headers(created_user))
+    view = assert_envelope_ok(resp)
+    assert view["username"] == "aliasme"
+    assert view["relationship"] == "self"
+
+    # The alias is ALWAYS the caller — never someone else's profile.
+    await _claim(client, second_user, "notme")
+    resp = await client.get("/v1/social/users/me", headers=_headers(second_user))
+    assert assert_envelope_ok(resp)["username"] == "notme"

@@ -647,6 +647,9 @@
   "/v1/social/cards/{card_ref}/owners": [
     "GET"
   ],
+  "/v1/social/discover": [
+    "GET"
+  ],
   "/v1/social/me": [
     "DELETE",
     "GET",

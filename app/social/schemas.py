@@ -119,6 +119,18 @@ class ProfileLikeRead(BaseModel):
     like_count: int = 0
 
 
+class DiscoverRead(BaseModel):
+    """``GET /v1/social/discover`` — the Community page, composed server-side.
+
+    ``featured`` and ``more`` are guaranteed DISJOINT and ranked by the
+    backend (most-followed, then largest collection, then newest), so
+    clients render the two shelves verbatim — no slicing, no dedupe.
+    """
+
+    featured: list[SocialUserCard] = []
+    more: list[SocialUserCard] = []
+
+
 class FollowStateRead(BaseModel):
     """Result of a follow/unfollow action — the new relationship."""
 
@@ -183,6 +195,9 @@ class SocialCollectionRead(BaseModel):
     estimated_value_usd: Decimal | None = None
     # The collector's curated portfolios (binders), largest value first.
     portfolios: list[SocialPortfolioRead] = []
+    # How many sets the vault spans in total — ``sets`` is capped to the top
+    # few by value, so the client can say "+N more" without math.
+    total_sets: int = 0
     # Whole-collection set breakdown (not page-scoped), largest value first.
     sets: list[SocialCollectionSet] = []
     items: list[SocialCollectionItem] = []
@@ -190,6 +205,7 @@ class SocialCollectionRead(BaseModel):
 
 __all__ = [
     "USERNAME_PATTERN",
+    "DiscoverRead",
     "FollowRequestRead",
     "FollowStateRead",
     "FriendOwnerRead",

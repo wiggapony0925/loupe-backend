@@ -18,6 +18,7 @@ from app.models.user import User
 from app.platform.rate_limit import rate_limit
 from app.social import avatars, service
 from app.social.schemas import (
+    DiscoverRead,
     FollowRequestRead,
     FollowStateRead,
     FriendOwnerRead,
@@ -172,6 +173,21 @@ async def search_users(
     db: AsyncSession = Depends(get_db),
 ) -> list[SocialUserCard]:
     return await service.search(db, user, q, limit)
+
+
+@router.get(
+    "/discover",
+    response_model=DiscoverRead,
+    summary="The Community page's people shelves, composed server-side",
+    dependencies=[Depends(search_limit)],
+)
+async def discover_collectors(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> DiscoverRead:
+    """Ranked and split by the backend — `featured` and `more` are disjoint;
+    clients render them verbatim (no slicing, no dedupe, no ordering)."""
+    return await service.discover(db, user)
 
 
 @router.get(
