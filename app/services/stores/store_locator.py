@@ -39,15 +39,18 @@ OVERPASS_URLS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 )
-OVERPASS_TIMEOUT_S = 12.0
+OVERPASS_TIMEOUT_S = 25.0
 #: OSM fair-use etiquette: identify the app with a contactable User-Agent.
 USER_AGENT = "Loupe/1.0 (card-shop locator; https://loupe.app)"
 CACHE_TTL_S = 24 * 3600
-MAX_RESULTS = 60
+MAX_RESULTS = 90
 
 #: Shop tags that ARE the target (a card/game/collectible store)…
 CORE_SHOP_TAGS = {"games", "collector", "trading_cards", "video_games"}
 #: …and tags that often carry cards (toy stores, comic shops, hobby shops).
+#: Kept deliberately tight. Adding high-cardinality tags (department_store,
+#: variety_store, antiques…) made the Overpass query 504 in dense cities —
+#: measured. Shops of those kinds still surface via the NAME net below.
 LIKELY_SHOP_TAGS = {"toys", "hobby", "comics", "anime", "books", "stationery"}
 
 #: WORD-BOUNDED name matching — substring checks classed "Cardullo's
@@ -55,6 +58,11 @@ LIKELY_SHOP_TAGS = {"toys", "hobby", "comics", "anime", "books", "stationery"}
 #: match promotes any shop to a card store; a likely match keeps it as a
 #: probable carrier.
 STRONG_NAME_RE = re.compile(r"\bcards?\b|\btcg\b|trading.?cards?", re.IGNORECASE)
+#: A shop whose NAME is about games/hobby sells cards often enough to list.
+GAME_NAME_RE = re.compile(
+    r"\bgames?\b|\bgaming\b|game\s?stop|games?\s?workshop|\bhobb(y|ies)\b",
+    re.IGNORECASE,
+)
 LIKELY_NAME_RE = re.compile(
     r"pok[eé]mon|yu.?gi.?oh|collectib|\bcomics?\b|\bgames?\b|\bhobby\b",
     re.IGNORECASE,
@@ -85,12 +93,17 @@ def _overpass_query(lat: float, lng: float, radius_m: int) -> str:
     shops = "|".join(sorted(CORE_SHOP_TAGS | LIKELY_SHOP_TAGS))
     # Two selectors: the shop-tag net, plus a name net that catches card
     # shops OSM has tagged as something else entirely.
-    name_re = "card|tcg|pok[eé]mon|collect"
+    # The name net spans shop/craft/amenity/office rather than shop alone —
+    # card shops are mapped under all four. Each selector stays TAG-ANCHORED
+    # on purpose: an unanchored ["name"~…] regex makes Overpass scan every
+    # named feature in the radius, which times out.
+    name_re = "card|tcg|pok[eé]mon|yu.?gi|collectib"
     return f"""
 [out:json][timeout:{int(OVERPASS_TIMEOUT_S)}];
 (
   nwr["shop"~"^({shops})$"](around:{radius_m},{lat},{lng});
   nwr["shop"]["name"~"{name_re}",i](around:{radius_m},{lat},{lng});
+  nwr["craft"]["name"~"{name_re}",i](around:{radius_m},{lat},{lng});
 );
 out center {MAX_RESULTS * 3};
 """.strip()
@@ -99,6 +112,10 @@ out center {MAX_RESULTS * 3};
 def _category_for(shop_tag: str, name: str) -> str | None:
     """The label a client renders under the pin — backend-owned wording."""
     if shop_tag in CORE_SHOP_TAGS or STRONG_NAME_RE.search(name):
+        return "Card & game store"
+    # "Games Workshop", "GameStop", "… Hobby" — a game/hobby NAME is a
+    # strong enough signal even when the tag is generic or missing.
+    if GAME_NAME_RE.search(name):
         return "Card & game store"
     if shop_tag == "comics":
         return "Comic shop"
