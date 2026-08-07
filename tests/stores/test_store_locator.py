@@ -365,3 +365,36 @@ async def test_saved_places_roundtrip(
         await client.get("/v1/public/stores/saved", headers=auth_headers)
     )
     assert cleared["stores"] == []
+
+
+@pytest.mark.asyncio
+async def test_empty_results_are_never_cached(monkeypatch):
+    """Overpass answers 200 with an empty list when its own timeout trips.
+    Caching that locks a real neighbourhood to 'no shops' for 24 h — which
+    is exactly what happened to a live area."""
+    kv: dict[str, str] = {}
+    calls = {"n": 0}
+
+    async def fake_kv_get(key):
+        return kv.get(key)
+
+    async def fake_kv_set(key, value, ttl_seconds):
+        kv[key] = value
+
+    async def empty_then_full(lat, lng, radius_m):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return []  # the slow-Overpass case
+        return [_element(id=9, name="Late Cards", shop="games", lat=lat, lon=lng)]
+
+    monkeypatch.setattr(store_locator, "kv_get", fake_kv_get)
+    monkeypatch.setattr(store_locator, "kv_set", fake_kv_set)
+    monkeypatch.setattr(store_locator, "_fetch_overpass", empty_then_full)
+
+    first = await store_locator.nearby_stores(5.0, 5.0, 15)
+    assert first.stores == []
+    # Nothing about that emptiness may be persisted.
+    assert not [k for k in kv if k.startswith("stores:nearby:")]
+
+    second = await store_locator.nearby_stores(5.0, 5.0, 15)
+    assert [s.name for s in second.stores] == ["Late Cards"]

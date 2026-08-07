@@ -213,6 +213,10 @@ async def nearby_stores(
         try:
             doc = json.loads(cached)
             stores = [NearbyStore(**s) for s in doc["stores"]]
+            if not stores:
+                # A poisoned empty row from before the guard above — ignore
+                # it and re-search rather than serving "no shops" again.
+                raise ValueError("empty cached row")
             # Index on the cached path TOO: areas searched before per-store
             # rows existed would otherwise 404 on detail until their grid
             # row expired.
@@ -228,6 +232,15 @@ async def nearby_stores(
         return NearbyStoresRead(stores=[], source="unavailable")
 
     stores = _parse_elements(elements, lat, lng)
+    if not stores:
+        # NEVER cache an empty area for a day. Overpass answers 200 with an
+        # empty element list when its own server-side timeout trips, so a
+        # single slow moment would otherwise lock a real neighbourhood to
+        # "no shops" for 24 h — which is exactly what happened to Queens.
+        logger.warning(
+            "empty store result at %.3f,%.3f (r=%skm) — not caching", lat, lng, radius_km
+        )
+        return NearbyStoresRead(stores=[], source="live")
     await kv_set(
         key,
         json.dumps({"stores": [s.model_dump() for s in stores]}),
