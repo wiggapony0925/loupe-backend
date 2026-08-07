@@ -79,6 +79,11 @@ ADMIN_PAGE_FLAGS: tuple[tuple[str, str, str], ...] = (
     ("admin_applications", "Admin · Applications", "Hiring: inbound applications."),
     ("admin_blog", "Admin · Blog", "Content: blog posts."),
     ("admin_waitlist", "Admin · Scanner waitlist", "Content: hardware waitlist."),
+    (
+        "admin_legal",
+        "Admin · Law",
+        "Legal: edit and publish the Terms, Privacy Policy, and other documents.",
+    ),
     ("admin_insights", "Admin · Ask your data", "Tools: NL→SQL data queries."),
     ("admin_api", "Admin · API inspector", "Tools: live API traffic."),
     ("admin_console", "Admin · API console", "Tools: run GET requests."),

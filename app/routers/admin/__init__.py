@@ -30,6 +30,7 @@ from app.routers.admin import (
     insights,
     integrations,
     jobs,
+    legal,
     metrics,
     notifications,
     pricecharting,
@@ -80,5 +81,7 @@ admin_router.include_router(jobs.router)
 admin_router.include_router(applications.router)
 admin_router.include_router(blog.router)
 admin_router.include_router(waitlist.router)
+# Legal — the published Terms/Privacy/Cookies/AUP corpus.
+admin_router.include_router(legal.router)
 
 __all__ = ["admin_router"]
