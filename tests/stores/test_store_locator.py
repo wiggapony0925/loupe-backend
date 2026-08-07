@@ -149,7 +149,7 @@ async def test_store_detail_and_reviews_roundtrip(
     async def fake_overpass(lat, lng, radius_m):
         return [_element(id=77, name="Review Cards", shop="games", lat=lat, lon=lng)]
 
-    async def no_photo(store_id, *, osm_image, website):
+    async def no_photo(store_id, *, osm_image, website, wikidata=None):
         return None
 
     monkeypatch.setattr(store_locator, "_fetch_overpass", fake_overpass)
@@ -298,7 +298,7 @@ async def test_saved_places_roundtrip(
     async def fake_overpass(lat, lng, radius_m):
         return [_element(id=555, name="Saved Cards", shop="games", lat=lat, lon=lng)]
 
-    async def no_photo(store_id, *, osm_image, website):
+    async def no_photo(store_id, *, osm_image, website, wikidata=None):
         return None
 
     monkeypatch.setattr(store_locator, "_fetch_overpass", fake_overpass)

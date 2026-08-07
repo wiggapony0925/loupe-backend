@@ -97,7 +97,10 @@ async def store_detail(
         raise HTTPException(status_code=404, detail="No such store")
 
     store.photo_url = await store_photos.photo_for(
-        store.id, osm_image=store.photo_url, website=store.website
+        store.id,
+        osm_image=store.photo_url,
+        website=store.website,
+        wikidata=store.wikidata_id,
     )
     rating, count = await store_reviews.aggregate(db, store_id)
     store.rating = rating

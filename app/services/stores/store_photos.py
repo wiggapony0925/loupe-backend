@@ -13,6 +13,7 @@ No API keys, no per-request billing — the whole locator stays $0.
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 import httpx
 
@@ -55,7 +56,7 @@ _OG_RE_REVERSED = _META_REVERSED[0]
 
 
 def _cache_key(store_id: str) -> str:
-    return f"stores:photo:v2:{store_id}"
+    return f"stores:photo:v3:{store_id}"
 
 
 def _absolutize(url: str, site: str) -> str | None:
@@ -106,8 +107,48 @@ async def _og_image(site: str) -> str | None:
     return None
 
 
+async def _wikimedia_image(qid: str) -> str | None:
+    """A real photo (or logo) for a Wikidata entity — free, no key.
+
+    OSM tags chain stores with ``brand:wikidata`` (and some independents
+    with ``wikidata``). P18 is an actual photograph of the subject, P154
+    the logo. Photo wins — a storefront beats a wordmark — and either
+    beats the drawn placeholder.
+    """
+    try:
+        async with httpx.AsyncClient(
+            timeout=FETCH_TIMEOUT_S,
+            follow_redirects=True,
+            headers={"User-Agent": USER_AGENT},
+        ) as client:
+            resp = await client.get(
+                f"https://www.wikidata.org/wiki/Special:EntityData/{qid}.json"
+            )
+            resp.raise_for_status()
+            claims = resp.json()["entities"][qid]["claims"]
+    except Exception as exc:
+        logger.info("wikidata miss for %s (%s)", qid, exc)
+        return None
+
+    for prop in ("P18", "P154"):  # photograph first, then logo
+        try:
+            name = claims[prop][0]["mainsnak"]["datavalue"]["value"]
+        except (KeyError, IndexError, TypeError):
+            continue
+        if isinstance(name, str) and name:
+            return (
+                "https://commons.wikimedia.org/wiki/Special:FilePath/"
+                f"{quote(name.replace(' ', '_'))}?width=800"
+            )
+    return None
+
+
 async def photo_for(
-    store_id: str, *, osm_image: str | None, website: str | None
+    store_id: str,
+    *,
+    osm_image: str | None,
+    website: str | None,
+    wikidata: str | None = None,
 ) -> str | None:
     """Best photo URL for a store — cached a week, ``None`` when there is none.
 
@@ -120,6 +161,9 @@ async def photo_for(
         return cached or None
 
     found = osm_image
+    if not found and wikidata:
+        # Chains carry brand:wikidata → Commons has real photography.
+        found = await _wikimedia_image(wikidata)
     if not found and website:
         found = await _og_image(website)
 

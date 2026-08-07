@@ -32,6 +32,8 @@ class NearbyStore(BaseModel):
     review_count: int = 0
     #: Whether the CALLER has hearted this shop (false when signed out).
     is_saved: bool = False
+    #: OSM brand:wikidata / wikidata id — resolves to Commons imagery.
+    wikidata_id: str | None = None
 
 
 class NearbyStoresRead(BaseModel):

@@ -176,6 +176,7 @@ def _parse_elements(
                 phone=tags.get("phone") or tags.get("contact:phone"),
                 opening_hours=tags.get("opening_hours"),
                 photo_url=tags.get("image"),
+                wikidata_id=tags.get("brand:wikidata") or tags.get("wikidata"),
             )
         )
     # Dedicated card/game stores first, then by distance.
