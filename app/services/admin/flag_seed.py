@@ -47,6 +47,11 @@ ADMIN_PAGE_FLAGS: tuple[tuple[str, str, str], ...] = (
     ("admin_pro", "Admin · Loupe Pro", "Monetization: plans & feature gates."),
     ("admin_announce", "Admin · Announcements", "Monetization: global banner editor."),
     ("admin_users", "Admin · Users", "People: user search, roles, bans."),
+    (
+        "admin_featured",
+        "Admin · Featured collectors",
+        "People: curate the Community featured rail.",
+    ),
     ("admin_catalog", "Admin · Catalog", "Catalog: coverage by game."),
     (
         "admin_carousels",
