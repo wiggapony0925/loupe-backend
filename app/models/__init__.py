@@ -53,6 +53,7 @@ from app.models.watchlist import WatchlistItem
 # The social layer lives as a vertical slice in app/social; its models are
 # re-exported here so alembic env + the test schema pick them up with the rest.
 from app.social.models import (
+    SavedStore,
     SocialFollow,
     SocialFollowRequest,
     SocialProfile,
@@ -98,6 +99,7 @@ __all__ = [
     "RawConditionEnum",
     "ReportPeriodEnum",
     "ReportStatusEnum",
+    "SavedStore",
     "ScanJob",
     "ScanSourceEnum",
     "ScanStatusEnum",

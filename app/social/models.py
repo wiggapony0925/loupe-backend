@@ -237,7 +237,37 @@ class StoreReview(Base):
     )
 
 
+class SavedStore(Base):
+    """A shop a collector hearted — their saved places.
+
+    Keyed on the UPSTREAM store id like StoreReview: stores aren't rows we
+    own, so a save survives the catalog data changing underneath it.
+    """
+
+    __tablename__ = "saved_stores"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    store_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "store_id", name="uq_saved_store_user"),
+        Index("ix_saved_stores_user_created", "user_id", "created_at"),
+    )
+
+
 __all__ = [
+    "SavedStore",
     "SocialFollow",
     "SocialFollowRequest",
     "SocialProfile",

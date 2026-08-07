@@ -30,6 +30,8 @@ class NearbyStore(BaseModel):
     #: Community rating over Loupe reviews (``None`` until someone rates).
     rating: float | None = None
     review_count: int = 0
+    #: Whether the CALLER has hearted this shop (false when signed out).
+    is_saved: bool = False
 
 
 class NearbyStoresRead(BaseModel):
@@ -70,10 +72,25 @@ class StoreDetailRead(BaseModel):
     reviews: list[StoreReviewRead] = []
 
 
+class SavedStoresRead(BaseModel):
+    """``GET /v1/public/stores/saved`` — the caller's saved places."""
+
+    stores: list[NearbyStore] = []
+
+
+class StoreSaveRead(BaseModel):
+    """Result of a save/unsave — the new state, so clients never guess."""
+
+    store_id: str
+    is_saved: bool
+
+
 __all__ = [
     "NearbyStore",
     "NearbyStoresRead",
+    "SavedStoresRead",
     "StoreDetailRead",
     "StoreReviewRead",
     "StoreReviewUpsert",
+    "StoreSaveRead",
 ]

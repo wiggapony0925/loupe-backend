@@ -284,3 +284,84 @@ async def test_cached_search_still_indexes_stores_for_detail(monkeypatch):
     second = await store_locator.nearby_stores(10.0, 10.0, 15)
     assert second.source == "cached"
     assert await store_locator.store_by_id(store_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_saved_places_roundtrip(
+    client, db_session, created_user, auth_headers, monkeypatch
+):
+    """Heart a shop → it lands in saved places, the flag rides the nearby
+    list and the detail payload, saving twice is idempotent, and the route
+    'saved' is never mistaken for a store id."""
+    from app.services.stores import store_photos
+
+    async def fake_overpass(lat, lng, radius_m):
+        return [_element(id=555, name="Saved Cards", shop="games", lat=lat, lon=lng)]
+
+    async def no_photo(store_id, *, osm_image, website):
+        return None
+
+    monkeypatch.setattr(store_locator, "_fetch_overpass", fake_overpass)
+    monkeypatch.setattr(store_photos, "photo_for", no_photo)
+
+    listed = assert_envelope_ok(
+        await client.get(
+            "/v1/public/stores/nearby",
+            params={"lat": 41.0, "lng": -72.0},
+            headers=auth_headers,
+        )
+    )
+    store_id = listed["stores"][0]["id"]
+    assert listed["stores"][0]["is_saved"] is False
+
+    # "saved" must resolve to the LIST route, not be read as a store id.
+    empty = assert_envelope_ok(
+        await client.get("/v1/public/stores/saved", headers=auth_headers)
+    )
+    assert empty["stores"] == []
+
+    saved = assert_envelope_ok(
+        await client.put(f"/v1/public/stores/{store_id}/save", headers=auth_headers)
+    )
+    assert saved["is_saved"] is True
+    # Idempotent.
+    again = assert_envelope_ok(
+        await client.put(f"/v1/public/stores/{store_id}/save", headers=auth_headers)
+    )
+    assert again["is_saved"] is True
+
+    mine = assert_envelope_ok(
+        await client.get("/v1/public/stores/saved", headers=auth_headers)
+    )
+    assert [s["id"] for s in mine["stores"]] == [store_id]
+    assert mine["stores"][0]["is_saved"] is True
+
+    # The flag rides both the detail payload and the nearby list.
+    detail = assert_envelope_ok(
+        await client.get(f"/v1/public/stores/{store_id}", headers=auth_headers)
+    )
+    assert detail["store"]["is_saved"] is True
+    relisted = assert_envelope_ok(
+        await client.get(
+            "/v1/public/stores/nearby",
+            params={"lat": 41.0, "lng": -72.0},
+            headers=auth_headers,
+        )
+    )
+    assert relisted["stores"][0]["is_saved"] is True
+
+    # Signed-out callers never see someone else's saves.
+    anon = assert_envelope_ok(
+        await client.get("/v1/public/stores/nearby", params={"lat": 41.0, "lng": -72.0})
+    )
+    assert anon["stores"][0]["is_saved"] is False
+    assert (await client.get("/v1/public/stores/saved")).status_code == 401
+
+    removed = assert_envelope_ok(
+        await client.delete(f"/v1/public/stores/{store_id}/save", headers=auth_headers)
+    )
+    assert removed["is_saved"] is False
+    cleared = assert_envelope_ok(
+        await client.get("/v1/public/stores/saved", headers=auth_headers)
+    )
+    assert cleared["stores"] == []

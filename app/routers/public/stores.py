@@ -19,11 +19,18 @@ from app.models.user import User
 from app.platform.rate_limit import rate_limit
 from app.schemas.stores import (
     NearbyStoresRead,
+    SavedStoresRead,
     StoreDetailRead,
     StoreReviewRead,
     StoreReviewUpsert,
+    StoreSaveRead,
 )
-from app.services.stores import store_locator, store_photos, store_reviews
+from app.services.stores import (
+    saved_stores,
+    store_locator,
+    store_photos,
+    store_reviews,
+)
 
 router = APIRouter(prefix="/public/stores", tags=["public"])
 
@@ -43,17 +50,34 @@ async def stores_nearby(
     lat: float = Query(..., ge=-90, le=90),
     lng: float = Query(..., ge=-180, le=180),
     radius_km: float = Query(25, ge=1, le=50),
+    user: User | None = Depends(optional_user),
     db: AsyncSession = Depends(get_db),
 ) -> NearbyStoresRead:
     found = await store_locator.nearby_stores(lat, lng, radius_km)
-    # Decorate with community ratings in ONE query — the map cards show
-    # "★ 4.3 (12)" without the client fanning out per store.
+    # Ratings AND the caller's saves in one query each — the map cards show
+    # "★ 4.3 (12)" and a filled heart without fanning out per store.
     ratings = await store_reviews.aggregates(db, [s.id for s in found.stores])
+    saved = await saved_stores.saved_ids(db, user)
     for store in found.stores:
         rating, count = ratings.get(store.id, (None, 0))
         store.rating = rating
         store.review_count = count
+        store.is_saved = store.id in saved
     return found
+
+
+@router.get(
+    "/saved",
+    response_model=SavedStoresRead,
+    summary="My saved places",
+)
+async def saved_places(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> SavedStoresRead:
+    """Newest first. Declared BEFORE /{store_id} so "saved" is never
+    swallowed as a store id."""
+    return SavedStoresRead(stores=await saved_stores.list_saved(db, user))
 
 
 @router.get(
@@ -78,6 +102,7 @@ async def store_detail(
     rating, count = await store_reviews.aggregate(db, store_id)
     store.rating = rating
     store.review_count = count
+    store.is_saved = await saved_stores.is_saved(db, user, store_id)
     return StoreDetailRead(
         store=store, reviews=await store_reviews.list_reviews(db, store_id, user)
     )
@@ -110,6 +135,37 @@ async def delete_store_review(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await store_reviews.delete_review(db, user, store_id)
+
+
+@router.put(
+    "/{store_id}/save",
+    response_model=StoreSaveRead,
+    summary="Save this shop to my places",
+)
+async def save_store(
+    store_id: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> StoreSaveRead:
+    """Idempotent — hearting twice leaves one save."""
+    return StoreSaveRead(
+        store_id=store_id, is_saved=await saved_stores.save(db, user, store_id)
+    )
+
+
+@router.delete(
+    "/{store_id}/save",
+    response_model=StoreSaveRead,
+    summary="Remove this shop from my places",
+)
+async def unsave_store(
+    store_id: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> StoreSaveRead:
+    return StoreSaveRead(
+        store_id=store_id, is_saved=await saved_stores.unsave(db, user, store_id)
+    )
 
 
 __all__ = ["router"]
