@@ -27,24 +27,49 @@ FETCH_TIMEOUT_S = 4.0
 MAX_HTML_BYTES = 60_000
 USER_AGENT = "Loupe/1.0 (card-shop locator; https://loupe.app)"
 
-_OG_RE = re.compile(
-    r"<meta[^>]+(?:property|name)=[\"']og:image[\"'][^>]*content=[\"']([^\"']+)[\"']",
+#: og:image first, then twitter:image, then the apple touch icon — most
+#: small shops publish at least one of the three.
+_META_KEYS = ("og:image", "twitter:image", "twitter:image:src")
+_META_FORWARD = [
+    re.compile(
+        rf"<meta[^>]+(?:property|name)=[\"']{re.escape(k)}[\"'][^>]*content=[\"']([^\"']+)[\"']",
+        re.IGNORECASE,
+    )
+    for k in _META_KEYS
+]
+_META_REVERSED = [
+    re.compile(
+        rf"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]*(?:property|name)=[\"']{re.escape(k)}[\"']",
+        re.IGNORECASE,
+    )
+    for k in _META_KEYS
+]
+_APPLE_ICON_RE = re.compile(
+    r"<link[^>]+rel=[\"']apple-touch-icon[^\"']*[\"'][^>]*href=[\"']([^\"']+)[\"']",
     re.IGNORECASE,
 )
-_OG_RE_REVERSED = re.compile(
-    r"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]*(?:property|name)=[\"']og:image[\"']",
-    re.IGNORECASE,
-)
+
+#: Kept so the unit tests can assert both attribute orders still parse.
+_OG_RE = _META_FORWARD[0]
+_OG_RE_REVERSED = _META_REVERSED[0]
 
 
 def _cache_key(store_id: str) -> str:
-    return f"stores:photo:v1:{store_id}"
+    return f"stores:photo:v2:{store_id}"
 
 
 def _absolutize(url: str, site: str) -> str | None:
+    """Absolute HTTPS URL, or None when the value isn't a fetchable image.
+
+    HTTPS is forced: sites routinely advertise ``http://`` og:image URLs,
+    and iOS App Transport Security silently refuses to load those — which
+    looked exactly like "the images don't work".
+    """
     if url.startswith("//"):
         return f"https:{url}"
-    if url.startswith(("http://", "https://")):
+    if url.startswith("http://"):
+        return f"https://{url[len('http://') :]}"
+    if url.startswith("https://"):
         return url
     if url.startswith("/"):
         base = site.rstrip("/")
@@ -72,10 +97,13 @@ async def _og_image(site: str) -> str | None:
         logger.info("no og:image for %s (%s)", site, exc)
         return None
 
-    match = _OG_RE.search(html) or _OG_RE_REVERSED.search(html)
-    if not match:
-        return None
-    return _absolutize(match.group(1).strip(), url)
+    for pattern in (*_META_FORWARD, *_META_REVERSED, _APPLE_ICON_RE):
+        match = pattern.search(html)
+        if match:
+            resolved = _absolutize(match.group(1).strip(), url)
+            if resolved:
+                return resolved
+    return None
 
 
 async def photo_for(
