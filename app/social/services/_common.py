@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import is_admin_user
 from app.models.card import Card
 from app.models.grade import GradedCard
 from app.models.user import User
@@ -82,6 +83,7 @@ def user_card(
         location=profile.location,
         is_private=profile.is_private,
         is_pro=is_pro(user),
+        is_admin=is_admin_user(user),
         relationship=relationship,
         card_count=peek.count if visible else 0,
         preview_image_urls=list(peek.images) if visible else [],

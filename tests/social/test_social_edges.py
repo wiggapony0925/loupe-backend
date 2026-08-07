@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 
 from app.social.models import SocialFollow, SocialFollowRequest
 from tests.conftest import assert_envelope_error, assert_envelope_ok
+from tests.factories import make_user
 from tests.social.test_social_api import _add_graded_card, _claim, _headers
 
 
@@ -515,6 +516,20 @@ async def test_portfolio_drilldown_endpoint(
     assert_envelope_error(gated, expected_status=403)
 
 
+@pytest.fixture
+async def admin_user(db_session):
+    """A separate Loupe staff account — the portal's caller.
+
+    A fresh user rather than promoting `created_user`, so the admin-tag
+    tests can assert an ordinary account is NOT badged in the same run.
+    """
+    user = await make_user(db_session)
+    user.is_admin = True
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
 # ── RULE: a pending follow request to a PUBLIC account is not a valid state ──
 #
 # Enforced as an invariant rather than a one-time fix-up. The private→public
@@ -716,3 +731,163 @@ async def test_a_private_account_keeps_its_pending_requests(
         await client.get("/v1/social/requests", headers=_headers(created_user))
     )
     assert len(inbox) == 1, "still the owner's decision to make"
+
+
+# ── Operator-curated featured rail ──
+
+
+@pytest.mark.asyncio
+async def test_featured_rail_falls_back_to_ranking_when_uncurated(
+    client, created_user, second_user
+):
+    """No curation must never mean an empty rail — the page has to work
+    before an operator ever opens the portal."""
+    await _claim(client, created_user, "viewer")
+    await _claim(client, second_user, "somebody")
+
+    data = assert_envelope_ok(
+        await client.get("/v1/social/discover", headers=_headers(created_user))
+    )
+    assert [u["username"] for u in data["featured"]] == ["somebody"]
+
+
+@pytest.mark.asyncio
+async def test_curation_replaces_the_algorithmic_rail(
+    client, db_session, created_user, second_user, admin_user
+):
+    await _claim(client, created_user, "viewer")
+    await _claim(client, second_user, "chosen")
+    await _claim(client, admin_user, "staff")
+
+    view = assert_envelope_ok(
+        await client.put(
+            "/v1/admin/social/featured",
+            json={"usernames": ["chosen"]},
+            headers=_headers(admin_user),
+        )
+    )
+    assert view["usernames"] == ["chosen"]
+    assert [c["username"] for c in view["collectors"]] == ["chosen"]
+
+    data = assert_envelope_ok(
+        await client.get("/v1/social/discover", headers=_headers(created_user))
+    )
+    assert [u["username"] for u in data["featured"]] == ["chosen"]
+    # The contract clients rely on: the two shelves never overlap.
+    assert "chosen" not in [u["username"] for u in data["more"]]
+
+
+@pytest.mark.asyncio
+async def test_removing_a_tag_is_idempotent(client, created_user, admin_user):
+    """The tag's × must survive a double tap."""
+    await _claim(client, created_user, "chosen")
+    await _claim(client, admin_user, "staff")
+    await client.put(
+        "/v1/admin/social/featured",
+        json={"usernames": ["chosen"]},
+        headers=_headers(admin_user),
+    )
+
+    for _ in range(2):
+        view = assert_envelope_ok(
+            await client.delete(
+                "/v1/admin/social/featured/chosen", headers=_headers(admin_user)
+            )
+        )
+        assert view["usernames"] == []
+
+
+@pytest.mark.asyncio
+async def test_featuring_a_handle_that_does_not_exist_is_rejected(client, admin_user):
+    """A tag that can never render is worse than an error while typing."""
+    await _claim(client, admin_user, "staff")
+    resp = await client.post(
+        "/v1/admin/social/featured",
+        json={"username": "nobody_here"},
+        headers=_headers(admin_user),
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_featured_collector_who_disappears_does_not_break_the_page(
+    client, created_user, second_user, admin_user
+):
+    """A stale curated handle must degrade, never 500 the Community page."""
+    await _claim(client, created_user, "viewer")
+    await _claim(client, second_user, "leaver")
+    await _claim(client, admin_user, "staff")
+    await client.put(
+        "/v1/admin/social/featured",
+        json={"usernames": ["leaver"]},
+        headers=_headers(admin_user),
+    )
+    # They leave the community.
+    await client.delete("/v1/social/me", headers=_headers(second_user))
+
+    data = assert_envelope_ok(
+        await client.get("/v1/social/discover", headers=_headers(created_user))
+    )
+    assert data["featured"] == []
+
+    # The portal SAYS the tag is dangling so it can be cleaned up.
+    view = assert_envelope_ok(
+        await client.get("/v1/admin/social/featured", headers=_headers(admin_user))
+    )
+    assert view["usernames"] == ["leaver"]
+    assert view["unresolved"] == ["leaver"]
+
+
+@pytest.mark.asyncio
+async def test_curation_never_features_you_to_yourself(
+    client, created_user, admin_user
+):
+    await _claim(client, created_user, "me_myself")
+    await _claim(client, admin_user, "staff")
+    await client.put(
+        "/v1/admin/social/featured",
+        json={"usernames": ["me_myself"]},
+        headers=_headers(admin_user),
+    )
+
+    data = assert_envelope_ok(
+        await client.get("/v1/social/discover", headers=_headers(created_user))
+    )
+    assert [u["username"] for u in data["featured"]] == []
+
+
+@pytest.mark.asyncio
+async def test_the_rail_is_capped(client, admin_user):
+    await _claim(client, admin_user, "staff")
+    view = assert_envelope_ok(
+        await client.put(
+            "/v1/admin/social/featured",
+            json={"usernames": [f"handle{i}" for i in range(40)]},
+            headers=_headers(admin_user),
+        )
+    )
+    assert len(view["usernames"]) == view["max_featured"]
+
+
+@pytest.mark.asyncio
+async def test_only_admins_can_curate(client, created_user):
+    await _claim(client, created_user, "rando")
+    resp = await client.get("/v1/admin/social/featured", headers=_headers(created_user))
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_collector_rows_flag_admins(client, created_user, admin_user):
+    """The ADMIN tag on people rows comes from EFFECTIVE admin."""
+    await _claim(client, created_user, "viewer")
+    await _claim(client, admin_user, "staff")
+
+    data = assert_envelope_ok(
+        await client.get("/v1/social/search?q=staff", headers=_headers(created_user))
+    )
+    assert data[0]["is_admin"] is True
+
+    mine = assert_envelope_ok(
+        await client.get("/v1/social/search?q=viewer", headers=_headers(admin_user))
+    )
+    assert mine[0]["is_admin"] is False

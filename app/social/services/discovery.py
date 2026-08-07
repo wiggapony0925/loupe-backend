@@ -28,6 +28,7 @@ from app.social.services._common import (
     relationship_between,
     user_card,
 )
+from app.social.services.featured import featured_usernames, resolve_featured
 
 
 def _exact_identifier(needle: str) -> tuple[str | None, uuid.UUID | None]:
@@ -193,7 +194,39 @@ async def discover(db: AsyncSession, viewer: User) -> DiscoverRead:
     ).all()
     peeks = await collection_peeks(db, [p.user_id for p, _ in rows])
     cards = [user_card(p, u, "none", peeks.get(p.user_id)) for p, u in rows]
-    return DiscoverRead(featured=cards[:FEATURED_COUNT], more=cards[FEATURED_COUNT:])
+
+    # CURATION WINS. An operator's featured list replaces the algorithmic
+    # top slice; with no curation the ranking stands, so the page works out
+    # of the box and an operator only intervenes when they want to.
+    curated_handles = await featured_usernames()
+    if not curated_handles:
+        return DiscoverRead(
+            featured=cards[:FEATURED_COUNT], more=cards[FEATURED_COUNT:]
+        )
+
+    curated_rows = await resolve_featured(db, curated_handles)
+    # Featured collectors are shown even if the viewer already follows them
+    # (the pool above excludes those) — being featured is an editorial
+    # decision, not a follow suggestion. So relationships are resolved fresh.
+    curated_peeks = await collection_peeks(db, [p.user_id for p, _ in curated_rows])
+    featured = [
+        user_card(
+            p,
+            u,
+            await relationship_between(db, viewer.id, p.user_id),
+            curated_peeks.get(p.user_id),
+        )
+        for p, u in curated_rows
+        # Never feature the viewer to themselves — a "collectors to discover"
+        # shelf containing you is just confusing.
+        if p.user_id != viewer.id
+    ]
+    featured_ids = {c.user_id for c in featured}
+    # `more` must stay disjoint from `featured` (the contract clients rely on).
+    return DiscoverRead(
+        featured=featured,
+        more=[c for c in cards if c.user_id not in featured_ids],
+    )
 
 
 #: Tiles in one Explore page. Enough to fill several screens of mosaic

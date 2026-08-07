@@ -219,6 +219,14 @@
   "/v1/admin/scanner/trend": [
     "GET"
   ],
+  "/v1/admin/social/featured": [
+    "GET",
+    "POST",
+    "PUT"
+  ],
+  "/v1/admin/social/featured/{username}": [
+    "DELETE"
+  ],
   "/v1/admin/users": [
     "GET"
   ],

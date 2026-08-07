@@ -68,6 +68,10 @@ class SocialUserCard(BaseModel):
     # ``subscriptions_enabled`` kill switch off everyone is *treated* as Pro,
     # and a badge that lights up for every account would mean nothing.
     is_pro: bool = False
+    #: Loupe staff — drives the ADMIN tag on rows. Effective admin (the DB
+    #: flag OR the ADMIN_EMAILS allowlist), so the bootstrap super-admin is
+    #: badged too without needing the column set.
+    is_admin: bool = False
     relationship: RelationshipState = "none"
     # A PEEK AT WHAT THEY COLLECT. Without these a collector directory is a
     # list of names on an app whose entire subject is the cards — the client

@@ -37,6 +37,7 @@ from app.routers.admin import (
     retention,
     revenue,
     scanner,
+    social,
     users,
     waitlist,
 )
@@ -57,6 +58,7 @@ admin_router.include_router(revenue.router)
 # Catalog & product.
 admin_router.include_router(catalog.router)
 admin_router.include_router(carousels.router)
+admin_router.include_router(social.router)
 admin_router.include_router(pricecharting.router)
 admin_router.include_router(scanner.router)
 admin_router.include_router(cards.router)
