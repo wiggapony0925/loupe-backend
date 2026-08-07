@@ -251,3 +251,36 @@ def test_og_image_parsing_and_absolutize():
         == "https://cdn.example/a.png"
     )
     assert _absolutize("data:image/png;base64,AAA", "https://s.example") is None
+
+
+@pytest.mark.asyncio
+async def test_cached_search_still_indexes_stores_for_detail(monkeypatch):
+    """A store found via the CACHED grid row must still be resolvable by id —
+    otherwise any area searched before per-store indexing existed 404s on
+    detail until its 24 h grid row expires."""
+    kv: dict[str, str] = {}
+
+    async def fake_kv_get(key):
+        return kv.get(key)
+
+    async def fake_kv_set(key, value, ttl_seconds):
+        kv[key] = value
+
+    async def fake_overpass(lat, lng, radius_m):
+        return [_element(id=4242, name="Cached Cards", shop="games", lat=lat, lon=lng)]
+
+    monkeypatch.setattr(store_locator, "kv_get", fake_kv_get)
+    monkeypatch.setattr(store_locator, "kv_set", fake_kv_set)
+    monkeypatch.setattr(store_locator, "_fetch_overpass", fake_overpass)
+
+    first = await store_locator.nearby_stores(10.0, 10.0, 15)
+    assert first.source == "live"
+    store_id = first.stores[0].id
+
+    # Simulate a grid row cached BEFORE per-store indexing shipped.
+    for key in [k for k in kv if k.startswith("stores:one:")]:
+        del kv[key]
+
+    second = await store_locator.nearby_stores(10.0, 10.0, 15)
+    assert second.source == "cached"
+    assert await store_locator.store_by_id(store_id) is not None

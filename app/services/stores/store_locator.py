@@ -194,10 +194,12 @@ async def nearby_stores(
     if cached:
         try:
             doc = json.loads(cached)
-            return NearbyStoresRead(
-                stores=[NearbyStore(**s) for s in doc["stores"]],
-                source="cached",
-            )
+            stores = [NearbyStore(**s) for s in doc["stores"]]
+            # Index on the cached path TOO: areas searched before per-store
+            # rows existed would otherwise 404 on detail until their grid
+            # row expired.
+            await _index_stores(stores)
+            return NearbyStoresRead(stores=stores, source="cached")
         except Exception:
             logger.warning("stores cache row unreadable; refetching")
 
@@ -213,13 +215,17 @@ async def nearby_stores(
         json.dumps({"stores": [s.model_dump() for s in stores]}),
         ttl_seconds=CACHE_TTL_S,
     )
-    # Also index each store on its own so the detail endpoint can resolve
-    # one by id without knowing which search found it.
+    await _index_stores(stores)
+    return NearbyStoresRead(stores=stores, source="live")
+
+
+async def _index_stores(stores: list[NearbyStore]) -> None:
+    """Index each store on its own key so DETAIL can resolve one by id
+    without knowing which search found it."""
     for store in stores:
         await kv_set(
             _store_key(store.id), store.model_dump_json(), ttl_seconds=CACHE_TTL_S
         )
-    return NearbyStoresRead(stores=stores, source="live")
 
 
 async def store_by_id(store_id: str) -> NearbyStore | None:
