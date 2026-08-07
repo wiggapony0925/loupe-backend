@@ -28,6 +28,7 @@ from app.social.services._common import (
     get_profile,
     profile_read,
 )
+from app.social.services.graph import apply_pending_requests
 
 # ── My profile ──
 
@@ -36,6 +37,11 @@ async def get_me(db: AsyncSession, user: User) -> SocialMeRead:
     profile = await get_profile(db, user.id)
     if profile is None:
         return SocialMeRead(profile=None, incoming_request_count=0)
+    # Enforce the public-account invariant before REPORTING the count: this
+    # endpoint is what draws the inbox badge, so healing anywhere later would
+    # still show a badge for requests that can never be answered.
+    if not profile.is_private:
+        await apply_pending_requests(db, user)
     pending = await count(
         db,
         select(func.count())
@@ -73,24 +79,17 @@ async def upsert_me(
     profile.location = payload.location
     profile.is_private = payload.is_private
 
-    # Going public honours everyone who already asked to follow.
-    if was_private and not payload.is_private:
-        pending = (
-            (
-                await db.execute(
-                    select(SocialFollowRequest).where(
-                        SocialFollowRequest.target_id == user.id
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for req in pending:
-            db.add(SocialFollow(follower_id=req.requester_id, followee_id=user.id))
-            await db.delete(req)
-
     await db.commit()
+
+    # Going public honours everyone who already asked to follow. Delegated to
+    # the shared invariant rather than inlined: the inline version added a
+    # follow edge per request with no duplicate check, so a requester who
+    # already followed would violate the composite PK and fail the whole
+    # privacy change. It also must run AFTER the commit above, so the helper
+    # sees the account as public.
+    if was_private and not payload.is_private:
+        await apply_pending_requests(db, user)
+
     await db.refresh(profile)
     return profile_read(profile)
 

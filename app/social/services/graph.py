@@ -28,8 +28,111 @@ from app.social.services._common import (
     resolve_username,
     user_card,
 )
+from app.utils.logger import get_logger
 
 # ── Follow graph ──
+
+
+logger = get_logger("social.graph")
+
+
+async def apply_pending_requests(db: AsyncSession, user: User) -> int:
+    """Resolve every pending request to a PUBLIC account. Returns how many.
+
+    THE RULE: a pending follow request to a public account is not a valid
+    state. Nobody should have to approve an ask to see something already
+    visible to anyone, and an inbox badge for a decision that cannot matter
+    is a lie the user can't clear.
+
+    This is written as an INVARIANT, not a one-time fix-up, because that
+    distinction is the actual bug it fixes: the private→public transition
+    already converted requests, but anything that reached "public" by some
+    other route — an older build that predated that code, a restore, a seed,
+    a direct DB edit — left requests stuck forever, visible and unresolvable.
+    So it is enforced wherever the state is READ as well as where it changes,
+    and it is idempotent and cheap enough to call on both.
+
+    Edge cases, all deliberately handled rather than left to a constraint:
+      • already follows      → delete the request, add nothing (the follow
+                               edge's composite PK would otherwise raise and
+                               take the whole request down with it);
+      • deleted/banned user  → drop the request, create no follow;
+      • deactivated profile  → drop it too. The graph only holds collectors
+                               with claimed handles, so a follow without a
+                               profile would inflate the follower COUNT past
+                               what the follower LIST (a profiles join) can
+                               show;
+      • self-request         → dropped (a CHECK forbids the follow edge);
+      • concurrent callers   → the insert is guarded, and a loser simply
+                               finds the row already there next time.
+    """
+    profile = await get_profile(db, user.id)
+    # Private accounts are exactly where pending requests belong.
+    if profile is None or profile.is_private:
+        return 0
+
+    pending = (
+        (
+            await db.execute(
+                select(SocialFollowRequest).where(
+                    SocialFollowRequest.target_id == user.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not pending:
+        return 0
+
+    requester_ids = {r.requester_id for r in pending}
+    # Who is still a real, claimed, live collector.
+    eligible = set(
+        (
+            await db.execute(
+                select(SocialProfile.user_id)
+                .join(User, User.id == SocialProfile.user_id)
+                .where(
+                    SocialProfile.user_id.in_(requester_ids),
+                    User.deleted_at.is_(None),
+                    User.banned_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Who already follows — converting them again would violate the PK.
+    existing = set(
+        (
+            await db.execute(
+                select(SocialFollow.follower_id).where(
+                    SocialFollow.followee_id == user.id,
+                    SocialFollow.follower_id.in_(requester_ids),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    applied = 0
+    added: set[uuid.UUID] = set()
+    for req in pending:
+        rid = req.requester_id
+        # `added` also collapses duplicate pending rows from one requester.
+        if rid in eligible and rid != user.id and rid not in existing | added:
+            db.add(SocialFollow(follower_id=rid, followee_id=user.id))
+            added.add(rid)
+            applied += 1
+        # Every pending row goes, applied or not: none of them can ever be
+        # answered while the account is public.
+        await db.delete(req)
+
+    await db.commit()
+    if applied:
+        logger.info("auto-accepted %s follow request(s) for a public account", applied)
+    return applied
 
 
 async def follow(db: AsyncSession, viewer: User, username: str) -> FollowStateRead:
@@ -99,6 +202,16 @@ async def remove_follower(db: AsyncSession, user: User, username: str) -> None:
 
 
 async def incoming_requests(db: AsyncSession, user: User) -> list[FollowRequestRead]:
+    """Pending asks for MY approval.
+
+    Heals first: a public account has no valid pending requests, and showing
+    an inbox the user cannot act on is worse than showing an empty one.
+    """
+    await apply_pending_requests(db, user)
+    return await _incoming_requests(db, user)
+
+
+async def _incoming_requests(db: AsyncSession, user: User) -> list[FollowRequestRead]:
     rows = (
         await db.execute(
             select(SocialFollowRequest, SocialProfile, User)

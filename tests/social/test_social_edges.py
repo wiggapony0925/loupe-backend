@@ -3,8 +3,12 @@ case-insensitive handles, and payload deep-link fields."""
 
 from __future__ import annotations
 
-import pytest
+from datetime import UTC, datetime
 
+import pytest
+from sqlalchemy import func, select
+
+from app.social.models import SocialFollow, SocialFollowRequest
 from tests.conftest import assert_envelope_error, assert_envelope_ok
 from tests.social.test_social_api import _add_graded_card, _claim, _headers
 
@@ -509,3 +513,206 @@ async def test_portfolio_drilldown_endpoint(
         headers=_headers(second_user),
     )
     assert_envelope_error(gated, expected_status=403)
+
+
+# ── RULE: a pending follow request to a PUBLIC account is not a valid state ──
+#
+# Enforced as an invariant rather than a one-time fix-up. The private→public
+# transition already converted requests, but anything reaching "public" by
+# another route (an older build, a restore, a seed, a manual edit) left
+# requests stuck forever — visible in the inbox and impossible to clear.
+# These lock down both the rule and every edge case it has to survive.
+
+
+@pytest.mark.asyncio
+async def test_going_public_auto_accepts_everyone_who_asked(
+    client, created_user, second_user
+):
+    await _claim(client, created_user, "gatekeeper", is_private=True)
+    await _claim(client, second_user, "asker")
+
+    assert_envelope_ok(
+        await client.post(
+            "/v1/social/users/gatekeeper/follow", headers=_headers(second_user)
+        )
+    )
+    # Flip to public.
+    await _claim(client, created_user, "gatekeeper", is_private=False)
+
+    me = assert_envelope_ok(
+        await client.get("/v1/social/me", headers=_headers(created_user))
+    )
+    assert me["incoming_request_count"] == 0
+
+    view = assert_envelope_ok(
+        await client.get("/v1/social/users/gatekeeper", headers=_headers(second_user))
+    )
+    assert view["relationship"] == "following", "the ask became a follow"
+    assert view["follower_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_public_account_heals_requests_it_should_never_have_had(
+    client, db_session, created_user, second_user
+):
+    """The reported bug: a PUBLIC account showing pending requests.
+
+    Simulates state that reached "public" without passing through the
+    transition — exactly what an older build or a restore leaves behind.
+    """
+    await _claim(client, created_user, "public_guy")
+    await _claim(client, second_user, "asker")
+    db_session.add(
+        SocialFollowRequest(requester_id=second_user.id, target_id=created_user.id)
+    )
+    await db_session.commit()
+
+    # Merely READING my own profile must resolve it — that endpoint draws
+    # the inbox badge, so it cannot report a number that can't be acted on.
+    me = assert_envelope_ok(
+        await client.get("/v1/social/me", headers=_headers(created_user))
+    )
+    assert me["incoming_request_count"] == 0
+
+    inbox = assert_envelope_ok(
+        await client.get("/v1/social/requests", headers=_headers(created_user))
+    )
+    assert inbox == []
+
+    view = assert_envelope_ok(
+        await client.get("/v1/social/users/public_guy", headers=_headers(second_user))
+    )
+    assert view["relationship"] == "following"
+
+
+@pytest.mark.asyncio
+async def test_going_public_when_a_requester_already_follows(
+    client, db_session, created_user, second_user
+):
+    """The duplicate that used to 500 the whole privacy change.
+
+    The old inline conversion added a follow edge per request with no
+    duplicate check; a requester who already followed violated the follow
+    table's composite PK and took the entire request down with it.
+    """
+    await _claim(client, created_user, "gatekeeper", is_private=True)
+    await _claim(client, second_user, "asker")
+    db_session.add(
+        SocialFollow(follower_id=second_user.id, followee_id=created_user.id)
+    )
+    db_session.add(
+        SocialFollowRequest(requester_id=second_user.id, target_id=created_user.id)
+    )
+    await db_session.commit()
+
+    # Must not raise, and must leave exactly ONE follow edge.
+    await _claim(client, created_user, "gatekeeper", is_private=False)
+
+    view = assert_envelope_ok(
+        await client.get("/v1/social/users/gatekeeper", headers=_headers(second_user))
+    )
+    assert view["relationship"] == "following"
+    assert view["follower_count"] == 1, "no duplicate edge"
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_requester_is_dropped_not_followed(
+    client, db_session, created_user, second_user
+):
+    """A dead account must not silently become a follower."""
+    await _claim(client, created_user, "gatekeeper", is_private=True)
+    await _claim(client, second_user, "ghost")
+    db_session.add(
+        SocialFollowRequest(requester_id=second_user.id, target_id=created_user.id)
+    )
+    second_user.deleted_at = datetime.now(UTC)
+    await db_session.commit()
+
+    await _claim(client, created_user, "gatekeeper", is_private=False)
+
+    me = assert_envelope_ok(
+        await client.get("/v1/social/me", headers=_headers(created_user))
+    )
+    assert me["incoming_request_count"] == 0, "the request is gone"
+    followers = await db_session.execute(
+        select(func.count())
+        .select_from(SocialFollow)
+        .where(SocialFollow.followee_id == created_user.id)
+    )
+    assert followers.scalar_one() == 0, "and produced no follow"
+
+
+@pytest.mark.asyncio
+async def test_a_requester_who_left_the_community_is_dropped(
+    client, db_session, created_user, second_user
+):
+    """Deactivating removes the SocialProfile but the account lives on.
+
+    The graph only holds collectors with claimed handles: a follow edge for
+    a profile-less user would inflate the follower COUNT past what the
+    follower LIST (a profiles join) can show.
+    """
+    await _claim(client, created_user, "gatekeeper", is_private=True)
+    await _claim(client, second_user, "quitter")
+    db_session.add(
+        SocialFollowRequest(requester_id=second_user.id, target_id=created_user.id)
+    )
+    await db_session.commit()
+    # They leave the community (profile gone, account intact).
+    await client.delete("/v1/social/me", headers=_headers(second_user))
+
+    await _claim(client, created_user, "gatekeeper", is_private=False)
+
+    followers = await db_session.execute(
+        select(func.count())
+        .select_from(SocialFollow)
+        .where(SocialFollow.followee_id == created_user.id)
+    )
+    assert followers.scalar_one() == 0
+
+
+@pytest.mark.asyncio
+async def test_healing_is_idempotent(client, db_session, created_user, second_user):
+    """It runs on every read of my own profile, so it must be a no-op the
+    second time — and must never multiply follower counts."""
+    await _claim(client, created_user, "public_guy")
+    await _claim(client, second_user, "asker")
+    db_session.add(
+        SocialFollowRequest(requester_id=second_user.id, target_id=created_user.id)
+    )
+    await db_session.commit()
+
+    for _ in range(3):
+        assert_envelope_ok(
+            await client.get("/v1/social/me", headers=_headers(created_user))
+        )
+
+    view = assert_envelope_ok(
+        await client.get("/v1/social/users/public_guy", headers=_headers(second_user))
+    )
+    assert view["follower_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_private_account_keeps_its_pending_requests(
+    client, created_user, second_user
+):
+    """The guard rail: healing must never touch an account that is still
+    private — that is exactly where pending requests belong."""
+    await _claim(client, created_user, "gatekeeper", is_private=True)
+    await _claim(client, second_user, "asker")
+    assert_envelope_ok(
+        await client.post(
+            "/v1/social/users/gatekeeper/follow", headers=_headers(second_user)
+        )
+    )
+
+    me = assert_envelope_ok(
+        await client.get("/v1/social/me", headers=_headers(created_user))
+    )
+    assert me["incoming_request_count"] == 1
+
+    inbox = assert_envelope_ok(
+        await client.get("/v1/social/requests", headers=_headers(created_user))
+    )
+    assert len(inbox) == 1, "still the owner's decision to make"
