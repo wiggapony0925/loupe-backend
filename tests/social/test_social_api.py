@@ -14,9 +14,10 @@ from decimal import Decimal
 import pytest
 
 from app.auth.jwt import issue_token
+from app.models.card import Card
 from app.models.grade import GradedCard
 from tests.conftest import assert_envelope_error, assert_envelope_ok
-from tests.factories import make_card
+from tests.factories import make_card, make_user
 
 
 def _headers(user) -> dict[str, str]:
@@ -350,3 +351,151 @@ async def test_social_requires_auth(client):
     for path in ("/v1/social/me", "/v1/social/requests", "/v1/social/users/anyone"):
         resp = await client.get(path)
         assert resp.status_code == 401, path
+
+
+# ── Row trend (the sparkline on a profile's card rows) ──
+
+
+@pytest.mark.asyncio
+async def test_collection_rows_carry_the_price_trend(
+    client, db_session, created_user, second_user
+):
+    """A card row on a profile shows the SAME trend as the owner's vault.
+
+    The line is built from the card's real price history through the vault's
+    own `spark_series`, so the two surfaces cannot drift apart.
+    """
+    await _claim(client, created_user, "viewer")
+    await _claim(client, second_user, "trendy")
+
+    card = await make_card(db_session, name="Trending Charizard")
+    card.card_metadata = {
+        "price_history": [
+            {"date": "2026-01-01", "priceUsd": 100.0},
+            {"date": "2026-02-01", "priceUsd": 150.0},
+            {"date": "2026-03-01", "priceUsd": 200.0},
+        ]
+    }
+    db_session.add(
+        GradedCard(
+            user_id=second_user.id,
+            card_id=card.id,
+            grade=Decimal("10"),
+            estimated_value_usd=Decimal("200.00"),
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.get(
+        "/v1/social/users/trendy/collection", headers=_headers(created_user)
+    )
+    item = assert_envelope_ok(resp)["items"][0]
+
+    assert len(item["spark_points"]) == 14, "clients draw a fixed-width line"
+    assert item["spark_points"][0] == 100.0
+    assert item["spark_points"][-1] == 200.0
+    # 100 → 200 is +100%.
+    assert item["spark_delta_pct"] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_a_card_with_no_history_gets_a_flat_line_not_invented_motion(
+    client, db_session, created_user, second_user
+):
+    await _claim(client, created_user, "viewer")
+    await _claim(client, second_user, "quiet")
+    await _add_graded_card(db_session, second_user, "75.00")
+
+    resp = await client.get(
+        "/v1/social/users/quiet/collection", headers=_headers(created_user)
+    )
+    item = assert_envelope_ok(resp)["items"][0]
+
+    assert set(item["spark_points"]) == {75.0}, "flat at the current estimate"
+    assert item["spark_delta_pct"] == 0.0
+
+
+# ── Collection peek on directory rows ──
+
+
+@pytest.mark.asyncio
+async def test_discover_rows_show_what_the_collector_owns(
+    client, db_session, created_user, second_user
+):
+    """A collector directory on a CARD app has to show cards.
+
+    Without this the Community page is a list of names and avatars — the
+    reason it read as empty.
+    """
+    await _claim(client, created_user, "browser")
+    await _claim(client, second_user, "bigvault")
+    for value in ("500.00", "300.00", "100.00", "50.00"):
+        grade = await _add_graded_card(db_session, second_user, value)
+        # Art is what the peek shows; a card with no image is skipped.
+        card = await db_session.get(Card, grade.card_id)
+        card.image_url = f"https://img.example/{value}.png"
+    await db_session.commit()
+
+    resp = await client.get("/v1/social/discover", headers=_headers(created_user))
+    rows = assert_envelope_ok(resp)["featured"]
+    row = next(r for r in rows if r["username"] == "bigvault")
+
+    assert row["card_count"] == 4
+    # Their best cards, capped — a peek, not the whole vault.
+    assert len(row["preview_image_urls"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_private_collection_never_leaks_its_size_to_strangers(
+    client, db_session, created_user, second_user
+):
+    """How much someone owns is part of what a private account is hiding."""
+    await _claim(client, created_user, "stranger")
+    await _claim(client, second_user, "secretive", is_private=True)
+    await _add_graded_card(db_session, second_user, "9000.00")
+
+    resp = await client.get("/v1/social/discover", headers=_headers(created_user))
+    data = assert_envelope_ok(resp)
+    row = next(
+        r for r in [*data["featured"], *data["more"]] if r["username"] == "secretive"
+    )
+
+    assert row["card_count"] == 0
+    assert row["preview_image_urls"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_peek_costs_a_FIXED_number_of_queries(db_session, created_user):
+    """A page of rows must not cost two queries per row.
+
+    N+1 here only hurts once a real directory exists, so the query count is
+    asserted rather than eyeballed. Counting statements on the live session
+    tests the behaviour, not the implementation.
+    """
+    from sqlalchemy import event
+
+    from app.social.services._common import collection_peeks
+
+    users = [created_user]
+    for _ in range(4):
+        users.append(await make_user(db_session))
+    for u in users:
+        await _add_graded_card(db_session, u, "100.00")
+
+    statements: list[str] = []
+    # The test session binds a sync Engine directly.
+    sync_engine = db_session.get_bind()
+
+    def record(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    event.listen(sync_engine, "before_cursor_execute", record)
+    try:
+        peeks = await collection_peeks(db_session, [u.id for u in users])
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", record)
+
+    assert len(peeks) == 5
+    assert all(peeks[u.id].count == 1 for u in users)
+    # Count + art. Five collectors must not cost ten round trips.
+    assert len(statements) == 2, statements

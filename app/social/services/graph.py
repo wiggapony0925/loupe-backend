@@ -22,6 +22,7 @@ from app.social.schemas import (
 from app.social.services._common import (
     MAX_PAGE_SIZE,
     can_view,
+    collection_peeks,
     get_profile,
     relationship_between,
     resolve_username,
@@ -193,8 +194,14 @@ async def followers(
             .offset(offset)
         )
     ).all()
+    peeks = await collection_peeks(db, [p.user_id for p, _ in rows])
     return [
-        user_card(p, u, await relationship_between(db, viewer.id, p.user_id))
+        user_card(
+            p,
+            u,
+            await relationship_between(db, viewer.id, p.user_id),
+            peeks.get(p.user_id),
+        )
         for p, u in rows
     ]
 
@@ -218,8 +225,14 @@ async def following(
             .offset(offset)
         )
     ).all()
+    peeks = await collection_peeks(db, [p.user_id for p, _ in rows])
     return [
-        user_card(p, u, await relationship_between(db, viewer.id, p.user_id))
+        user_card(
+            p,
+            u,
+            await relationship_between(db, viewer.id, p.user_id),
+            peeks.get(p.user_id),
+        )
         for p, u in rows
     ]
 

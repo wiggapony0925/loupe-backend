@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from typing import TypedDict
 
 from fastapi import HTTPException
 from sqlalchemy import and_, func, select
@@ -14,6 +15,10 @@ from app.models.collection import Collection, CollectionItem
 from app.models.grade import GradedCard
 from app.models.sealed import SealedHolding, SealedProduct
 from app.models.user import User
+from app.services.collection.portfolio_service import (
+    _extract_price_history,
+    spark_series,
+)
 from app.social.models import (
     SocialFollow,
     SocialProfile,
@@ -35,6 +40,25 @@ from app.social.services._common import (
     resolve_username,
     user_card,
 )
+
+
+class _Spark(TypedDict):
+    spark_points: list[float]
+    spark_delta_pct: float | None
+
+
+def _spark_for(grade: GradedCard, card: Card | None) -> _Spark:
+    """The row's trend, from the card row already joined into the query.
+
+    Kept as a dict splat so both collection builders stay single expressions.
+    Uses the vault's own `spark_series`, so the same holding shows the same
+    line whether you're looking at your vault or someone's profile.
+    """
+    points, delta = spark_series(
+        _extract_price_history(card),
+        current=float(grade.estimated_value_usd or 0),
+    )
+    return _Spark(spark_points=points, spark_delta_pct=delta)
 
 
 async def friend_owners(
@@ -290,6 +314,7 @@ async def collection(
             ),
             estimated_value_usd=grade.estimated_value_usd,
             graded_at=grade.graded_at,
+            **_spark_for(grade, card),
         )
         for grade, card, card_set in rows
     ]
@@ -393,6 +418,7 @@ async def portfolio_items(
             ),
             estimated_value_usd=grade.estimated_value_usd,
             graded_at=grade.graded_at,
+            **_spark_for(grade, card),
         )
         for grade, card, card_set in rows
     ]

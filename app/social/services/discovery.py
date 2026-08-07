@@ -18,6 +18,7 @@ from app.social.schemas import (
 )
 from app.social.services._common import (
     MAX_PAGE_SIZE,
+    collection_peeks,
     relationship_between,
     user_card,
 )
@@ -52,8 +53,14 @@ async def search(
             .limit(min(limit, MAX_PAGE_SIZE))
         )
     ).all()
+    peeks = await collection_peeks(db, [p.user_id for p, _ in rows])
     return [
-        user_card(p, u, await relationship_between(db, viewer.id, p.user_id))
+        user_card(
+            p,
+            u,
+            await relationship_between(db, viewer.id, p.user_id),
+            peeks.get(p.user_id),
+        )
         for p, u in rows
     ]
 
@@ -89,7 +96,8 @@ async def suggested(
         )
     ).all()
     # Exclusions above guarantee the relationship is "none".
-    return [user_card(p, u, "none") for p, u in rows]
+    peeks = await collection_peeks(db, [p.user_id for p, _ in rows])
+    return [user_card(p, u, "none", peeks.get(p.user_id)) for p, u in rows]
 
 
 #: Server-owned composition of the Community page.
@@ -145,5 +153,6 @@ async def discover(db: AsyncSession, viewer: User) -> DiscoverRead:
             .limit(DISCOVER_POOL)
         )
     ).all()
-    cards = [user_card(p, u, "none") for p, u in rows]
+    peeks = await collection_peeks(db, [p.user_id for p, _ in rows])
+    cards = [user_card(p, u, "none", peeks.get(p.user_id)) for p, u in rows]
     return DiscoverRead(featured=cards[:FEATURED_COUNT], more=cards[FEATURED_COUNT:])

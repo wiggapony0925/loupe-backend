@@ -942,6 +942,35 @@ async def history(
     )
 
 
+def spark_series(
+    history: list[tuple[date, float]],
+    *,
+    points: int = 14,
+    current: float = 0.0,
+) -> tuple[list[float], float]:
+    """Down-sample real price history to exactly `points` values + its delta %.
+
+    Shared by the vault's sparkline endpoint and the social collection
+    payload so a row on someone's profile and the same row in your own
+    vault can never disagree about the trend.
+
+    With no history this returns a FLAT line at the current estimate: the
+    row still renders, and a flat line is honest about knowing nothing,
+    where interpolated motion would be invented.
+    """
+    if not history:
+        return [round(current, 2)] * points, 0.0
+    if len(history) >= points:
+        stride = len(history) / points
+        sampled = [history[int(i * stride)][1] for i in range(points)]
+    else:
+        # Pad on the left with the first known price.
+        sampled = [history[0][1]] * (points - len(history)) + [p for _, p in history]
+    first, last = sampled[0], sampled[-1]
+    delta = round(((last - first) / first * 100), 2) if first > 0 else 0.0
+    return [round(p, 2) for p in sampled], delta
+
+
 async def sparklines(
     db: AsyncSession,
     user: User,
@@ -958,32 +987,14 @@ async def sparklines(
     )
     out: list[dict] = []
     for g, c in rows:
-        hist = _extract_price_history(c)
-        if not hist:
-            # No real history — emit a flat line at the current estimate so
-            # the UI can still render the card row without fabricating motion.
-            current = float(g.estimated_value_usd or 0)
-            pts = [current] * points
-            out.append(
-                CardSparkline(card_id=str(g.id), points=pts, delta_pct=0.0).to_dict()
-            )
-            continue
-        # Down-sample the real history to exactly `points` points.
-        if len(hist) >= points:
-            stride = len(hist) / points
-            sampled = [hist[int(i * stride)][1] for i in range(points)]
-        else:
-            # Pad on the left with the first known price.
-            pad = [hist[0][1]] * (points - len(hist))
-            sampled = pad + [p for _, p in hist]
-        first = sampled[0]
-        last = sampled[-1]
-        delta_pct = round(((last - first) / first * 100), 2) if first > 0 else 0.0
+        series, delta_pct = spark_series(
+            _extract_price_history(c),
+            points=points,
+            current=float(g.estimated_value_usd or 0),
+        )
         out.append(
             CardSparkline(
-                card_id=str(g.id),
-                points=[round(p, 2) for p in sampled],
-                delta_pct=delta_pct,
+                card_id=str(g.id), points=series, delta_pct=delta_pct
             ).to_dict()
         )
     return out
@@ -996,6 +1007,7 @@ __all__ = [
     "current_market_value",
     "history",
     "holding_value_usd",
+    "spark_series",
     "sparklines",
     "summary",
 ]

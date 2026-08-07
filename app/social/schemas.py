@@ -69,6 +69,14 @@ class SocialUserCard(BaseModel):
     # and a badge that lights up for every account would mean nothing.
     is_pro: bool = False
     relationship: RelationshipState = "none"
+    # A PEEK AT WHAT THEY COLLECT. Without these a collector directory is a
+    # list of names on an app whose entire subject is the cards — the client
+    # had nothing to show but an avatar and a Follow button.
+    #: How many cards they own (0 when private — never leak a private size).
+    card_count: int = 0
+    #: Art for their best few cards, most valuable first. Empty for private
+    #: accounts and for collectors with nothing yet.
+    preview_image_urls: list[str] = []
 
 
 class FriendOwnerRead(SocialUserCard):
@@ -163,6 +171,12 @@ class SocialCollectionItem(BaseModel):
     condition: str | None = None
     estimated_value_usd: Decimal | None = None
     graded_at: datetime
+    # The row's price trend, so a card list on a profile carries the same
+    # sparkline the owner sees in their own vault. Computed from the card's
+    # real price history via the SAME helper the vault endpoint uses; a card
+    # with no history gets a flat line rather than invented motion.
+    spark_points: list[float] = []
+    spark_delta_pct: float | None = None
 
 
 class SocialPortfolioRead(BaseModel):
