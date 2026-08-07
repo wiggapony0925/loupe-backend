@@ -61,6 +61,11 @@ LIKELY_NAME_RE = re.compile(
 )
 
 
+def _store_key(store_id: str) -> str:
+    """Per-store row so store DETAIL doesn't need the grid it came from."""
+    return f"stores:one:v1:{store_id}"
+
+
 def _grid_key(lat: float, lng: float, radius_km: float) -> str:
     """Snap the query to a ~1.1 km grid so nearby requests share a cache row."""
     return f"stores:nearby:v1:{round(lat, 2)}:{round(lng, 2)}:{int(radius_km)}"
@@ -153,6 +158,7 @@ def _parse_elements(
                 website=tags.get("website") or tags.get("contact:website"),
                 phone=tags.get("phone") or tags.get("contact:phone"),
                 opening_hours=tags.get("opening_hours"),
+                photo_url=tags.get("image"),
             )
         )
     # Dedicated card/game stores first, then by distance.
@@ -207,7 +213,25 @@ async def nearby_stores(
         json.dumps({"stores": [s.model_dump() for s in stores]}),
         ttl_seconds=CACHE_TTL_S,
     )
+    # Also index each store on its own so the detail endpoint can resolve
+    # one by id without knowing which search found it.
+    for store in stores:
+        await kv_set(
+            _store_key(store.id), store.model_dump_json(), ttl_seconds=CACHE_TTL_S
+        )
     return NearbyStoresRead(stores=stores, source="live")
 
 
-__all__ = ["nearby_stores"]
+async def store_by_id(store_id: str) -> NearbyStore | None:
+    """A single cached store, or ``None`` if we've never seen it."""
+    raw = await kv_get(_store_key(store_id))
+    if not raw:
+        return None
+    try:
+        return NearbyStore.model_validate_json(raw)
+    except Exception:  # poisoned row → treat as a miss
+        logger.warning("store cache row unreadable for %s", store_id)
+        return None
+
+
+__all__ = ["nearby_stores", "store_by_id"]

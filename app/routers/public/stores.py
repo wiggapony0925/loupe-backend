@@ -1,23 +1,36 @@
 """Public card-shop locator — ``/v1/public/stores/*``.
 
-No auth: store locations are public data, and the mobile map screen may be
-opened before sign-in. The rate limit + the per-grid-cell cache inside the
-service keep the free Overpass upstream comfortably within fair use.
+Browsing is open (store locations are public data, and the map may be
+opened before sign-in); WRITING a review needs a signed-in collector with
+a claimed handle, so every review is attributable.
+
+The rate limit + the per-grid-cell cache inside the service keep the free
+Overpass upstream comfortably within fair use.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import optional_user, require_user
+from app.db import get_db
+from app.models.user import User
 from app.platform.rate_limit import rate_limit
-from app.schemas.stores import NearbyStoresRead
-from app.services.stores import store_locator
+from app.schemas.stores import (
+    NearbyStoresRead,
+    StoreDetailRead,
+    StoreReviewRead,
+    StoreReviewUpsert,
+)
+from app.services.stores import store_locator, store_photos, store_reviews
 
 router = APIRouter(prefix="/public/stores", tags=["public"])
 
 # Map pans re-query as the user explores; 30/min per client is plenty and
 # caps what a hostile client can relay to Overpass through us.
 stores_limit = rate_limit(limit=30, window_seconds=60, name="stores.nearby")
+review_limit = rate_limit(limit=20, window_seconds=300, name="stores.review")
 
 
 @router.get(
@@ -30,8 +43,73 @@ async def stores_nearby(
     lat: float = Query(..., ge=-90, le=90),
     lng: float = Query(..., ge=-180, le=180),
     radius_km: float = Query(25, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
 ) -> NearbyStoresRead:
-    return await store_locator.nearby_stores(lat, lng, radius_km)
+    found = await store_locator.nearby_stores(lat, lng, radius_km)
+    # Decorate with community ratings in ONE query — the map cards show
+    # "★ 4.3 (12)" without the client fanning out per store.
+    ratings = await store_reviews.aggregates(db, [s.id for s in found.stores])
+    for store in found.stores:
+        rating, count = ratings.get(store.id, (None, 0))
+        store.rating = rating
+        store.review_count = count
+    return found
+
+
+@router.get(
+    "/{store_id}",
+    response_model=StoreDetailRead,
+    summary="One shop: details, photo, and community reviews",
+    dependencies=[Depends(stores_limit)],
+)
+async def store_detail(
+    store_id: str,
+    user: User | None = Depends(optional_user),
+    db: AsyncSession = Depends(get_db),
+) -> StoreDetailRead:
+    """404 when we've never seen the store (its area was never searched)."""
+    store = await store_locator.store_by_id(store_id)
+    if store is None:
+        raise HTTPException(status_code=404, detail="No such store")
+
+    store.photo_url = await store_photos.photo_for(
+        store.id, osm_image=store.photo_url, website=store.website
+    )
+    rating, count = await store_reviews.aggregate(db, store_id)
+    store.rating = rating
+    store.review_count = count
+    return StoreDetailRead(
+        store=store, reviews=await store_reviews.list_reviews(db, store_id, user)
+    )
+
+
+@router.put(
+    "/{store_id}/review",
+    response_model=StoreReviewRead,
+    summary="Write or update my review of a shop",
+    dependencies=[Depends(review_limit)],
+)
+async def upsert_store_review(
+    store_id: str,
+    payload: StoreReviewUpsert,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> StoreReviewRead:
+    """One review per collector per store — posting again edits yours."""
+    return await store_reviews.upsert_review(db, user, store_id, payload)
+
+
+@router.delete(
+    "/{store_id}/review",
+    status_code=204,
+    summary="Delete my review of a shop",
+)
+async def delete_store_review(
+    store_id: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await store_reviews.delete_review(db, user, store_id)
 
 
 __all__ = ["router"]

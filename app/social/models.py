@@ -196,10 +196,52 @@ class SocialProfileVisit(Base):
     )
 
 
+class StoreReview(Base):
+    """A collector's review of a physical card shop.
+
+    Stores are UPSTREAM entities (``osm:node:123``), not rows we own, so
+    the key is the opaque store id the locator emits — no FK, and reviews
+    survive a store's catalog data changing. One review per user per store
+    (edit by re-posting); ratings are 1-5 whole stars like every venue app.
+    """
+
+    __tablename__ = "store_reviews"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(), primary_key=True, default=uuid.uuid4
+    )
+    #: Locator id, e.g. "osm:node:1234567" — opaque to us.
+    store_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    body: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("store_id", "user_id", name="uq_store_review_author"),
+        CheckConstraint("rating >= 1 AND rating <= 5", name="ck_store_review_rating"),
+        Index("ix_store_reviews_store_created", "store_id", "created_at"),
+    )
+
+
 __all__ = [
     "SocialFollow",
     "SocialFollowRequest",
     "SocialProfile",
     "SocialProfileLike",
     "SocialProfileVisit",
+    "StoreReview",
 ]

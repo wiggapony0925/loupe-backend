@@ -566,6 +566,13 @@
   "/v1/public/stores/nearby": [
     "GET"
   ],
+  "/v1/public/stores/{store_id}": [
+    "GET"
+  ],
+  "/v1/public/stores/{store_id}/review": [
+    "DELETE",
+    "PUT"
+  ],
   "/v1/public/trending": [
     "GET"
   ],
