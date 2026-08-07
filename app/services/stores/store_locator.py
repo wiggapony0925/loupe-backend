@@ -238,7 +238,10 @@ async def nearby_stores(
         # single slow moment would otherwise lock a real neighbourhood to
         # "no shops" for 24 h — which is exactly what happened to Queens.
         logger.warning(
-            "empty store result at %.3f,%.3f (r=%skm) — not caching", lat, lng, radius_km
+            "empty store result at %.3f,%.3f (r=%skm) — not caching",
+            lat,
+            lng,
+            radius_km,
         )
         return NearbyStoresRead(stores=[], source="live")
     await kv_set(
