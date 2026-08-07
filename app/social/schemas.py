@@ -254,6 +254,8 @@ class SocialPortfolioItemsRead(BaseModel):
 __all__ = [
     "USERNAME_PATTERN",
     "DiscoverRead",
+    "ExploreCard",
+    "ExploreRead",
     "FollowRequestRead",
     "FollowStateRead",
     "FriendOwnerRead",
@@ -270,3 +272,29 @@ __all__ = [
     "SocialSealedItem",
     "SocialUserCard",
 ]
+
+
+class ExploreCard(BaseModel):
+    """One tile in the Explore mosaic — a card somebody owns."""
+
+    #: Holding id, unique per tile.
+    id: uuid.UUID
+    #: Catalog card, so a tap can deep-link the card page.
+    card_id: uuid.UUID
+    card_name: str | None = None
+    image_url: str
+    #: Whose it is — the tile's route to a person.
+    username: str
+    #: Drives the mosaic's occasional double-size tile: the standouts get
+    #: the big cell, so the grid has rhythm instead of uniform monotony.
+    is_hero: bool = False
+
+
+class ExploreRead(BaseModel):
+    """``GET /v1/social/explore`` — the Community browse grid.
+
+    Cards from PUBLIC collections only, ranked and laid out server-side so
+    every client renders the same mosaic verbatim (house rule).
+    """
+
+    cards: list[ExploreCard] = []

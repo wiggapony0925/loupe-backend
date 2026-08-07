@@ -12,7 +12,7 @@ from app.social.services._common import (
     RESERVED_USERNAMES,
 )
 from app.social.services.collections import collection, friend_owners, portfolio_items
-from app.social.services.discovery import discover, search, suggested
+from app.social.services.discovery import discover, explore, search, suggested
 from app.social.services.engagement import like, unlike, view_profile
 from app.social.services.graph import (
     accept_request,
@@ -41,6 +41,7 @@ __all__ = [
     "deactivate",
     "decline_request",
     "discover",
+    "explore",
     "follow",
     "followers",
     "following",

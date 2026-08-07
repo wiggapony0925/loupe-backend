@@ -667,6 +667,9 @@
   "/v1/social/discover": [
     "GET"
   ],
+  "/v1/social/explore": [
+    "GET"
+  ],
   "/v1/social/me": [
     "DELETE",
     "GET",

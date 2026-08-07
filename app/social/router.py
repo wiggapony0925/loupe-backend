@@ -19,6 +19,7 @@ from app.platform.rate_limit import rate_limit
 from app.social import avatars, service
 from app.social.schemas import (
     DiscoverRead,
+    ExploreRead,
     FollowRequestRead,
     FollowStateRead,
     FriendOwnerRead,
@@ -189,6 +190,21 @@ async def discover_collectors(
     """Ranked and split by the backend — `featured` and `more` are disjoint;
     clients render them verbatim (no slicing, no dedupe, no ordering)."""
     return await service.discover(db, user)
+
+
+@router.get(
+    "/explore",
+    response_model=ExploreRead,
+    summary="The Community browse grid — card art from public collections",
+    dependencies=[Depends(search_limit)],
+)
+async def explore_cards(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> ExploreRead:
+    """Ranked AND laid out server-side (including which tiles are heroes),
+    so every client draws the same mosaic."""
+    return await service.explore(db, user)
 
 
 @router.get(

@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import uuid
 from decimal import Decimal
+from urllib.parse import quote
 
 import pytest
 
@@ -499,3 +500,101 @@ async def test_the_peek_costs_a_FIXED_number_of_queries(db_session, created_user
     assert all(peeks[u.id].count == 1 for u in users)
     # Count + art. Five collectors must not cost ten round trips.
     assert len(statements) == 2, statements
+
+
+# ── Explore grid + identifier search ──
+
+
+@pytest.mark.asyncio
+async def test_explore_returns_card_art_from_public_collections(
+    client, db_session, created_user, second_user
+):
+    await _claim(client, created_user, "browser")
+    await _claim(client, second_user, "sharer")
+    for value in ("300.00", "200.00"):
+        grade = await _add_graded_card(db_session, second_user, value)
+        card = await db_session.get(Card, grade.card_id)
+        card.image_url = f"https://img.example/{value}.png"
+    await db_session.commit()
+
+    data = assert_envelope_ok(
+        await client.get("/v1/social/explore", headers=_headers(created_user))
+    )
+    assert len(data["cards"]) == 2
+    assert all(c["image_url"] for c in data["cards"]), "a tile IS its art"
+    assert data["cards"][0]["username"] == "sharer"
+    # The first tile leads a hero band; the client's grid math relies on it.
+    assert data["cards"][0]["is_hero"] is True
+
+
+@pytest.mark.asyncio
+async def test_explore_excludes_private_collections_and_your_own_cards(
+    client, db_session, created_user, second_user
+):
+    """A browse grid of your own cards is a mirror, and a private vault
+    must not be browsable by strangers."""
+    await _claim(client, created_user, "mine")
+    await _claim(client, second_user, "hidden", is_private=True)
+    for user in (created_user, second_user):
+        grade = await _add_graded_card(db_session, user, "100.00")
+        card = await db_session.get(Card, grade.card_id)
+        card.image_url = "https://img.example/x.png"
+    await db_session.commit()
+
+    data = assert_envelope_ok(
+        await client.get("/v1/social/explore", headers=_headers(created_user))
+    )
+    assert data["cards"] == []
+
+
+@pytest.mark.asyncio
+async def test_search_finds_a_collector_by_exact_email(
+    client, created_user, second_user
+):
+    await _claim(client, created_user, "seeker")
+    await _claim(client, second_user, "findme")
+
+    data = assert_envelope_ok(
+        await client.get(
+            f"/v1/social/search?q={quote(second_user.email)}",
+            headers=_headers(created_user),
+        )
+    )
+    assert [u["username"] for u in data] == ["findme"]
+    # The address is a lookup key, never something the API hands back.
+    assert all("email" not in u for u in data)
+
+
+@pytest.mark.asyncio
+async def test_search_will_not_harvest_emails_by_prefix(
+    client, created_user, second_user
+):
+    """Exact-match only. Partial email search would turn the collector
+    directory into an address-harvesting tool."""
+    await _claim(client, created_user, "seeker")
+    await _claim(client, second_user, "findme")
+
+    local_part = second_user.email.split("@")[0][:6]
+    data = assert_envelope_ok(
+        await client.get(
+            f"/v1/social/search?q={quote(local_part)}",
+            headers=_headers(created_user),
+        )
+    )
+    assert [u["username"] for u in data] == []
+
+
+@pytest.mark.asyncio
+async def test_search_finds_a_collector_by_account_id(
+    client, created_user, second_user
+):
+    """The id a support conversation would quote."""
+    await _claim(client, created_user, "seeker")
+    await _claim(client, second_user, "findme")
+
+    data = assert_envelope_ok(
+        await client.get(
+            f"/v1/social/search?q={second_user.id}", headers=_headers(created_user)
+        )
+    )
+    assert [u["username"] for u in data] == ["findme"]
