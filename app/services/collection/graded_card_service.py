@@ -425,6 +425,15 @@ async def update(
 ) -> GradedCard:
     row = await _load_owned(db, user, grade_id)
     fields = payload.model_fields_set
+    # What the holding was worth BEFORE this edit, and what we would have
+    # derived for it under its OLD facts. Comparing the two is how we tell a
+    # value we computed from one the owner typed — see the repricing block
+    # at the end of this function.
+    card_for_value = await db.get(Card, row.card_id)
+    value_before = row.estimated_value_usd
+    derived_before = holding_valuation_service.derive_estimated_value(
+        card_for_value, condition=row.condition, explicit=None
+    )
 
     # House switch owns RAW ↔ slab normalization. The schema validator rewrites
     # grade/condition/subgrades, but those derived fields are often NOT in
@@ -454,16 +463,26 @@ async def update(
         row.notes = payload.notes
     if "estimated_value_usd" in fields:
         row.estimated_value_usd = payload.estimated_value_usd
-    elif row.estimated_value_usd is None:
-        # Condition may have just changed, or the holding predates valuation
-        # on create. Only fill a NULL — never silently overwrite a value the
-        # owner set, and never re-derive one we already derived (that would
-        # make every edit quietly re-price the card).
-        row.estimated_value_usd = holding_valuation_service.derive_estimated_value(
-            await db.get(Card, row.card_id),
-            condition=row.condition,
-            explicit=None,
+    else:
+        # REPRICE a derived value when the facts it was derived FROM change.
+        #
+        # A holding's value depends on its raw condition (a damaged card is
+        # held at 30% of market; a slab has no raw condition and sits at the
+        # full floor). This block used to fill only a NULL, so a collector
+        # who slabbed a damaged card — or corrected a condition — kept the
+        # old number forever and their total never moved. That is the whole
+        # promise of the figure, so it is worth being careful about.
+        #
+        # The care: we only replace a value we can PROVE we derived, by
+        # checking it still equals what the old facts would produce. A number
+        # the owner typed differs from that and is left alone. (If they typed
+        # exactly the market price, repricing is a no-op in spirit anyway.)
+        derived_now = holding_valuation_service.derive_estimated_value(
+            card_for_value, condition=row.condition, explicit=None
         )
+        was_derived = value_before is None or value_before == derived_before
+        if was_derived and derived_now is not None:
+            row.estimated_value_usd = derived_now
     if "purchase_price_usd" in fields:
         row.purchase_price_usd = payload.purchase_price_usd
     if "purchase_date" in fields:

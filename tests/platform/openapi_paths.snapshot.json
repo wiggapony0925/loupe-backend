@@ -593,6 +593,9 @@
   "/v1/public/legal/{slug}": [
     "GET"
   ],
+  "/v1/public/places/search": [
+    "GET"
+  ],
   "/v1/public/search": [
     "GET"
   ],
