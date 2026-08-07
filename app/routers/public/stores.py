@@ -58,6 +58,10 @@ async def stores_nearby(
     # "★ 4.3 (12)" and a filled heart without fanning out per store.
     ratings = await store_reviews.aggregates(db, [s.id for s in found.stores])
     saved = await saved_stores.saved_ids(db, user)
+    # Photography for the drawer cards. Bounded + cached, so this adds
+    # ~0 s once an area has been seen; before this, list cards had no
+    # photo at all and always fell back to the drawn placeholder.
+    await store_photos.photos_for_many(found.stores)
     for store in found.stores:
         rating, count = ratings.get(store.id, (None, 0))
         store.rating = rating

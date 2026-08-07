@@ -12,7 +12,9 @@ No API keys, no per-request billing — the whole locator stays $0.
 
 from __future__ import annotations
 
+import asyncio
 import re
+from typing import Any
 from urllib.parse import quote
 
 import httpx
@@ -171,4 +173,67 @@ async def photo_for(
     return found
 
 
-__all__ = ["photo_for"]
+async def photos_for_many(
+    stores: list[Any],
+    *,
+    deadline_s: float = 3.0,
+    concurrency: int = 12,
+) -> None:
+    """Fill ``photo_url`` on a LIST of stores, in place — fast or not at all.
+
+    The map drawer used to show art blocks for every shop because only the
+    DETAIL endpoint resolved photography; the list never did. Resolving 40
+    shops serially would obviously be worse than no photos, so:
+
+      • cached shops (the common case after the first visit) cost nothing;
+      • misses resolve concurrently under a HARD deadline — whatever lands
+        in time is returned, and the rest keep resolving in the background
+        so they are cached and instant on the next open.
+
+    Chains are resolved ONCE. A search around Newark returns seven GameStops,
+    all pointing at the same Wikidata entity; resolving per store fetched
+    that entity seven times and spent the deadline on duplicates.
+    """
+    pending = [s for s in stores if not s.photo_url and (s.website or s.wikidata_id)]
+    if not pending:
+        return
+
+    # Group by what the photo actually comes from, so every GameStop shares
+    # one lookup and the deadline is spent on DISTINCT shops. The key mirrors
+    # photo_for's own priority — wikidata wins over website — because keying
+    # on BOTH split the chain again: branches share a brand entity but each
+    # has its own store-page URL.
+    groups: dict[str, list[Any]] = {}
+    for store in pending:
+        key = f"wd:{store.wikidata_id}" if store.wikidata_id else f"web:{store.website}"
+        groups.setdefault(key, []).append(store)
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def resolve(group: list[Any]) -> None:
+        async with sem:
+            lead = group[0]
+            url = await photo_for(
+                lead.id,
+                osm_image=None,
+                website=lead.website,
+                wikidata=lead.wikidata_id,
+            )
+            for store in group:
+                store.photo_url = url
+                if store is not lead:
+                    # Give each branch its own cache row so a later single
+                    # store lookup is a hit too.
+                    await kv_set(
+                        _cache_key(store.id), url or "", ttl_seconds=CACHE_TTL_S
+                    )
+
+    tasks = [asyncio.create_task(resolve(g)) for g in groups.values()]
+    _done, still_running = await asyncio.wait(tasks, timeout=deadline_s)
+    if still_running:
+        # Deliberately NOT cancelled: let them finish and populate the
+        # week-long cache so the next request has them ready.
+        logger.info("%s store photos still resolving past deadline", len(still_running))
+
+
+__all__ = ["photo_for", "photos_for_many"]

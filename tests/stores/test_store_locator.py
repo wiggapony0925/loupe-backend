@@ -430,3 +430,128 @@ async def test_all_queries_failing_still_raises(monkeypatch):
     monkeypatch.setattr(store_locator, "_run_query", dead)
     with pytest.raises(TimeoutError):
         await store_locator._fetch_overpass(1.0, 1.0, 12000)
+
+
+# ── Upstream resilience ───────────────────────────────────────────────────
+# These lock in the fixes for "it takes forever to find stores": mirrors are
+# hedged rather than tried one-after-another, and a mirror serving a REGIONAL
+# extract must never win the race with a fast empty answer.
+
+
+@pytest.mark.asyncio
+async def test_hedges_onto_next_mirror_when_the_first_stalls(monkeypatch):
+    """A stalled mirror costs the hedge delay, not its full timeout."""
+    import asyncio
+
+    monkeypatch.setattr(store_locator, "HEDGE_DELAY_S", 0.05)
+    monkeypatch.setattr(store_locator, "_preferred_url", None)
+
+    async def fake_post(client, url, query):
+        if "openstreetmap.fr" in url:
+            await asyncio.sleep(30)  # the sick mirror
+        return [_element(name="Hedged Hobby")]
+
+    monkeypatch.setattr(store_locator, "_post_query", fake_post)
+    elements = await asyncio.wait_for(store_locator._run_query("q"), timeout=5)
+    assert elements[0]["tags"]["name"] == "Hedged Hobby"
+
+
+@pytest.mark.asyncio
+async def test_empty_mirror_never_beats_a_real_answer(monkeypatch):
+    """overpass.osm.ch answers US queries with a fast, confident, WRONG 0.
+
+    It returned HTTP 200 + zero elements in under a second, so a plain
+    first-success race preferred it and the map came back empty.
+    """
+    import asyncio
+
+    monkeypatch.setattr(store_locator, "HEDGE_DELAY_S", 0.05)
+    monkeypatch.setattr(store_locator, "_preferred_url", None)
+
+    async def fake_post(client, url, query):
+        if "openstreetmap.fr" in url:
+            await asyncio.sleep(0.3)  # correct but slower
+            return [_element(name="Real Card Shop")]
+        return []  # regional extract: instant and empty
+
+    monkeypatch.setattr(store_locator, "_post_query", fake_post)
+    elements = await store_locator._run_query("q")
+    assert [e["tags"]["name"] for e in elements] == ["Real Card Shop"]
+
+
+@pytest.mark.asyncio
+async def test_all_empty_is_still_a_valid_empty_answer(monkeypatch):
+    """When every mirror agrees there's nothing, that's an answer, not an error."""
+
+    async def fake_post(client, url, query):
+        return []
+
+    monkeypatch.setattr(store_locator, "_post_query", fake_post)
+    monkeypatch.setattr(store_locator, "HEDGE_DELAY_S", 0.01)
+    assert await store_locator._run_query("q") == []
+
+
+@pytest.mark.asyncio
+async def test_slow_name_net_does_not_hold_up_the_tag_results(monkeypatch):
+    """The name net is a bonus; it must never gate first paint."""
+    import asyncio
+
+    monkeypatch.setattr(store_locator, "NAME_GRACE_S", 0.05)
+
+    async def fake_run(query):
+        if '"name"~' in query:
+            await asyncio.sleep(30)
+        return [_element(name="Tag Net Shop")]
+
+    monkeypatch.setattr(store_locator, "_run_query", fake_run)
+    elements = await asyncio.wait_for(
+        store_locator._fetch_overpass(40.7, -74.0, 15000), timeout=5
+    )
+    assert [e["tags"]["name"] for e in elements] == ["Tag Net Shop"]
+
+
+def test_name_query_has_no_craft_selector():
+    """The craft selector took this query from 4s to a 40s+ timeout."""
+    assert '"craft"' not in store_locator._name_query(40.7, -74.0, 15000)
+
+
+def test_laundromats_are_not_card_shops():
+    """ "Showcase Card-op Laundr-o-mat" matched \\bcard\\b and shipped as a store."""
+    assert store_locator._category_for("laundry", "Card-op Laundr-o-mat") is None
+    assert store_locator._category_for("gift", "Hallmark Greeting Cards") is None
+    # A real card shop, and a core-tagged shop, both survive the filter.
+    assert store_locator._category_for("", "Card Connection") == "Card & game store"
+
+
+@pytest.mark.asyncio
+async def test_chain_branches_share_one_photo_lookup(monkeypatch):
+    """Seven GameStops share a brand entity but have distinct store URLs —
+    keying the dedupe on both fields fetched the same entity seven times."""
+    from app.services.stores import store_photos
+
+    calls: list[str] = []
+
+    async def fake_wikimedia(qid: str):
+        calls.append(qid)
+        return f"https://commons.example/{qid}.jpg"
+
+    monkeypatch.setattr(store_photos, "_wikimedia_image", fake_wikimedia)
+    monkeypatch.setattr(store_photos, "kv_get", lambda *a, **k: _none())
+    monkeypatch.setattr(store_photos, "kv_set", lambda *a, **k: _none())
+
+    class Store:
+        def __init__(self, i):
+            self.id = f"node:{i}"
+            self.photo_url = None
+            self.website = f"https://gamestop.com/store/{i}"  # distinct per branch
+            self.wikidata_id = "Q202210"  # same brand
+
+    stores = [Store(i) for i in range(7)]
+    await store_photos.photos_for_many(stores, deadline_s=5)
+
+    assert calls == ["Q202210"], "chain must resolve exactly once"
+    assert all(s.photo_url == "https://commons.example/Q202210.jpg" for s in stores)
+
+
+async def _none():
+    return None
