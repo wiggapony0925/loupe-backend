@@ -89,6 +89,31 @@ def _distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return 2 * r * math.asin(math.sqrt(a))
 
 
+def _tag_query(lat: float, lng: float, radius_m: int) -> str:
+    """Indexed shop-tag lookup — cheap, works even in dense cities."""
+    shops = "|".join(sorted(CORE_SHOP_TAGS | LIKELY_SHOP_TAGS))
+    return f"""
+[out:json][timeout:{int(OVERPASS_TIMEOUT_S)}];
+nwr["shop"~"^({shops})$"](around:{radius_m},{lat},{lng});
+out center {MAX_RESULTS * 3};
+""".strip()
+
+
+def _name_query(lat: float, lng: float, radius_m: int) -> str:
+    """Name lookup — catches card shops tagged as something else, but makes
+    Overpass scan every shop name in the radius, so it is the expensive half
+    and is allowed to fail on its own without taking the tag net with it."""
+    name_re = "card|tcg|pok[eé]mon|yu.?gi|collectib"
+    return f"""
+[out:json][timeout:{int(OVERPASS_TIMEOUT_S)}];
+(
+  nwr["shop"]["name"~"{name_re}",i](around:{radius_m},{lat},{lng});
+  nwr["craft"]["name"~"{name_re}",i](around:{radius_m},{lat},{lng});
+);
+out center {MAX_RESULTS * 2};
+""".strip()
+
+
 def _overpass_query(lat: float, lng: float, radius_m: int) -> str:
     shops = "|".join(sorted(CORE_SHOP_TAGS | LIKELY_SHOP_TAGS))
     # Two selectors: the shop-tag net, plus a name net that catches card
@@ -184,10 +209,8 @@ def _parse_elements(
     return out[:MAX_RESULTS]
 
 
-async def _fetch_overpass(
-    lat: float, lng: float, radius_m: int
-) -> list[dict[str, Any]]:
-    query = _overpass_query(lat, lng, radius_m)
+async def _run_query(query: str) -> list[dict[str, Any]]:
+    """One Overpass query across the mirrors. Raises if all of them fail."""
     last_error: Exception | None = None
     async with httpx.AsyncClient(
         timeout=OVERPASS_TIMEOUT_S + 5, headers={"User-Agent": USER_AGENT}
@@ -201,6 +224,30 @@ async def _fetch_overpass(
                 last_error = exc
                 logger.warning("Overpass endpoint %s failed: %s", url, exc)
     raise last_error if last_error else RuntimeError("no overpass endpoints")
+
+
+async def _fetch_overpass(
+    lat: float, lng: float, radius_m: int
+) -> list[dict[str, Any]]:
+    """Tag net + name net, run INDEPENDENTLY and merged.
+
+    The name net is the expensive one; when it times out in a dense city it
+    used to fail the whole search and the area came back empty. Now its
+    failure only costs those extra matches.
+    """
+    results: list[dict[str, Any]] = []
+    errors: list[Exception] = []
+
+    for build in (_tag_query, _name_query):
+        try:
+            results.extend(await _run_query(build(lat, lng, radius_m)))
+        except Exception as exc:
+            errors.append(exc)
+            logger.warning("overpass %s failed: %s", build.__name__, exc)
+
+    if not results and errors:
+        raise errors[0]
+    return results
 
 
 async def nearby_stores(

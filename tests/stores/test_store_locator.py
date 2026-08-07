@@ -398,3 +398,35 @@ async def test_empty_results_are_never_cached(monkeypatch):
 
     second = await store_locator.nearby_stores(5.0, 5.0, 15)
     assert [s.name for s in second.stores] == ["Late Cards"]
+
+
+@pytest.mark.asyncio
+async def test_name_net_failure_does_not_lose_tag_results(monkeypatch):
+    """The name query is the expensive half; in a dense city it times out.
+    That must cost only its own extra matches, never the whole search —
+    which is what blanked a live area."""
+    calls = {"n": 0}
+
+    async def flaky(query: str):
+        calls["n"] += 1
+        if '"name"~' in query:
+            raise TimeoutError("overpass 504")  # the expensive net
+        return [_element(id=1, name="Tag Cards", shop="games", lat=1.0, lon=1.0)]
+
+    monkeypatch.setattr(store_locator, "_run_query", flaky)
+    els = await store_locator._fetch_overpass(1.0, 1.0, 12000)
+    assert [e["tags"]["name"] for e in els] == ["Tag Cards"]
+    assert calls["n"] == 2  # both were attempted
+
+
+@pytest.mark.asyncio
+async def test_all_queries_failing_still_raises(monkeypatch):
+    """If nothing comes back at all the caller must see the failure, so the
+    area reports 'unavailable' rather than being cached as empty."""
+
+    async def dead(query: str):
+        raise TimeoutError("overpass down")
+
+    monkeypatch.setattr(store_locator, "_run_query", dead)
+    with pytest.raises(TimeoutError):
+        await store_locator._fetch_overpass(1.0, 1.0, 12000)
