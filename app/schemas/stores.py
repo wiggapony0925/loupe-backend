@@ -9,6 +9,32 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class OpeningHoursDay(BaseModel):
+    """One row of the store's week."""
+
+    day: str
+    short: str
+    #: Time spans as written upstream ("11:00-21:00"). Empty means closed —
+    #: unless `unknown`, which means the data never said.
+    ranges: list[str] = []
+    #: The source didn't mention this day. Rendered as "—", never "Closed":
+    #: claiming a shop is shut when we simply weren't told sends someone on
+    #: a wasted trip.
+    unknown: bool = False
+
+
+class OpeningHoursWeek(BaseModel):
+    """``opening_hours`` expanded into an ordered Monday-first week."""
+
+    days: list[OpeningHoursDay] = []
+    always_open: bool = False
+    #: Qualifiers that aren't weekdays ("Public holidays: closed") plus any
+    #: rule the parser didn't understand, kept verbatim so nothing is lost.
+    notes: list[str] = []
+    #: The original expression, for debugging and for clients that want it.
+    raw: str | None = None
+
+
 class NearbyStore(BaseModel):
     """One physical shop near the caller. Positions are WGS84."""
 
@@ -24,6 +50,9 @@ class NearbyStore(BaseModel):
     website: str | None = None
     phone: str | None = None
     opening_hours: str | None = None
+    #: The same hours expanded into an ordered week. Parsed server-side so
+    #: web and mobile can't disagree about the same shop.
+    hours: OpeningHoursWeek | None = None
     #: Photo the shop publishes (OSM ``image`` tag, else its site's
     #: og:image). ``None`` = the client renders its own art block.
     photo_url: str | None = None

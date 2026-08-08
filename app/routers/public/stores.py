@@ -26,6 +26,7 @@ from app.schemas.stores import (
     StoreSaveRead,
 )
 from app.services.stores import (
+    opening_hours,
     saved_stores,
     store_locator,
     store_photos,
@@ -106,6 +107,9 @@ async def store_detail(
         website=store.website,
         wikidata=store.wikidata_id,
     )
+    # Expand the hours for the detail sheet — the list doesn't render a week,
+    # so it isn't worth the work there.
+    store.hours = opening_hours.parse(store.opening_hours)
     rating, count = await store_reviews.aggregate(db, store_id)
     store.rating = rating
     store.review_count = count

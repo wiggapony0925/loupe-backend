@@ -9,13 +9,9 @@ This is the reported scenario, end to end through the real API.
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 import pytest
 
 from app.models.card import Card
-from app.models.enums import GradeHouseEnum, RawConditionEnum
-from app.models.grade import GradedCard
 from tests.conftest import assert_envelope_ok
 from tests.factories import make_card
 
