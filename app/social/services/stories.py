@@ -49,9 +49,9 @@ from app.social.schemas import (
     StoryTrayRead,
     StoryViewerRead,
 )
+from app.social.services._common import get_profile
 from app.social.services.feed_common import author_card, relationships_to
 from app.social.services.safety import TARGET_POST, enforce
-from app.social.services._common import get_profile
 
 #: How many live stories one account may hold. Past this the oldest is not
 #: deleted — posting is refused — because silently dropping something
