@@ -515,3 +515,30 @@ async def test_an_unsupported_type_is_refused(client, created_user):
         headers=_headers(created_user),
     )
     assert_envelope_error(resp, expected_status=415)
+
+
+@pytest.mark.asyncio
+async def test_the_tray_is_built_from_the_follow_graph(
+    client, created_user, second_user, db_session
+):
+    """A public stranger's story is VIEWABLE (permalink, profile) but not
+    RECOMMENDED — the tray is your follow graph, not the whole product."""
+    await _claim(client, created_user, "poster11")
+    await _claim(client, second_user, "browser11")
+    await _post_story(client, created_user)
+
+    tray = assert_envelope_ok(
+        await client.get("/v1/social/stories/tray", headers=_headers(second_user))
+    )
+    assert tray["entries"] == []
+
+    await client.post(
+        "/v1/social/users/poster11/follow", headers=_headers(second_user)
+    )
+    tray = assert_envelope_ok(
+        await client.get("/v1/social/stories/tray", headers=_headers(second_user))
+    )
+    assert [e["author"]["username"] for e in tray["entries"]] == ["poster11"]
+    # The preview's kind ships with the entry so clients never hand a video
+    # clip to an image view.
+    assert tray["entries"][0]["kind"] == "image"

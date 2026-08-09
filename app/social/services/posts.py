@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_admin_user
@@ -481,7 +481,13 @@ async def _foryou_feed(
         .subquery()
     )
 
-    age_hours = func.extract("epoch", func.now() - SocialPost.created_at) / 3600.0
+    # Clamped at zero: a post stamped in the future (clock skew, a seeded
+    # row) would otherwise drive the denominator's base to zero — or
+    # negative, where a fractional exponent is undefined — and the database
+    # raising there 500s the whole For You tab. `case`, not `greatest`,
+    # because the test suite runs on SQLite, which lacks it.
+    raw_age_hours = func.extract("epoch", func.now() - SocialPost.created_at) / 3600.0
+    age_hours = case((raw_age_hours < 0.0, 0.0), else_=raw_age_hours)
     # Engagement over a decaying denominator — Hacker News' shape. Ordering
     # by raw counts alone would freeze the feed on whatever went viral once.
     score = (

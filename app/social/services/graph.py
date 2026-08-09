@@ -6,6 +6,7 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -126,11 +127,24 @@ async def apply_pending_requests(db: AsyncSession, user: User) -> int:
             db.add(SocialFollow(follower_id=rid, followee_id=user.id))
             added.add(rid)
             applied += 1
-        # Every pending row goes, applied or not: none of them can ever be
-        # answered while the account is public.
-        await db.delete(req)
 
-    await db.commit()
+    # Every pending row goes, applied or not: none of them can ever be
+    # answered while the account is public. A bulk DELETE (not per-row ORM
+    # deletes) carries no expected row count, so a concurrent caller having
+    # already swept them is a no-op instead of a StaleDataError.
+    await db.execute(
+        delete(SocialFollowRequest).where(SocialFollowRequest.target_id == user.id)
+    )
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The docstring's "concurrent callers" promise, actually kept: two
+        # overlapping requests both read `existing` before either committed,
+        # so the loser's INSERT hits the composite PK. The winner already
+        # did the work — roll back and report nothing applied.
+        await db.rollback()
+        return 0
     if applied:
         logger.info("auto-accepted %s follow request(s) for a public account", applied)
     return applied

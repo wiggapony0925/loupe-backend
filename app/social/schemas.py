@@ -469,6 +469,9 @@ class StoryTrayEntry(BaseModel):
     latest_at: datetime
     #: First frame to show behind the avatar while the viewer loads.
     preview_url: str | None = None
+    #: What `preview_url` points at. Clients must not hand an mp4 to an
+    #: image view — that rendered as a blank ring for video stories.
+    kind: str = "image"
 
 
 class StoryTrayRead(BaseModel):

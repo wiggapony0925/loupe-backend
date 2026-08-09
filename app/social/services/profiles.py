@@ -30,6 +30,9 @@ from app.social.services._common import (
     profile_read,
 )
 from app.social.services.graph import apply_pending_requests
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # ── My profile ──
 
@@ -41,8 +44,15 @@ async def get_me(db: AsyncSession, user: User) -> SocialMeRead:
     # Enforce the public-account invariant before REPORTING the count: this
     # endpoint is what draws the inbox badge, so healing anywhere later would
     # still show a badge for requests that can never be answered.
+    # Housekeeping must never fail the READ: /social/me is the gate the whole
+    # Community tab hangs off, and a hiccup here used to 500 it — which the
+    # app rendered as "claim a username" to people who already had one.
     if not profile.is_private:
-        await apply_pending_requests(db, user)
+        try:
+            await apply_pending_requests(db, user)
+        except Exception:  # noqa: BLE001 — degrade to skipping the sweep
+            logger.exception("pending-request sweep failed; serving /me anyway")
+            await db.rollback()
     pending = await count(
         db,
         select(func.count())
