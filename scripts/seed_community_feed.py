@@ -46,11 +46,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_sessionmaker
 from app.models.card import Card
+from app.models.notification import Notification
 from app.models.user import User
 from app.social import post_media, story_media
 from app.social.models import (
@@ -704,10 +705,114 @@ async def backfill_media(handle: str) -> None:
             )
 
 
+async def backfill_notifications() -> None:
+    """Create the notifications the seeded posts WOULD have produced.
+
+    Seeded posts are written straight to the database — deliberately, that
+    is what makes the seed fast and idempotent — but that bypasses
+    ``create_post``, and with it the "@x posted" fanout. The result is a
+    populated feed over an inbox stuck at zero, which reads as the
+    notification feature being broken when it is actually unexercised.
+
+    This replays :func:`feed_notify.posted` for every seeded post, so the
+    rows carry the REAL pipeline's titles, previews, hrefs and dedupe keys
+    — meaning it is idempotent (dedupe refuses replays) and a later real
+    notification for the same post can't double up.
+
+    Push is stubbed out for the replay: a hundred backfilled rows must not
+    become a hundred push notifications to whatever device is signed in.
+    One real push goes out at the end for the newest post, so the
+    device-buzz path gets exercised exactly once.
+    """
+    from app.services import notification_service, push_service
+    from app.social.services import feed_notify
+
+    # Stub the push transport BEFORE any notify call. The rows still land;
+    # nothing buzzes.
+    real_send = push_service.send_to_user
+
+    async def _no_push(*args: object, **kwargs: object) -> int:
+        return 0
+
+    push_service.send_to_user = _no_push  # type: ignore[assignment]
+
+    sm = get_sessionmaker()
+    try:
+        async with sm() as db:
+            rows = (
+                await db.execute(
+                    select(SocialPost, SocialProfile, User)
+                    .join(SocialProfile, SocialProfile.user_id == SocialPost.author_id)
+                    .join(User, User.id == SocialPost.author_id)
+                    .where(SocialPost.deleted_at.is_(None))
+                    .order_by(SocialPost.created_at.asc())
+                )
+            ).all()
+            logger.info("replaying the posted-fanout for %s posts", len(rows))
+
+            for i, (post, profile, user) in enumerate(rows):
+                await feed_notify.posted(
+                    db, author=user, author_profile=profile, post=post
+                )
+                if (i + 1) % 20 == 0:
+                    logger.info("  %s/%s", i + 1, len(rows))
+
+            # Backdate each notification to its post: an inbox where a
+            # hundred things happened "just now" reads as seeded, which is
+            # exactly what it must not read as.
+            await db.execute(
+                text(
+                    """
+                    UPDATE notifications n
+                    SET created_at = p.created_at + interval '2 minutes'
+                    FROM social_posts p
+                    WHERE n.kind = 'social_new_post'
+                      AND n.dedupe_key LIKE 'social_new_post:' || p.id || ':%'
+                    """
+                )
+            )
+            await db.commit()
+
+            total = (
+                await db.execute(select(func.count()).select_from(Notification))
+            ).scalar_one()
+            logger.info("done — %s notification rows now exist", total)
+
+            # One REAL push for the newest post, so the phone actually buzzes
+            # and the whole pipe (token → Expo → banner) is proven once.
+            push_service.send_to_user = real_send  # type: ignore[assignment]
+            newest, newest_profile, _ = rows[-1]
+            followers = (
+                await db.execute(
+                    select(SocialFollow.follower_id).where(
+                        SocialFollow.followee_id == newest.author_id
+                    )
+                )
+            ).scalars()
+            for follower_id in followers:
+                sent = await push_service.send_to_user(
+                    follower_id,
+                    title=f"{newest_profile.username} posted",
+                    body=(newest.body or "New post")[:120],
+                    data={"href": f"/app/community/p/{newest.id}"},
+                )
+                if sent:
+                    logger.info("real push delivered to user %s", follower_id)
+    finally:
+        push_service.send_to_user = real_send  # type: ignore[assignment]
+    del notification_service
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handle", default=DEFAULT_VIEWER)
     parser.add_argument("--count", type=int, default=TARGET_POSTS)
+    parser.add_argument(
+        "--backfill-notifications",
+        action="store_true",
+        help="Replay the posted-fanout for seeded posts so the inbox matches "
+        "the feed. Idempotent via the real dedupe keys.",
+    )
     parser.add_argument(
         "--backfill-media",
         action="store_true",
@@ -715,7 +820,9 @@ def main() -> None:
         "seed stories. Additive: deletes nothing.",
     )
     args = parser.parse_args()
-    if args.backfill_media:
+    if args.backfill_notifications:
+        asyncio.run(backfill_notifications())
+    elif args.backfill_media:
         asyncio.run(backfill_media(args.handle))
     else:
         asyncio.run(seed(args.handle, args.count))
