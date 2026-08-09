@@ -1089,7 +1089,7 @@ async def test_top_is_the_default_for_a_tag_page(client, db_session, created_use
 async def test_for_you_never_recommends_a_private_account_you_follow(
     client, db_session, created_user, second_user
 ):
-    """"Can they see it" and "may we recommend it" are different questions.
+    """ "Can they see it" and "may we recommend it" are different questions.
 
     A follower can open a private friend's post from Following or from a
     permalink. Finding it in For You, ranked between two strangers' posts,
@@ -1113,7 +1113,9 @@ async def test_for_you_never_recommends_a_private_account_you_follow(
     # Following: yes — they asked for this person's posts.
     following = assert_envelope_ok(
         await client.get(
-            "/v1/social/feed", params={"tab": "following"}, headers=_headers(created_user)
+            "/v1/social/feed",
+            params={"tab": "following"},
+            headers=_headers(created_user),
         )
     )
     assert post["id"] in [p["id"] for p in following["items"]]
@@ -1142,7 +1144,9 @@ async def test_a_private_post_never_lands_on_a_hashtag_page(
     photo has no business on one — not even for its own followers."""
     await _claim(client, created_user, "viewerht")
     await _claim(client, second_user, "privateht", is_private=True)
-    await client.post("/v1/social/users/privateht/follow", headers=_headers(created_user))
+    await client.post(
+        "/v1/social/users/privateht/follow", headers=_headers(created_user)
+    )
     reqs = assert_envelope_ok(
         await client.get("/v1/social/requests", headers=_headers(second_user))
     )
@@ -1274,7 +1278,9 @@ async def test_an_edit_is_re_screened(client, created_user, monkeypatch):
 
     # And the original survives untouched.
     still = assert_envelope_ok(
-        await client.get(f"/v1/social/posts/{post['id']}", headers=_headers(created_user))
+        await client.get(
+            f"/v1/social/posts/{post['id']}", headers=_headers(created_user)
+        )
     )
     assert still["body"] == "cute pikachu"
     assert still["edited_at"] is None
@@ -1352,13 +1358,17 @@ async def test_an_edit_notifies_newly_mentioned_people_only_once(
 
     async def mention_notifications() -> int:
         rows = (
-            await db_session.execute(
-                select(Notification).where(
-                    Notification.user_id == second_user.id,
-                    Notification.kind == "social_mention",
+            (
+                await db_session.execute(
+                    select(Notification).where(
+                        Notification.user_id == second_user.id,
+                        Notification.kind == "social_mention",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return len(rows)
 
     assert await mention_notifications() == 0
