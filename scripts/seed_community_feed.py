@@ -1,16 +1,18 @@
 """Fill the community feed with ~100 realistic posts.
 
-**On the images.** These are REAL card photographs, downloaded at run time
-from the catalog's own image URLs (pokemontcg.io et al) — the same pictures
-the app already renders on every card page. That is a deliberate choice over
-scraping Google Images:
+**On the images.** Two real sources, mixed, because a feed of nothing but
+catalog scans doesn't look like a feed:
 
-* they are genuinely real photos of the actual cards being posted about,
-  which is what makes the seeded feed look like a real feed;
-* the app is already licensed to display them, and re-hosting arbitrary
-  Google results in a product would not be;
-* the URLs are stable, so this script doesn't rot the first time a scraper
-  selector changes.
+* **Wikimedia Commons photographs** (see ``_seed_images``) — actual photos
+  of binders, shop counters, tournament tables and cards on desks, taken by
+  real people. Freely licensed, with attribution carried back and appended
+  to the caption when the licence asks for it.
+* **Catalog card art** — the same images the app renders on card pages, for
+  posts that are about one specific card.
+
+Chosen over scraping Google Images: those results come with no licence you
+could point at, and re-hosting them inside a product is not something to do
+casually. Commons gives a real API, stated terms, and attribution data.
 
 Every post is written through the SAME helpers the API uses, so hashtags and
 mentions are extracted and indexed for real — the tag pages, trending chips
@@ -65,6 +67,9 @@ from app.social.services.feed_common import (
     extract_mention_handles,
 )
 from app.utils.logger import get_logger
+from scripts._seed_images import USER_AGENT as SEED_USER_AGENT
+from scripts._seed_images import SeedImage
+from scripts._seed_images import gather as gather_photos
 
 logger = get_logger("seed.feed")
 
@@ -109,6 +114,21 @@ CAPTIONS: list[str] = [
     "The art on {card} is still unmatched. #cardart #pokemon",
 ]
 
+#: Captions for the photo posts — about a haul, a shop trip or a binder,
+#: not about one card, so the picture and the words agree.
+PHOTO_CAPTIONS: list[str] = [
+    "Binder reorganisation day. Four hours, zero regrets. #collection #binder",
+    "Local shop run. Came for singles, left with a box. #lgs #pokemontcg",
+    "Today's haul laid out. Some of these are going straight to grading. #maildaymonday",
+    "This is what four years of collecting looks like. #collection #vintage",
+    "League night. Half the table is chasing the same card as me. #tcg #community",
+    "Sorting and sleeving the whole set tonight. #pokemon #collection",
+    "New display case finally arrived. Worth the wait. #collection",
+    "Pulled everything out to take stock. It's worse than I thought 😅 #collection",
+    "Shop had a whole case of vintage. Dangerous place. #lgs #vintage",
+    "Tournament weekend. Deck's tuned, sleeves are fresh. #tcg",
+]
+
 COMMENTS: list[str] = [
     "Insane pull. What's the centering like?",
     "Congrats! 🔥",
@@ -123,9 +143,16 @@ COMMENTS: list[str] = [
 ]
 
 
+#: Pause between image fetches. Wikimedia answers 429 ("your bot is making
+#: too many requests") to an unthrottled loop, and a seed run that silently
+#: drops half its photos looks like it worked.
+DOWNLOAD_DELAY_SECONDS = 0.4
+
+
 async def _download(client: httpx.AsyncClient, url: str) -> tuple[bytes, str] | None:
-    """Fetch one real card image. Returns None on any failure — a seeded
-    post without a photo is fine; a crashed seed run is not."""
+    """Fetch one real image. Returns None on any failure — a seeded post
+    without a photo is fine; a crashed seed run is not."""
+    await asyncio.sleep(DOWNLOAD_DELAY_SECONDS)
     try:
         resp = await client.get(url, timeout=20.0)
         resp.raise_for_status()
@@ -250,11 +277,25 @@ async def seed(handle: str, count: int) -> None:
         authors = list(cast.values())
         now = datetime.now(UTC)
 
-        async with httpx.AsyncClient(follow_redirects=True) as http:
+        photos = await gather_photos()
+        random.shuffle(photos)
+        logger.info("%s real photographs available from Commons", len(photos))
+
+        # The User-Agent is NOT optional: Wikimedia answers 403 to clients
+        # that don't identify themselves, and the failure is silent here
+        # because _download swallows it — the first run looked like it
+        # worked and quietly produced card art for every post.
+        async with httpx.AsyncClient(
+            follow_redirects=True, headers={"User-Agent": SEED_USER_AGENT}
+        ) as http:
             for i in range(todo):
                 author = authors[i % len(authors)]
                 card = random.choice(cards)
-                body = random.choice(CAPTIONS).format(card=card.name)
+                body = (
+                    random.choice(CAPTIONS).format(card=card.name)
+                    if i % 3 == 0
+                    else random.choice(PHOTO_CAPTIONS)
+                )
 
                 # Every ~7th post @-mentions someone, so mention linking and
                 # its notification path get exercised too.
@@ -271,6 +312,15 @@ async def seed(handle: str, count: int) -> None:
                     minutes=random.randint(0, 59),
                 )
 
+                # Two in three posts get a REAL photograph (a binder, a shop,
+                # cards on a table); the rest show the card's own art. A feed
+                # of nothing but catalog scans doesn't read as a feed.
+                photo: SeedImage | None = None
+                if photos and i % 3 != 0:
+                    photo = photos[i % len(photos)]
+                    if photo.credit:
+                        body = f"{body}\n\n{photo.credit}"
+
                 post = SocialPost(
                     author_id=author.id,
                     body=body,
@@ -280,9 +330,9 @@ async def seed(handle: str, count: int) -> None:
                 db.add(post)
                 await db.flush()
 
-                # A REAL photo of the card the caption is about.
-                if card.image_url:
-                    fetched = await _download(http, card.image_url)
+                image_url = photo.url if photo else card.image_url
+                if image_url:
+                    fetched = await _download(http, image_url)
                     if fetched is not None:
                         data, content_type = fetched
                         media_id = uuid.uuid4()
