@@ -358,7 +358,7 @@ class PostAuthor(BaseModel):
 
 
 class PostMediaRead(BaseModel):
-    """One image in a post's carousel."""
+    """One slide in a post's carousel — a photo or a video."""
 
     id: uuid.UUID
     url: str
@@ -367,6 +367,12 @@ class PostMediaRead(BaseModel):
     #: BEFORE the bytes arrive; without it every image pops the layout.
     width: int | None = None
     height: int | None = None
+    #: ``"image"`` or ``"video"``. Sent as a KIND rather than leaving the
+    #: clients to sniff the MIME type: three of them would each write their
+    #: own `startsWith("video/")`, and the first codec added off this list
+    #: would break whichever one was forgotten.
+    kind: str = "image"
+    content_type: str = "image/jpeg"
 
 
 class PostCardRef(BaseModel):
@@ -417,6 +423,85 @@ class PostRead(BaseModel):
     #: someone else's byline. Sent rather than derived so the clients don't
     #: each re-implement the rule and disagree about the staff case.
     can_edit: bool = False
+
+
+# ── Stories ──
+
+
+class StoryRead(BaseModel):
+    """One story card."""
+
+    id: uuid.UUID
+    author: PostAuthor
+    url: str
+    kind: str = "image"
+    content_type: str = "image/jpeg"
+    width: int | None = None
+    height: int | None = None
+    #: Video length. NULL for a still, which the client shows for its own
+    #: fixed dwell instead.
+    duration_ms: int | None = None
+    caption: str | None = None
+    created_at: datetime
+    expires_at: datetime
+    #: Whether the VIEWER has already opened this one — drives the ring.
+    seen: bool = False
+    #: Author only; 0 for everyone else. Nobody gets to see how many people
+    #: watched someone else's story.
+    view_count: int = 0
+    comment_count: int = 0
+    can_delete: bool = False
+
+
+class StoryTrayEntry(BaseModel):
+    """One avatar in the tray above the feed.
+
+    Composed server-side — order, unseen state and the preview frame all
+    come from here, so the row can't be assembled differently on two
+    clients and disagree about whose ring is lit.
+    """
+
+    author: PostAuthor
+    story_count: int
+    #: Lights the ring. False once every one of their live stories is seen.
+    has_unseen: bool
+    #: Newest story's timestamp, for "3h" under the avatar.
+    latest_at: datetime
+    #: First frame to show behind the avatar while the viewer loads.
+    preview_url: str | None = None
+
+
+class StoryTrayRead(BaseModel):
+    """The whole tray. `mine` is separated because it renders as the
+    "Your story" plus-button slot rather than as another avatar."""
+
+    mine: StoryTrayEntry | None = None
+    entries: list[StoryTrayEntry] = []
+
+
+class StoryCommentRead(BaseModel):
+    """One comment under a story.
+
+    A comment, not a DM — see :class:`app.social.models.SocialStoryComment`.
+    """
+
+    id: uuid.UUID
+    story_id: uuid.UUID
+    author: PostAuthor
+    body: str
+    created_at: datetime
+    can_delete: bool = False
+
+
+class StoryCommentCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=500)
+
+
+class StoryViewerRead(BaseModel):
+    """A person who opened your story. Author-only."""
+
+    viewer: PostAuthor
+    viewed_at: datetime
 
 
 class PostEdit(BaseModel):

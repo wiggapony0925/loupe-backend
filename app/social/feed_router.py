@@ -154,7 +154,11 @@ async def create_post(
         None, description="Optional catalog card this post showcases."
     ),
     images: list[UploadFile] = File(
-        [], description="Up to 4 JPEG/PNG/WebP images, 12 MB each."
+        [],
+        description=(
+            "Up to 4 slides. JPEG/PNG/WebP up to 12 MB, or MP4/QuickTime "
+            "video up to 120 MB."
+        ),
     ),
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
@@ -171,11 +175,17 @@ async def create_post(
         content_type = (image.content_type or "").lower()
         if content_type not in post_media.ALLOWED_CONTENT_TYPES:
             raise HTTPException(
-                status_code=415, detail="Photos must be JPEG, PNG or WebP"
+                status_code=415,
+                detail="Slides must be JPEG, PNG, WebP, MP4 or QuickTime",
             )
         data = await image.read()
-        if len(data) > post_media.MAX_IMAGE_BYTES:
-            raise HTTPException(status_code=413, detail="Image too large (max 12 MB)")
+        # The ceiling depends on the kind — a 40 MB video is normal, a 40 MB
+        # JPEG is someone uploading a RAW export by mistake.
+        if len(data) > post_media.max_bytes(content_type):
+            limit = post_media.max_bytes(content_type) // (1024 * 1024)
+            raise HTTPException(
+                status_code=413, detail=f"File too large (max {limit} MB)"
+            )
         if data:
             payloads.append(
                 posts_service.NewImage(body=data, content_type=content_type)

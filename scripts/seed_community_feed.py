@@ -47,11 +47,12 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_sessionmaker
 from app.models.card import Card
 from app.models.user import User
-from app.social import post_media
+from app.social import post_media, story_media
 from app.social.models import (
     SocialFollow,
     SocialPost,
@@ -61,12 +62,14 @@ from app.social.models import (
     SocialPostMedia,
     SocialPostMention,
     SocialProfile,
+    SocialStory,
 )
 from app.social.services.feed_common import (
     extract_hashtags,
     extract_mention_handles,
 )
 from app.utils.logger import get_logger
+from scripts import _seed_video as seed_video
 from scripts._seed_images import USER_AGENT as SEED_USER_AGENT
 from scripts._seed_images import SeedImage
 from scripts._seed_images import gather as gather_photos
@@ -288,6 +291,17 @@ async def seed(handle: str, count: int) -> None:
         async with httpx.AsyncClient(
             follow_redirects=True, headers={"User-Agent": SEED_USER_AGENT}
         ) as http:
+            # A handful of MP4s, rendered locally from the licensed stills we
+            # already have (see _seed_video). Reused across posts on purpose:
+            # six distinct clips is enough to exercise the player, and
+            # rendering a hundred would take longer than the whole seed.
+            clip_sources: list[bytes] = []
+            for source in photos[:6]:
+                fetched = await _download(http, source.url)
+                if fetched is not None:
+                    clip_sources.append(fetched[0])
+            clips = await seed_video.clips(clip_sources)
+
             for i in range(todo):
                 author = authors[i % len(authors)]
                 card = random.choice(cards)
@@ -312,14 +326,23 @@ async def seed(handle: str, count: int) -> None:
                     minutes=random.randint(0, 59),
                 )
 
-                # Two in three posts get a REAL photograph (a binder, a shop,
+                # Two in three posts get REAL photographs (a binder, a shop,
                 # cards on a table); the rest show the card's own art. A feed
                 # of nothing but catalog scans doesn't read as a feed.
-                photo: SeedImage | None = None
+                #
+                # How many slides: most posts are one, but roughly a third
+                # are CAROUSELS of 2-4. A feed where every post has exactly
+                # one photo never exercises the swipe, the dots, or the
+                # position ordering — the three things most likely to be
+                # wrong and least likely to be noticed in review.
+                chosen: list[SeedImage] = []
                 if photos and i % 3 != 0:
-                    photo = photos[i % len(photos)]
-                    if photo.credit:
-                        body = f"{body}\n\n{photo.credit}"
+                    slides = (2, 3, 4, 1, 1, 2)[i % 6]
+                    for slot in range(slides):
+                        chosen.append(photos[(i + slot * 7) % len(photos)])
+                    credits = [c.credit for c in chosen if c.credit]
+                    if credits:
+                        body = f"{body}\n\n" + "\n".join(dict.fromkeys(credits))
 
                 post = SocialPost(
                     author_id=author.id,
@@ -330,25 +353,55 @@ async def seed(handle: str, count: int) -> None:
                 db.add(post)
                 await db.flush()
 
-                image_url = photo.url if photo else card.image_url
-                if image_url:
-                    fetched = await _download(http, image_url)
-                    if fetched is not None:
-                        data, content_type = fetched
-                        media_id = uuid.uuid4()
-                        key = await post_media.store(media_id, data, content_type)
-                        width, height = post_media.probe_size(data)
-                        db.add(
-                            SocialPostMedia(
-                                id=media_id,
-                                post_id=post.id,
-                                position=0,
-                                storage_key=key,
-                                content_type=content_type,
-                                width=width,
-                                height=height,
-                            )
+                sources = (
+                    [c.url for c in chosen]
+                    if chosen
+                    else ([card.image_url] if card.image_url else [])
+                )
+
+                # Every fifth post is a VIDEO instead — a slow pan over the
+                # card, built locally (see _seed_video). Real MP4 bytes, so
+                # the player, the poster frame and the duration all get
+                # exercised rather than assumed.
+                position = 0
+                if clips and i % 5 == 2:
+                    clip = clips[i % len(clips)]
+                    media_id = uuid.uuid4()
+                    key = await post_media.store(media_id, clip, "video/mp4")
+                    width, height = post_media.probe_size(clip)
+                    db.add(
+                        SocialPostMedia(
+                            id=media_id,
+                            post_id=post.id,
+                            position=position,
+                            storage_key=key,
+                            content_type="video/mp4",
+                            width=width,
+                            height=height,
                         )
+                    )
+                    position += 1
+
+                for image_url in sources[: post_media.MAX_IMAGES_PER_POST - position]:
+                    fetched = await _download(http, image_url)
+                    if fetched is None:
+                        continue
+                    data, content_type = fetched
+                    media_id = uuid.uuid4()
+                    key = await post_media.store(media_id, data, content_type)
+                    width, height = post_media.probe_size(data)
+                    db.add(
+                        SocialPostMedia(
+                            id=media_id,
+                            post_id=post.id,
+                            position=position,
+                            storage_key=key,
+                            content_type=content_type,
+                            width=width,
+                            height=height,
+                        )
+                    )
+                    position += 1
 
                 # Hashtags + mentions through the SAME extraction the API
                 # uses — anything else and the tag pages would be empty.
@@ -398,6 +451,13 @@ async def seed(handle: str, count: int) -> None:
                     await db.commit()
                     logger.info("  %s/%s", i + 1, todo)
 
+            await db.commit()
+            # Inside the client block on purpose — story media is fetched
+            # over the same session.
+            await _seed_stories(
+                db, http, cast, viewer=viewer, photos=photos, clips=clips
+            )
+
         await db.commit()
 
         total = int(
@@ -414,7 +474,107 @@ async def seed(handle: str, count: int) -> None:
             ).scalar_one()
             or 0
         )
+
         logger.info("done — %s posts total, %s distinct hashtags", total, tags)
+
+
+STORY_CAPTIONS = [
+    "mail day 📬",
+    "shop run",
+    "this one's staying in the binder",
+    "grading pile getting out of hand",
+    "one more for the PC",
+    "sunday sorting",
+    "look at this centering",
+    "pack from the LGS",
+]
+
+
+async def _seed_stories(
+    db: AsyncSession,
+    http: httpx.AsyncClient,
+    cast: dict[str, User],
+    *,
+    viewer: User,
+    photos: list[SeedImage],
+    clips: list[bytes],
+) -> None:
+    """Put a few live stories up so the tray isn't an empty row.
+
+    Deliberately staggered across the last several hours rather than all
+    "now": the tray sorts unseen-first then by recency, and a set of
+    stories posted at one timestamp exercises neither half of that.
+
+    Idempotent by the same rule as the posts — if the viewer already has
+    live stories in front of them, this has run.
+    """
+    existing = (
+        await db.execute(
+            select(func.count())
+            .select_from(SocialStory)
+            .where(SocialStory.expires_at > func.now())
+        )
+    ).scalar_one()
+    if existing:
+        logger.info("%s live stories already — skipping", existing)
+        return
+
+    now = datetime.now(UTC)
+    # Only people the viewer follows, plus the viewer: a tray full of
+    # strangers is not what the feature looks like in use.
+    followed = list(
+        (
+            await db.execute(
+                select(SocialFollow.followee_id).where(
+                    SocialFollow.follower_id == viewer.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    authors = [*[u for u in cast.values() if u.id in followed][:6], viewer]
+
+    made = 0
+    for index, author in enumerate(authors):
+        for slot in range(1 if index % 2 else 2):
+            story_id = uuid.uuid4()
+            # Every third is a video, so the viewer's progress bar runs off
+            # a real duration rather than always the still fallback.
+            use_clip = clips and (index + slot) % 3 == 1
+            if use_clip:
+                body, content_type = clips[(index + slot) % len(clips)], "video/mp4"
+            else:
+                if not photos:
+                    continue
+                fetched = await _download(
+                    http, photos[(index * 3 + slot) % len(photos)].url
+                )
+                if fetched is None:
+                    continue
+                body, content_type = fetched
+
+            key = await story_media.store(story_id, body, content_type)
+            width, height = post_media.probe_size(body)
+            created = now - timedelta(hours=index * 2 + slot, minutes=index * 7 % 59)
+            db.add(
+                SocialStory(
+                    id=story_id,
+                    author_id=author.id,
+                    storage_key=key,
+                    content_type=content_type,
+                    width=width,
+                    height=height,
+                    duration_ms=seed_video.CLIP_SECONDS * 1000 if use_clip else None,
+                    caption=random.choice(STORY_CAPTIONS),
+                    created_at=created,
+                    expires_at=created + timedelta(hours=story_media.STORY_TTL_HOURS),
+                )
+            )
+            made += 1
+
+    await db.commit()
+    logger.info("seeded %s live stories across %s accounts", made, len(authors))
 
 
 def main() -> None:

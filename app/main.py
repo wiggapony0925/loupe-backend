@@ -43,6 +43,7 @@ from app.routers.public import unsubscribe as public_unsubscribe
 from app.routers.public import verify_email as public_verify_email
 from app.social.feed_router import router as social_feed_router
 from app.social.router import router as social_router
+from app.social.story_router import router as social_story_router
 
 
 def create_app() -> FastAPI:
@@ -148,6 +149,7 @@ def create_app() -> FastAPI:
     app.include_router(social_router, prefix=api_prefix)
     # The feed half of the same surface: posts, comments, hashtags.
     app.include_router(social_feed_router, prefix=api_prefix)
+    app.include_router(social_story_router, prefix=api_prefix)
     app.include_router(announcement.router, prefix=api_prefix)
     app.include_router(billing.router, prefix=api_prefix)
     app.include_router(email_webhook.router, prefix=api_prefix)

@@ -604,6 +604,152 @@ class SavedStore(Base):
     )
 
 
+class SocialStory(Base):
+    """One story — a photo or short video that stops being visible after 24h.
+
+    **Expiry is a column, not a job.** `expires_at` is stamped on write and
+    every read filters on it, so a story disappears at the right second even
+    if a cleanup cron is wedged, a deploy is mid-flight, or the row is being
+    read from a replica. A sweeper that DELETEs on a schedule would make
+    "has this expired?" a question about infrastructure health; here it is a
+    question about the clock.
+
+    The row outlives the expiry on purpose: the author's own archive is the
+    whole point of keeping it, and a viewer count nobody can look at
+    afterwards is a statistic thrown away. `deleted_at` is the separate,
+    deliberate act of removing one.
+    """
+
+    __tablename__ = "social_stories"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(), primary_key=True, default=uuid.uuid4
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    #: Object key in the blob store (see app/social/story_media.py).
+    storage_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Intrinsic pixel size, so a client can reserve the frame before the
+    #: bytes arrive. A story is full-screen, so getting this wrong is a
+    #: whole-screen pop rather than a row shifting.
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Video length. Drives how long the progress bar takes to fill; a still
+    #: uses the client's fixed dwell instead, so this stays NULL for images.
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Optional text over the media.
+    caption: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+    )
+    #: When it stops being visible. Set by the service, never by the client.
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), index=True, nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        # The tray query is "whose stories are still live", which is exactly
+        # this pair — and it is run on every open of the community tab.
+        Index("ix_social_stories_author_expires", "author_id", "expires_at"),
+    )
+
+
+class SocialStoryView(Base):
+    """A viewer opened a story. One row per (story, viewer).
+
+    Two jobs from one table: the ring around an avatar is "does a row exist
+    for me on any of their live stories", and the author's viewer list is
+    the rows on theirs. Unique so a re-watch doesn't inflate the count —
+    Instagram counts people, not plays.
+    """
+
+    __tablename__ = "social_story_views"
+    __table_args__ = (
+        UniqueConstraint("story_id", "viewer_id", name="uq_social_story_view"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(), primary_key=True, default=uuid.uuid4
+    )
+    story_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("social_stories.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    viewer_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    viewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class SocialStoryComment(Base):
+    """A comment on a story.
+
+    Deliberately a COMMENT, not a direct message. Instagram routes story
+    replies into the DM inbox; this app has no inbox, and building one to
+    carry story replies would drag in conversation threads, read receipts,
+    blocking semantics and a moderation surface with no public audit — a
+    much larger feature wearing a small feature's clothes.
+
+    So a story comment is visible to everyone who can see the story, exactly
+    like a post comment, and moderated through the same chokepoint. It
+    disappears with the story it hangs off, because a comment outliving the
+    thing it answers is a fragment nobody can read.
+    """
+
+    __tablename__ = "social_story_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(), primary_key=True, default=uuid.uuid4
+    )
+    story_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("social_stories.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    author_id: Mapped[uuid.UUID] = mapped_column(
+        UuidCol(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+    body: Mapped[str] = mapped_column(Text(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+        nullable=False,
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("ix_social_story_comments_story_created", "story_id", "created_at"),
+    )
+
+
 __all__ = [
     "SavedStore",
     "SocialCommentLike",
@@ -619,5 +765,8 @@ __all__ = [
     "SocialProfile",
     "SocialProfileLike",
     "SocialProfileVisit",
+    "SocialStory",
+    "SocialStoryComment",
+    "SocialStoryView",
     "StoreReview",
 ]

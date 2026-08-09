@@ -372,6 +372,8 @@ async def _media_by_post(
                 position=row.position,
                 width=row.width,
                 height=row.height,
+                kind="video" if post_media.is_video(row.content_type) else "image",
+                content_type=row.content_type,
             )
         )
     return out

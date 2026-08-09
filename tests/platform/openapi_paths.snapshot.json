@@ -794,6 +794,37 @@
   "/v1/social/search/all": [
     "GET"
   ],
+  "/v1/social/stories": [
+    "POST"
+  ],
+  "/v1/social/stories/archive": [
+    "GET"
+  ],
+  "/v1/social/stories/comments/{comment_id}": [
+    "DELETE"
+  ],
+  "/v1/social/stories/media/{story_id}": [
+    "GET"
+  ],
+  "/v1/social/stories/tray": [
+    "GET"
+  ],
+  "/v1/social/stories/{handle}": [
+    "GET"
+  ],
+  "/v1/social/stories/{story_id}": [
+    "DELETE"
+  ],
+  "/v1/social/stories/{story_id}/comments": [
+    "GET",
+    "POST"
+  ],
+  "/v1/social/stories/{story_id}/view": [
+    "POST"
+  ],
+  "/v1/social/stories/{story_id}/viewers": [
+    "GET"
+  ],
   "/v1/social/suggested": [
     "GET"
   ],

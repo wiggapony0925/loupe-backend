@@ -23,11 +23,32 @@ from app.platform import blob_store
 #: A feed photo off a modern phone camera, uncompressed-ish. Larger than the
 #: avatar cap because this is the content, not a thumbnail.
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
-ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+#: Video, capped an order of magnitude higher because thirty seconds off a
+#: phone is tens of megabytes and there is no server-side transcode to lean
+#: on. The clients record at a bounded resolution and duration; this is the
+#: backstop for anything that arrives from elsewhere.
+MAX_VIDEO_BYTES = 120 * 1024 * 1024
+#: MP4/H.264 and QuickTime — what iOS and Android actually produce. No WebM:
+#: iOS cannot play it, and accepting an upload that half the users can't
+#: watch is worse than refusing it.
+VIDEO_CONTENT_TYPES = {"video/mp4", "video/quicktime"}
+
+ALLOWED_CONTENT_TYPES = IMAGE_CONTENT_TYPES | VIDEO_CONTENT_TYPES
 
 #: Instagram allows 10; 4 keeps a carousel swipeable without a slide counter
 #: and keeps one post's storage bounded.
 MAX_IMAGES_PER_POST = 4
+
+
+def is_video(content_type: str) -> bool:
+    return content_type in VIDEO_CONTENT_TYPES
+
+
+def max_bytes(content_type: str) -> int:
+    """The size ceiling for one upload of this kind."""
+    return MAX_VIDEO_BYTES if is_video(content_type) else MAX_IMAGE_BYTES
 
 
 def storage_key(media_id: uuid.UUID) -> str:
@@ -68,7 +89,10 @@ async def load(media_id: uuid.UUID) -> bytes | None:
 
 
 def probe_size(body: bytes) -> tuple[int | None, int | None]:
-    """Intrinsic (width, height) read from the image header.
+    """Intrinsic (width, height) read from the file header.
+
+    Handles stills and MP4/QuickTime video — see :func:`_probe_mp4` for the
+    latter.
 
     Hand-rolled rather than pulling in Pillow: we need four integers out of
     the first few dozen bytes, not decoding. The feed needs the aspect ratio
@@ -79,6 +103,10 @@ def probe_size(body: bytes) -> tuple[int | None, int | None]:
     back to a square, so an odd file degrades to a crop rather than an error.
     """
     try:
+        # MP4 / QuickTime: 'ftyp' is the first box in both.
+        if body[4:8] == b"ftyp":
+            return _probe_mp4(body)
+
         # PNG: 8-byte signature, then IHDR with width/height as big-endian u32.
         if body[:8] == b"\x89PNG\r\n\x1a\n" and body[12:16] == b"IHDR":
             w, h = struct.unpack(">II", body[16:24])
@@ -124,11 +152,55 @@ def probe_size(body: bytes) -> tuple[int | None, int | None]:
     return None, None
 
 
+def _probe_mp4(body: bytes) -> tuple[int | None, int | None]:
+    """Display size of an MP4/QuickTime video, from its first ``tkhd`` box.
+
+    An ISO-BMFF file is a tree of length-prefixed boxes. The track header
+    (``tkhd``) carries the display width and height as 16.16 fixed-point in
+    its last eight bytes — the only two numbers a client needs to reserve
+    the right frame before the video streams.
+
+    Scanned linearly rather than walked properly. A correct walk means
+    parsing moov ▸ trak ▸ tkhd with sizes and versions at every level, to
+    reach a value we tolerate not finding: unknown dimensions fall back to
+    a square, exactly as they do for a malformed JPEG. The scan is bounded
+    to the first 512 KB so a large upload can't turn this into a linear
+    read of a hundred megabytes.
+
+    Takes the FIRST tkhd with a non-zero size, which is the video track —
+    an audio track's tkhd carries zeroes, so it self-skips.
+    """
+    window = body[: 512 * 1024]
+    start = 0
+    while True:
+        at = window.find(b"tkhd", start)
+        if at == -1:
+            return None, None
+        # Box layout: [4B size][4B type][1B version][3B flags][payload…].
+        # Everything after the version differs in width by 4 bytes per
+        # 64-bit field, so index backwards from the end of the box instead.
+        version = window[at + 4] if at + 4 < len(window) else 0
+        # v0 payload is 84 bytes after the type; v1 adds 12 for 64-bit times.
+        payload = 84 if version == 0 else 96
+        end = at + 4 + payload
+        if end <= len(window):
+            w = int.from_bytes(window[end - 8 : end - 4], "big") >> 16
+            h = int.from_bytes(window[end - 4 : end], "big") >> 16
+            if w > 0 and h > 0:
+                return w, h
+        start = at + 4
+
+
 __all__ = [
     "ALLOWED_CONTENT_TYPES",
+    "IMAGE_CONTENT_TYPES",
     "MAX_IMAGES_PER_POST",
     "MAX_IMAGE_BYTES",
+    "MAX_VIDEO_BYTES",
+    "VIDEO_CONTENT_TYPES",
+    "is_video",
     "load",
+    "max_bytes",
     "media_url",
     "probe_size",
     "storage_key",
