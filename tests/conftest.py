@@ -57,7 +57,7 @@ def _reset_process_singletons():
     it's event-loop-agnostic."""
 
     def _reset() -> None:
-        from app.platform import cache_swr, redis_client
+        from app.platform import cache_swr, rate_limit, redis_client
         from app.services.catalog import (
             card_search_service,
             carousel_service,
@@ -65,6 +65,10 @@ def _reset_process_singletons():
         )
 
         redis_client._client = None
+        # Rate-limit windows are per-process and hold real wall-clock hits, so
+        # a test that legitimately posts 30 times would hand the next test a
+        # 429 that has nothing to do with the code it is exercising.
+        rate_limit.reset_rate_limits()
         for taskset in (
             cache_swr._bg_tasks,
             carousel_service._bg_tasks,

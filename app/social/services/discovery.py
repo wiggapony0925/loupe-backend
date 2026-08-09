@@ -62,8 +62,17 @@ async def search(
     needle = q.strip().lower()
     if len(needle) < 2:
         return []
-    like = f"%{needle}%"
-    prefix = f"{needle}%"
+    # A LEADING '@' IS PART OF HOW PEOPLE WRITE A HANDLE, not part of the
+    # handle. The search box literally invites "@handle", and usernames are
+    # stored bare — so matching the raw text meant typing the '@' the
+    # placeholder asked for returned nothing at all. Stripped for handle and
+    # name matching; `needle` keeps the '@' because that is what makes an
+    # email address recognisable as one.
+    handle = needle.lstrip("@")
+    if not handle:
+        return []
+    like = f"%{handle}%"
+    prefix = f"{handle}%"
     email, account_id = _exact_identifier(needle)
     matchers: list[ColumnElement[bool]] = [
         SocialProfile.username.like(like),

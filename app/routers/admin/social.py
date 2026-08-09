@@ -12,14 +12,21 @@ leave the Community page blank.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_admin
 from app.db import get_db
 from app.models.user import User
-from app.social.schemas import SocialUserCard
+from app.social.schemas import (
+    ModerationCaseRead,
+    ModerationQueueRead,
+    SocialUserCard,
+)
+from app.social.services import safety
 from app.social.services._common import collection_peeks, user_card
 from app.social.services.featured import (
     MAX_FEATURED,
@@ -132,6 +139,42 @@ async def delete_featured(
     double-tap on the × can't 404."""
     await remove_featured(username)
     return await _view(db, admin)
+
+
+# ── Moderation queue ──
+
+
+@router.get(
+    "/moderation",
+    response_model=ModerationQueueRead,
+    summary="The review queue (auto-flags + user reports, worst first)",
+)
+async def moderation_queue(
+    status: str = Query("open", description="`open`, `dismissed` or `removed`."),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ModerationQueueRead:
+    """One list for both sources. A moderator asks "what needs me", not
+    "which system noticed"."""
+    return await safety.queue(db, status=status, limit=limit, offset=offset)
+
+
+@router.post(
+    "/moderation/{case_id}/resolve",
+    response_model=ModerationCaseRead,
+    summary="Dismiss a case, or remove what it points at",
+)
+async def resolve_case(
+    case_id: uuid.UUID,
+    action: str = Query(..., description="`dismiss` or `remove`."),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ModerationCaseRead:
+    """Resolving one case answers every other open case about the same
+    thing — nine duplicate reports left open is how a queue becomes noise."""
+    return await safety.resolve(db, admin, case_id, action=action)
 
 
 __all__ = ["router"]

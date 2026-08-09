@@ -116,6 +116,40 @@ async def test_search_finds_by_handle_and_name(client, created_user, second_user
     assert [r["username"] for r in rows] == ["vaultboy"]
 
 
+@pytest.mark.asyncio
+async def test_search_accepts_the_at_sign_the_placeholder_asks_for(
+    client, created_user, second_user
+):
+    """Typing "@handle" must find @handle.
+
+    The search box says "name, @handle or email", and people type the '@'.
+    Handles are stored bare, so matching the raw text meant the one spelling
+    the UI asked for was the one spelling that returned nothing.
+    """
+    await _claim(client, created_user, "pikapulls")
+
+    for spelling in ("@pikapulls", "pikapulls", "@pika", "PikaPulls"):
+        resp = await client.get(
+            "/v1/social/search",
+            params={"q": spelling},
+            headers=_headers(second_user),
+        )
+        rows = assert_envelope_ok(resp)
+        assert [r["username"] for r in rows] == ["pikapulls"], spelling
+
+
+@pytest.mark.asyncio
+async def test_a_bare_at_sign_is_not_a_search_for_everyone(
+    client, created_user, second_user
+):
+    """Stripping '@' must not turn "@" into an empty LIKE that matches all."""
+    await _claim(client, created_user, "pikapulls")
+    resp = await client.get(
+        "/v1/social/search", params={"q": "@@"}, headers=_headers(second_user)
+    )
+    assert assert_envelope_ok(resp) == []
+
+
 # ── Public follow flow ──
 
 

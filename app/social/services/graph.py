@@ -19,6 +19,7 @@ from app.social.schemas import (
     FollowStateRead,
     SocialUserCard,
 )
+from app.social.services import feed_notify
 from app.social.services._common import (
     MAX_PAGE_SIZE,
     can_view,
@@ -160,6 +161,8 @@ async def follow(db: AsyncSession, viewer: User, username: str) -> FollowStateRe
 
     db.add(SocialFollow(follower_id=viewer.id, followee_id=profile.user_id))
     await db.commit()
+    # After the commit: the follow is the fact, the notification is delivery.
+    await feed_notify.followed(db, actor=viewer, target_id=profile.user_id)
     return FollowStateRead(relationship="following")
 
 

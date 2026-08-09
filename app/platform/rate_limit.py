@@ -96,9 +96,25 @@ def _client_key(request: Request) -> str:
     return (client.host if client else None) or "unknown"
 
 
+#: Every window built by :func:`rate_limit`, so the suite can clear them
+#: between tests. Windows live in closures and their state is per-process,
+#: which means a test that legitimately calls an endpoint 30 times leaks a
+#: 429 into whatever test runs next — a failure with no relationship to the
+#: code under test. Same shape as ``reset_blob_store`` / ``reset_registry``.
+_WINDOWS: list[_SlidingWindow] = []
+
+
+def reset_rate_limits() -> None:
+    """Forget every recorded hit. Test-suite hook, never called in prod."""
+    for window in _WINDOWS:
+        with window._lock:
+            window._buckets.clear()
+
+
 def rate_limit(*, limit: int, window_seconds: float, name: str):
     """Build a FastAPI dependency that enforces a sliding-window limit."""
     window = _SlidingWindow(limit=limit, window_s=window_seconds)
+    _WINDOWS.append(window)
 
     async def _dep(request: Request) -> None:
         key = f"{name}:{_client_key(request)}"
@@ -185,6 +201,7 @@ __all__ = [
     "mfa_verify_limit",
     "rate_limit",
     "reset_password_limit",
+    "reset_rate_limits",
     "resolve_limit",
     "scan_create_limit",
     "search_live_limit",

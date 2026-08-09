@@ -256,14 +256,30 @@ class SocialPortfolioItemsRead(BaseModel):
 
 
 __all__ = [
+    "MAX_COMMENT_BODY",
+    "MAX_POST_BODY",
     "USERNAME_PATTERN",
+    "CommentCreate",
+    "CommentRead",
+    "CommentThreadRead",
     "DiscoverRead",
     "ExploreCard",
     "ExploreRead",
+    "FeedRead",
+    "FeedTab",
     "FollowRequestRead",
     "FollowStateRead",
     "FriendOwnerRead",
+    "HashtagRead",
+    "ModerationCaseRead",
+    "ModerationQueueRead",
+    "PostAuthor",
+    "PostCardRef",
+    "PostLikeRead",
+    "PostMediaRead",
+    "PostRead",
     "RelationshipState",
+    "ReportCreate",
     "SocialCollectionItem",
     "SocialCollectionRead",
     "SocialCollectionSet",
@@ -274,6 +290,7 @@ __all__ = [
     "SocialProfileUpsert",
     "SocialProfileView",
     "SocialSealedItem",
+    "SocialSearchRead",
     "SocialUserCard",
 ]
 
@@ -302,3 +319,212 @@ class ExploreRead(BaseModel):
     """
 
     cards: list[ExploreCard] = []
+
+
+# ── The feed ──
+
+#: Which feed a client is asking for. The backend owns what each one MEANS
+#: (who is in it, how it's ordered) so web and native can never drift.
+FeedTab = Literal["following", "foryou", "mine"]
+
+#: Caption/comment caps. Generous enough for a real write-up, bounded so a
+#: single row can't be used as blob storage.
+MAX_POST_BODY = 2200
+MAX_COMMENT_BODY = 1000
+
+
+class PostAuthor(BaseModel):
+    """Who wrote a post or comment.
+
+    Deliberately leaner than :class:`SocialUserCard`: a feed page shows 20
+    authors and a card would drag a collection-peek query along with each
+    one. Everything a byline draws is here and nothing else.
+    """
+
+    user_id: uuid.UUID
+    username: str
+    display_name: str | None = None
+    avatar_url: str | None = None
+    #: Gold PRO chip — raw plan, same rule as SocialUserCard.is_pro.
+    is_pro: bool = False
+    #: Loupe staff — drives the verified tick.
+    is_admin: bool = False
+    relationship: RelationshipState = "none"
+
+
+class PostMediaRead(BaseModel):
+    """One image in a post's carousel."""
+
+    id: uuid.UUID
+    url: str
+    position: int = 0
+    #: Intrinsic pixel size when known. Clients reserve the aspect ratio
+    #: BEFORE the bytes arrive; without it every image pops the layout.
+    width: int | None = None
+    height: int | None = None
+
+
+class PostCardRef(BaseModel):
+    """The catalog card a post showcases — what makes this a collector's
+    feed rather than a photo app. Enough to draw a tappable chip.
+
+    Carries NO price on purpose. A feed row is a snapshot of a moment and
+    would go stale in place, while the card page it links to holds the
+    authoritative, grade-aware number; a second figure drifting beside it
+    would only ever be a source of "which one is right?".
+    """
+
+    card_id: uuid.UUID
+    name: str | None = None
+    image_url: str | None = None
+    set_name: str | None = None
+    number: str | None = None
+    tcg: str | None = None
+
+
+class PostRead(BaseModel):
+    """One post as the viewer sees it."""
+
+    id: uuid.UUID
+    author: PostAuthor
+    body: str | None = None
+    media: list[PostMediaRead] = []
+    card: PostCardRef | None = None
+    created_at: datetime
+    like_count: int = 0
+    comment_count: int = 0
+    #: Drives the filled heart — computed for the requesting viewer.
+    viewer_has_liked: bool = False
+    #: Tags extracted from the caption, lowercase and without '#'. Clients
+    #: highlight them by matching the caption text; this list is what a tag
+    #: chip row and the "posts in #x" link are built from.
+    hashtags: list[str] = []
+    #: Handles named in the caption that resolve to real accounts, so a
+    #: client can link only the @words that actually go somewhere.
+    mentions: list[str] = []
+    #: Whether the viewer may remove this post (author or staff).
+    can_delete: bool = False
+
+
+class FeedRead(BaseModel):
+    """A page of posts. ``next_cursor`` is opaque — pass it back verbatim.
+
+    Cursors rather than offsets: a feed gains rows at the top while it's
+    being read, and offset paging responds to that by showing page 2's first
+    post twice. The token encodes the position, so a page is stable no
+    matter what arrives above it.
+    """
+
+    items: list[PostRead] = []
+    next_cursor: str | None = None
+
+
+class CommentRead(BaseModel):
+    """One comment, or one reply (``parent_id`` set)."""
+
+    id: uuid.UUID
+    post_id: uuid.UUID
+    parent_id: uuid.UUID | None = None
+    author: PostAuthor
+    body: str
+    created_at: datetime
+    like_count: int = 0
+    viewer_has_liked: bool = False
+    #: Replies hanging off this top-level comment. Always 0 on a reply —
+    #: threading is one level deep.
+    reply_count: int = 0
+    #: The first few replies, inlined. A thread where every comment needs a
+    #: round trip to show its two replies feels broken; the rest come from
+    #: the replies endpoint behind "View N replies".
+    replies: list[CommentRead] = []
+    can_delete: bool = False
+
+
+class CommentThreadRead(BaseModel):
+    """``GET /v1/social/posts/{id}/comments`` — top-level comments, oldest
+    first (a conversation reads down, unlike a feed)."""
+
+    items: list[CommentRead] = []
+    next_cursor: str | None = None
+    #: Every comment on the post, replies included — the number under the
+    #: post's speech bubble.
+    total: int = 0
+
+
+class CommentCreate(BaseModel):
+    """Body for ``POST /v1/social/posts/{id}/comments``."""
+
+    body: str = Field(..., min_length=1, max_length=MAX_COMMENT_BODY)
+    #: Set to reply. Replying to a reply attaches to its top-level parent —
+    #: the server flattens it, so clients can pass whatever was tapped.
+    parent_id: uuid.UUID | None = None
+
+
+class PostLikeRead(BaseModel):
+    """New like state + the fresh total, so the client never guesses."""
+
+    liked: bool
+    like_count: int = 0
+
+
+class HashtagRead(BaseModel):
+    """One tag chip."""
+
+    tag: str
+    post_count: int = 0
+
+
+# ── Safety ──
+
+
+class ReportCreate(BaseModel):
+    """Body for ``POST /v1/social/reports``."""
+
+    target_type: Literal["post", "comment", "profile"]
+    target_id: uuid.UUID
+    #: One of `safety.REPORT_REASONS`. A closed list on purpose — free text
+    #: produces "idk it's weird", which can't be counted or acted on.
+    reason: str = Field(..., max_length=32)
+    note: str | None = Field(None, max_length=1000)
+
+
+class ModerationCaseRead(BaseModel):
+    """One row in the review queue."""
+
+    id: uuid.UUID
+    target_type: str
+    target_id: uuid.UUID
+    author_id: uuid.UUID | None = None
+    author_username: str | None = None
+    #: "auto" (the classifier) | "report" (a user).
+    source: str
+    reason: str | None = None
+    reason_label: str | None = None
+    detail: str | None = None
+    #: Worst classifier score, 0-1. Orders the queue by severity.
+    score: float | None = None
+    #: A copy of the text, kept in case the target is deleted before review.
+    excerpt: str | None = None
+    reporter_username: str | None = None
+    status: str
+    created_at: datetime
+    resolved_at: datetime | None = None
+
+
+class ModerationQueueRead(BaseModel):
+    items: list[ModerationCaseRead] = []
+    total: int = 0
+    #: Open cases regardless of the filter — the badge on the nav.
+    open_count: int = 0
+
+
+class SocialSearchRead(BaseModel):
+    """``GET /v1/social/search/all`` — one query, both kinds of result.
+
+    Composed server-side so the search bar's ranking (which handles beat
+    which tags) is one decision in one place rather than two lists the
+    clients have to interleave themselves.
+    """
+
+    users: list[SocialUserCard] = []
+    hashtags: list[HashtagRead] = []

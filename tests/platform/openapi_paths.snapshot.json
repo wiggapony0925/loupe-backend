@@ -249,6 +249,12 @@
   "/v1/admin/social/featured/{username}": [
     "DELETE"
   ],
+  "/v1/admin/social/moderation": [
+    "GET"
+  ],
+  "/v1/admin/social/moderation/{case_id}/resolve": [
+    "POST"
+  ],
   "/v1/admin/users": [
     "GET"
   ],
@@ -703,10 +709,29 @@
   "/v1/social/cards/{card_ref}/owners": [
     "GET"
   ],
+  "/v1/social/comments/{comment_id}": [
+    "DELETE"
+  ],
+  "/v1/social/comments/{comment_id}/like": [
+    "DELETE",
+    "POST"
+  ],
+  "/v1/social/comments/{comment_id}/replies": [
+    "GET"
+  ],
   "/v1/social/discover": [
     "GET"
   ],
   "/v1/social/explore": [
+    "GET"
+  ],
+  "/v1/social/feed": [
+    "GET"
+  ],
+  "/v1/social/hashtags/trending": [
+    "GET"
+  ],
+  "/v1/social/hashtags/{tag}/posts": [
     "GET"
   ],
   "/v1/social/me": [
@@ -720,6 +745,30 @@
   "/v1/social/me/followers/{username}": [
     "DELETE"
   ],
+  "/v1/social/posts": [
+    "POST"
+  ],
+  "/v1/social/posts/media/{media_id}": [
+    "GET"
+  ],
+  "/v1/social/posts/{post_id}": [
+    "DELETE",
+    "GET"
+  ],
+  "/v1/social/posts/{post_id}/comments": [
+    "GET",
+    "POST"
+  ],
+  "/v1/social/posts/{post_id}/like": [
+    "DELETE",
+    "POST"
+  ],
+  "/v1/social/report-reasons": [
+    "GET"
+  ],
+  "/v1/social/reports": [
+    "POST"
+  ],
   "/v1/social/requests": [
     "GET"
   ],
@@ -730,6 +779,9 @@
     "POST"
   ],
   "/v1/social/search": [
+    "GET"
+  ],
+  "/v1/social/search/all": [
     "GET"
   ],
   "/v1/social/suggested": [
@@ -757,6 +809,9 @@
   "/v1/social/users/{username}/like": [
     "DELETE",
     "POST"
+  ],
+  "/v1/social/users/{username}/posts": [
+    "GET"
   ],
   "/v1/waitlist": [
     "POST"
