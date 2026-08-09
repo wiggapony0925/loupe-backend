@@ -9,6 +9,7 @@ app/social/
   schemas.py       Pydantic request/response shapes
   avatars.py       Profile-picture storage (S3-compatible blob store)
   post_media.py    Feed-image storage + an intrinsic-size probe
+  moderation.py    Content screening (OpenAI omni-moderation: text + images)
   router.py        /v1/social/* — profiles, graph, shared collections
   feed_router.py   /v1/social/* — posts, comments, hashtags
   service.py       Façade over services/ (historic import path)
@@ -17,6 +18,7 @@ app/social/
     profiles.py graph.py engagement.py discovery.py collections.py
     feed_common.py caption parsing, cursors, the feed privacy predicate
     posts.py comments.py hashtags.py feed_notify.py
+    safety.py      the review queue: auto-flags, user reports, resolution
 ```
 
 ## What ships in the MVP
@@ -59,6 +61,10 @@ Posts, threaded comments, hashtags and mentions — migration `0050_social_feed`
   payload lists them, so a client links only the words that actually resolve.
 - **Cursors, not offsets**, for feeds: a feed gains rows at the top while it
   is being read, and offset paging answers that by showing a post twice.
+- **Screening fails open, never silently.** A vendor timeout or error still
+  publishes the post AND opens a case. No key configured is different: that
+  means screening is deliberately off, and queueing everything would make
+  the queue 100% of the content — noise a moderator learns to ignore.
 - **Notifications** — `feed_notify.py` owns the wording of every community
   notification and is best-effort: a failed inbox write never fails the like.
 
@@ -68,7 +74,7 @@ Posts, threaded comments, hashtags and mentions — migration `0050_social_feed`
 |------|--------|
 | Direct messages | `dm.py` — per-pair threads; gate on mutual follow to stop spam. The clients already leave room for the entry point. |
 | Trade requests | `trades.py` — offer items from your vault for theirs; state machine `proposed → countered → accepted/declined`; reuses `SocialFollow` for who may propose. |
-| Blocking & reporting | extend `models.py` with `social_blocks`; a block severs both follow edges (see flim's `block_severs_follows` trigger for the reference implementation). |
+| Blocking | extend `models.py` with `social_blocks`; a block severs both follow edges (see flim's `block_severs_follows` trigger for the reference implementation). Reporting already ships — see `safety.py`. |
 | Reposts / quotes | a nullable `repost_of_id` on `social_posts`; the feed query already pages by `(created_at, id)`. |
 | Saved posts | a `social_post_saves` edge, and a fourth tab that reads it. |
 

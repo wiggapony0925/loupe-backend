@@ -102,14 +102,19 @@ async def test_screening_nothing_is_allowed_without_calling_a_provider():
 
 
 @pytest.mark.asyncio
-async def test_screening_without_a_key_asks_for_review_rather_than_blocking(
+async def test_no_key_means_screening_is_off_not_that_everything_is_suspect(
     monkeypatch,
 ):
+    """An unconfigured environment has screening switched off deliberately.
+
+    Queueing every post there would make the review queue 100% of the
+    content — noise a moderator learns to ignore, which is worse than no
+    queue. Distinct from a vendor we tried and couldn't reach (below).
+    """
     monkeypatch.setattr(moderation, "enabled", lambda: False)
     verdict = await moderation.screen("anything at all")
-    assert verdict.action == moderation.REVIEW
-    assert not verdict.blocked
-    assert verdict.needs_review
+    assert verdict.action == moderation.ALLOW
+    assert not verdict.needs_review
 
 
 @pytest.mark.asyncio

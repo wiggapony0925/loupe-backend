@@ -136,11 +136,14 @@ async def screen(
     if not parts:
         return Verdict()
 
+    # NO KEY IS NOT THE SAME AS A FAILED CHECK. An unconfigured environment
+    # (dev, a self-hosted deploy) has screening switched OFF on purpose, and
+    # queueing every post there would make the review queue 100% of the
+    # content — noise a moderator learns to ignore, which is worse than no
+    # queue at all. User reports still work. A vendor that we *tried* and
+    # couldn't reach is the case worth flagging, and that's handled below.
     if not enabled():
-        return Verdict(
-            action=REVIEW,
-            detail="Screening unavailable (no provider configured).",
-        )
+        return Verdict()
 
     try:
         return await asyncio.wait_for(_classify(parts), timeout=TIMEOUT_SECONDS)
