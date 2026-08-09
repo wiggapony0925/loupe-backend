@@ -728,6 +728,9 @@
   "/v1/social/feed": [
     "GET"
   ],
+  "/v1/social/hashtags/suggest": [
+    "GET"
+  ],
   "/v1/social/hashtags/trending": [
     "GET"
   ],

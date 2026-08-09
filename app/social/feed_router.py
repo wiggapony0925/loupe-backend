@@ -343,6 +343,32 @@ async def trending_hashtags(
 
 
 @router.get(
+    "/hashtags/suggest",
+    response_model=list[HashtagRead],
+    summary="Tag autocomplete for the composer",
+    dependencies=[Depends(feed_limit)],
+)
+async def suggest_hashtags(
+    q: str = Query("", max_length=64, description="What's been typed after '#'."),
+    limit: int = Query(8, ge=1, le=20),
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[HashtagRead]:
+    """What to offer while someone is typing a `#`.
+
+    An empty query returns TRENDING rather than nothing: the moment the
+    '#' is typed is exactly when a suggestion is most useful, and showing
+    an empty list there teaches people the feature doesn't work.
+
+    REGISTERED BEFORE `/hashtags/{tag}/posts` — FastAPI matches in order,
+    so with the parameterised route first "suggest" would be read as a tag.
+    """
+    if not q.strip():
+        return await hashtags_service.trending(db, user, limit=limit)
+    return await hashtags_service.search(db, user, q, limit=limit)
+
+
+@router.get(
     "/hashtags/{tag}/posts",
     response_model=FeedRead,
     summary="Posts carrying a tag",
