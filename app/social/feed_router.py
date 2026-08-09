@@ -376,12 +376,21 @@ async def suggest_hashtags(
 )
 async def hashtag_posts(
     tag: str,
+    sort: str = Query(
+        "top",
+        description="`top` — most engaged first (the tag page's default). "
+        "`recent` — newest first.",
+    ),
     cursor: str | None = Query(None),
     limit: int = Query(DEFAULT_PAGE, ge=1, le=MAX_PAGE),
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_db),
 ) -> FeedRead:
-    return await hashtags_service.tag_feed(db, user, tag, cursor=cursor, limit=limit)
+    """Defaults to `top`: arriving on #pokemon and seeing whatever was
+    posted ninety seconds ago tells you nothing about the tag."""
+    return await hashtags_service.tag_feed(
+        db, user, tag, sort=sort, cursor=cursor, limit=limit
+    )
 
 
 # ── Safety ──

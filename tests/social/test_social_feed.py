@@ -1012,3 +1012,63 @@ async def test_you_are_not_notified_about_your_own_post(
         .all()
     )
     assert rows == []
+
+
+# ── The hashtag page's Top / Recent split ──
+
+
+@pytest.mark.asyncio
+async def test_a_tag_page_leads_with_the_best_of_the_tag_not_the_newest(
+    client, db_session, created_user
+):
+    """Arriving on #pokemon and seeing whatever was posted ninety seconds
+    ago tells you nothing about the tag. `top` is the page's default."""
+    fans = [await make_user(db_session) for _ in range(3)]
+    for i, fan in enumerate(fans):
+        await _claim(client, fan, f"fan{i}30")
+    await _claim(client, created_user, "tagtop")
+
+    quiet = await _post(client, created_user, "quiet one #pokemon")
+    loved = await _post(client, created_user, "the good one #pokemon")
+    newest = await _post(client, created_user, "just now #pokemon")
+
+    for fan in fans:
+        await client.post(f"/v1/social/posts/{loved['id']}/like", headers=_headers(fan))
+
+    top = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/pokemon/posts",
+            params={"sort": "top"},
+            headers=_headers(created_user),
+        )
+    )
+    assert top["items"][0]["id"] == loved["id"]
+
+    recent = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/pokemon/posts",
+            params={"sort": "recent"},
+            headers=_headers(created_user),
+        )
+    )
+    assert recent["items"][0]["id"] == newest["id"]
+    assert quiet["id"] in {i["id"] for i in recent["items"]}
+
+
+@pytest.mark.asyncio
+async def test_top_is_the_default_for_a_tag_page(client, db_session, created_user):
+    fan = await make_user(db_session)
+    await _claim(client, fan, "fandefault")
+    await _claim(client, created_user, "tagdefault")
+
+    await _post(client, created_user, "first #psa10")
+    loved = await _post(client, created_user, "loved #psa10")
+    await _post(client, created_user, "newest #psa10")
+    await client.post(f"/v1/social/posts/{loved['id']}/like", headers=_headers(fan))
+
+    page = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/psa10/posts", headers=_headers(created_user)
+        )
+    )
+    assert page["items"][0]["id"] == loved["id"]

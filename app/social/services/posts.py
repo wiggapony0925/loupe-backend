@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.dependencies import is_admin_user
 from app.models.card import Card
 from app.models.user import User
-from app.social import post_media
+from app.social import hashtag_policy, post_media
 from app.social.models import (
     SocialFollow,
     SocialModerationCase,
@@ -151,7 +151,12 @@ async def create_post(
             )
         )
 
-    for tag in extract_hashtags(text):
+    # Only tags that earn a page get a row. A blocked tag is NOT censored
+    # out of the caption — the words stay the author's — it simply doesn't
+    # become a browsable page, a trending chip or a suggestion. The client
+    # stops linking it for free, because PostCaption only styles tags the
+    # server returned. See app/social/hashtag_policy.py.
+    for tag in hashtag_policy.indexable(extract_hashtags(text)):
         db.add(SocialPostHashtag(post_id=post.id, tag=tag))
 
     mentioned = await resolve_mentions(db, extract_mention_handles(text))

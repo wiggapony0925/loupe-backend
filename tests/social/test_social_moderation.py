@@ -502,3 +502,71 @@ def test_every_publish_path_goes_through_enforce():
             f"{path.relative_to(root)} calls the classifier directly — "
             "route it through safety.enforce so the policy stays in one place"
         )
+
+
+# ── Which hashtags become browsable ──
+
+
+def test_a_tag_has_to_earn_its_page():
+    """Profanity in a caption publishes; profanity as a TAG does not get a
+    page, a trending chip or a suggestion. Different acts, different rule."""
+    from app.social.hashtag_policy import is_indexable
+
+    for good in ("pokemon", "psa10", "charizard", "2024", "evolving_skies"):
+        assert is_indexable(good), good
+    for bad in ("fuck", "fuckthis", "porn", "nsfw", "onlyfans", "sex"):
+        assert not is_indexable(bad), bad
+
+
+def test_the_scunthorpe_problem_is_handled():
+    """The oldest bug in filtering: innocent words containing a blocked
+    root. A card app really does say #analysis and #classic."""
+    from app.social.hashtag_policy import is_indexable
+
+    for word in ("analysis", "assassin", "classic", "grass", "sextet", "shitake"):
+        assert is_indexable(word), word
+
+
+def test_a_tag_must_look_like_a_tag():
+    from app.social.hashtag_policy import is_indexable
+
+    assert not is_indexable("a")  # one character is noise
+    assert not is_indexable("x" * 65)  # somebody testing the input
+    assert not is_indexable("has space")
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_tag_is_not_indexed_but_the_post_still_publishes(
+    client, db_session, created_user, allow_all
+):
+    """The caption stays the author's words. The tag just doesn't become
+    product furniture — and the client stops linking it for free, because
+    it only styles tags the server returned."""
+    from app.social.models import SocialPostHashtag
+
+    await _claim(client, created_user, "tagpolicy")
+    post = await _post(client, created_user, "great pull #pokemon #fuck")
+
+    # Published, caption intact.
+    assert post["body"] == "great pull #pokemon #fuck"
+    # …but only the acceptable tag is indexed, and only it comes back as a
+    # linkable tag.
+    assert post["hashtags"] == ["pokemon"]
+
+    rows = (await db_session.execute(select(SocialPostHashtag.tag))).scalars().all()
+    assert set(rows) == {"pokemon"}
+
+    # And it never reaches trending or the composer's suggestions.
+    trending = assert_envelope_ok(
+        await client.get("/v1/social/hashtags/trending", headers=_headers(created_user))
+    )
+    assert "fuck" not in {t["tag"] for t in trending}
+
+    suggest = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/suggest",
+            params={"q": "fu"},
+            headers=_headers(created_user),
+        )
+    )
+    assert "fuck" not in {t["tag"] for t in suggest}
