@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.social import avatars
+from app.social import avatars, moderation
 from app.social.models import (
     SocialFollow,
     SocialFollowRequest,
@@ -22,6 +22,7 @@ from app.social.schemas import (
     SocialProfileRead,
     SocialProfileUpsert,
 )
+from app.social.services import safety
 from app.social.services._common import (
     RESERVED_USERNAMES,
     count,
@@ -144,13 +145,52 @@ async def deactivate(db: AsyncSession, user: User) -> None:
 async def set_avatar(
     db: AsyncSession, user: User, body: bytes, content_type: str
 ) -> SocialProfileRead:
-    """Store a new profile picture (payload already validated by the router)."""
+    """Store a new profile picture (payload already validated by the router).
+
+    SCREENED LIKE ANY OTHER POSTED IMAGE, and arguably more important than
+    one: a caption is seen by whoever opens the post, but an avatar rides
+    along on every feed row, every comment and every follower list the
+    account appears in — so an unscreened one is the widest-reach image in
+    the product. Same policy as posts (app/social/moderation.py): refuse
+    the zero-tolerance set outright, store-and-queue anything else doubtful.
+    """
     profile = await get_profile(db, user.id)
     if profile is None:
         raise HTTPException(
             status_code=409, detail="Claim a username before adding a picture"
         )
+
+    verdict = await moderation.screen(images=[(body, content_type)])
+    if verdict.blocked:
+        # Nothing is written — not the object, not the version bump. The
+        # case IS the record that this was attempted and refused.
+        await safety.open_auto_case(
+            db,
+            target_type=safety.TARGET_PROFILE,
+            target_id=profile.user_id,
+            author_id=user.id,
+            verdict=verdict,
+            excerpt=f"@{profile.username} profile picture",
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "That picture looks like it breaks the community rules. "
+                "Try a photo of you or your collection."
+            ),
+        )
+
     await avatars.store_avatar(profile, body, content_type)
+    if verdict.needs_review:
+        await safety.open_auto_case(
+            db,
+            target_type=safety.TARGET_PROFILE,
+            target_id=profile.user_id,
+            author_id=user.id,
+            verdict=verdict,
+            excerpt=f"@{profile.username} profile picture",
+        )
     await db.commit()
     await db.refresh(profile)
     return profile_read(profile)

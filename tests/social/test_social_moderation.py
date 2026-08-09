@@ -367,3 +367,102 @@ async def test_dismissing_leaves_the_post_up(
         )
     )
     assert [i["id"] for i in feed["items"]] == [post["id"]]
+
+
+# ── Profile pictures ──
+#
+# An avatar is the widest-reach image in the product: a caption is seen by
+# whoever opens the post, but a picture rides along on every feed row, every
+# comment and every follower list the account appears in.
+
+
+def _png() -> bytes:
+    """A real 1x1 PNG — the upload path validates content, not just headers."""
+    import base64
+
+    return base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+        "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+
+
+async def _upload_avatar(client, user):
+    return await client.post(
+        "/v1/social/me/avatar",
+        files={"image": ("me.png", _png(), "image/png")},
+        headers=_headers(user),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_clean_avatar_uploads_and_opens_no_case(
+    client, db_session, created_user, allow_all
+):
+    await _claim(client, created_user, "picgood")
+    profile = assert_envelope_ok(await _upload_avatar(client, created_user))
+    assert profile["avatar_url"]
+    assert (
+        await db_session.execute(select(SocialModerationCase))
+    ).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_a_zero_tolerance_avatar_is_refused_and_never_stored(
+    client, db_session, created_user, monkeypatch
+):
+    await _claim(client, created_user, "picbad")
+    monkeypatch.setattr(moderation, "screen", _verdict(moderation.BLOCK, ["sexual"]))
+
+    resp = await _upload_avatar(client, created_user)
+    assert_envelope_error(resp, expected_status=422)
+
+    # The profile still has no picture…
+    me = assert_envelope_ok(
+        await client.get("/v1/social/me", headers=_headers(created_user))
+    )
+    assert me["profile"]["avatar_url"] is None
+    # …and the attempt is on the record.
+    case = (await db_session.execute(select(SocialModerationCase))).scalars().one()
+    assert case.target_type == "profile"
+    assert case.status == "removed"
+
+
+@pytest.mark.asyncio
+async def test_a_doubtful_avatar_is_stored_but_queued(
+    client, db_session, created_user, monkeypatch
+):
+    await _claim(client, created_user, "picmeh")
+    monkeypatch.setattr(moderation, "screen", _verdict(moderation.REVIEW, ["violence"]))
+
+    profile = assert_envelope_ok(await _upload_avatar(client, created_user))
+    assert profile["avatar_url"]  # not punished for a maybe
+
+    case = (await db_session.execute(select(SocialModerationCase))).scalars().one()
+    assert case.status == "open"
+    assert case.target_type == "profile"
+
+
+@pytest.mark.asyncio
+async def test_removing_a_profile_case_clears_the_picture(
+    client, db_session, created_user, monkeypatch
+):
+    admin_user = await _make_admin(db_session)
+    await _claim(client, created_user, "picpull")
+    monkeypatch.setattr(moderation, "screen", _verdict(moderation.REVIEW, ["violence"]))
+    assert_envelope_ok(await _upload_avatar(client, created_user))
+
+    queue = assert_envelope_ok(
+        await client.get("/v1/admin/social/moderation", headers=_headers(admin_user))
+    )
+    assert_envelope_ok(
+        await client.post(
+            f"/v1/admin/social/moderation/{queue['items'][0]['id']}/resolve",
+            params={"action": "remove"},
+            headers=_headers(admin_user),
+        )
+    )
+
+    me = assert_envelope_ok(
+        await client.get("/v1/social/me", headers=_headers(created_user))
+    )
+    assert me["profile"]["avatar_url"] is None

@@ -327,9 +327,18 @@ async def _remove_target(
         if comment is not None:
             await db.delete(comment)
     elif target_type == TARGET_PROFILE:
-        # A profile isn't deleted from here — that is an account action.
-        # The case records the decision; the operator acts in /admin/users.
-        logger.info("profile case resolved as removed; act in user admin")
+        # Clear the picture — that IS the actionable part of a profile case,
+        # and an avatar rides along on every row the account appears in.
+        # Deleting the ACCOUNT is deliberately not folded in here: that's an
+        # audit-logged, reversible action over in /admin/users, and putting
+        # it one mis-click from "hide this picture" would be reckless. The
+        # blob is left in place; the profile stops pointing at it, and the
+        # version bump means no client keeps showing the old one.
+        profile = await db.get(SocialProfile, target_id)
+        if profile is not None:
+            profile.avatar_key = None
+            profile.avatar_content_type = None
+            profile.avatar_version = (profile.avatar_version or 0) + 1
 
 
 def _case_read(
