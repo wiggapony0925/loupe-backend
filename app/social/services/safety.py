@@ -8,6 +8,7 @@ and user reports are the same row type and the same list.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
@@ -35,6 +36,12 @@ logger = get_logger("social.safety")
 TARGET_POST = "post"
 TARGET_COMMENT = "comment"
 TARGET_PROFILE = "profile"
+TARGET_REVIEW = "review"
+TARGET_COLLECTION = "collection"
+
+#: What a USER may report. Deliberately narrower than what we SCREEN —
+#: nobody needs a "report this collection name" button, but the name still
+#: gets screened on write.
 TARGET_TYPES = frozenset({TARGET_POST, TARGET_COMMENT, TARGET_PROFILE})
 
 STATUS_OPEN = "open"
@@ -86,6 +93,56 @@ async def open_auto_case(
             resolved_at=datetime.now(UTC) if verdict.blocked else None,
         )
     )
+
+
+async def enforce(
+    db: AsyncSession,
+    *,
+    actor: User,
+    surface: str,
+    target_id: uuid.UUID,
+    text: str | None = None,
+    images: Sequence[tuple[bytes, str]] | None = None,
+    excerpt: str | None = None,
+    refusal: str | None = None,
+) -> moderation.Verdict:
+    """**The chokepoint.** Screen one piece of user content, act on the verdict.
+
+    Every path that lets a user publish something another user can see calls
+    this and nothing else. That is the whole design: policy sprinkled across
+    six call sites is policy that will be implemented five times and
+    forgotten once, and the one that gets forgotten is the one that ships a
+    hole. Adding a new surface should mean adding a call here, not
+    re-deciding what "blocked" means.
+
+    Does three things, in order:
+
+    1. screens the text and/or images in ONE provider call;
+    2. **raises 422** if the zero-tolerance set trips — nothing is written,
+       and a case is still opened so the refusal is auditable;
+    3. opens a review case for anything else doubtful, and returns.
+
+    Callers must invoke this BEFORE they write, and commit afterwards; the
+    case row joins whatever transaction they're already in.
+    """
+    verdict = await moderation.screen(text, list(images or []))
+    if not verdict.needs_review:
+        return verdict
+
+    await open_auto_case(
+        db,
+        target_type=surface,
+        target_id=target_id,
+        author_id=actor.id,
+        verdict=verdict,
+        excerpt=excerpt if excerpt is not None else text,
+    )
+    if verdict.blocked:
+        # The case is the record that this was attempted and refused, so it
+        # has to survive the caller's rollback — commit it here.
+        await db.commit()
+        raise HTTPException(status_code=422, detail=refusal or verdict.message())
+    return verdict
 
 
 async def report(
@@ -370,9 +427,12 @@ __all__ = [
     "STATUS_DISMISSED",
     "STATUS_OPEN",
     "STATUS_REMOVED",
+    "TARGET_COLLECTION",
     "TARGET_COMMENT",
     "TARGET_POST",
     "TARGET_PROFILE",
+    "TARGET_REVIEW",
+    "enforce",
     "open_auto_case",
     "queue",
     "report",

@@ -13,15 +13,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_admin_user
 from app.models.card import Card
 from app.models.user import User
-from app.social import moderation, post_media
+from app.social import post_media
 from app.social.models import (
     SocialFollow,
+    SocialModerationCase,
     SocialPost,
     SocialPostComment,
     SocialPostHashtag,
@@ -112,23 +113,19 @@ async def create_post(
         raise HTTPException(status_code=404, detail="Card not found")
 
     # SCREENED BEFORE ANYTHING IS WRITTEN — text and photos together, in one
-    # call. Blocked content never becomes a row or an object in the bucket;
-    # everything else publishes, and anything doubtful opens a case (see
-    # app/social/moderation.py for why it fails open).
-    verdict = await moderation.screen(
-        text, [(image.body, image.content_type) for image in images]
+    # call through the shared chokepoint. Blocked content never becomes a row
+    # or an object in the bucket; a 422 is raised from inside enforce().
+    # `target_id` is a fresh uuid because nothing is stored yet: for a
+    # refusal the case IS the record.
+    provisional_id = uuid.uuid4()
+    verdict = await safety.enforce(
+        db,
+        actor=author,
+        surface=safety.TARGET_POST,
+        target_id=provisional_id,
+        text=text,
+        images=[(image.body, image.content_type) for image in images],
     )
-    if verdict.blocked:
-        await safety.open_auto_case(
-            db,
-            target_type=safety.TARGET_POST,
-            target_id=uuid.uuid4(),  # nothing was stored; the case is the record
-            author_id=author.id,
-            verdict=verdict,
-            excerpt=text,
-        )
-        await db.commit()
-        raise HTTPException(status_code=422, detail=verdict.message())
 
     post = SocialPost(author_id=author.id, body=text or None, card_id=card_id)
     db.add(post)
@@ -163,18 +160,17 @@ async def create_post(
             db.add(SocialPostMention(post_id=post.id, user_id=user_id))
 
     if verdict.needs_review:
-        await safety.open_auto_case(
-            db,
-            target_type=safety.TARGET_POST,
-            target_id=post.id,
-            author_id=author.id,
-            verdict=verdict,
-            excerpt=text,
-        )
+        # enforce() already opened the case against the provisional id (it
+        # had to — the row didn't exist yet). Point it at the real post now
+        # that there is one, so a moderator can open what they're judging.
+        await _retarget_case(db, provisional_id, post.id)
 
     await db.commit()
     await db.refresh(post)
 
+    # Mentions first: being named in a post is more specific than "someone
+    # you follow posted", and the dedupe keys differ so a mentioned follower
+    # gets both — which is right, they're different facts.
     await feed_notify.mentioned_in_post(
         db,
         actor=author,
@@ -182,7 +178,19 @@ async def create_post(
         post=post,
         user_ids=[uid for uid in mentioned.values() if uid != author.id],
     )
+    await feed_notify.posted(db, author=author, author_profile=profile, post=post)
     return await get_post(db, author, post.id)
+
+
+async def _retarget_case(
+    db: AsyncSession, provisional_id: uuid.UUID, post_id: uuid.UUID
+) -> None:
+    """Repoint the case enforce() opened before the post row existed."""
+    await db.execute(
+        update(SocialModerationCase)
+        .where(SocialModerationCase.target_id == provisional_id)
+        .values(target_id=post_id)
+    )
 
 
 async def delete_post(db: AsyncSession, viewer: User, post_id: uuid.UUID) -> None:

@@ -89,6 +89,29 @@ def _reset_process_singletons():
 
 
 @pytest.fixture(autouse=True)
+def _offline_moderation():
+    """Screening OFF by default in tests — the same rule as the provider
+    registry below, for the same reason.
+
+    The developer's `.env` carries a real `OPENAI_API_KEY`, so every test
+    that posted, commented, claimed a handle or named a collection was
+    making a LIVE moderation call: slow, nondeterministic, billable, and it
+    leaked un-closed HTTP clients that surfaced as "Event loop is closed"
+    at teardown in unrelated suites.
+
+    With no key the policy is ALLOW (see app/social/moderation.py), which is
+    what a test that isn't about moderation wants. Tests that DO exercise it
+    opt back in by monkeypatching `moderation.enabled` / `moderation.screen`.
+    """
+    from app.social import moderation
+
+    original = moderation.enabled
+    moderation.enabled = lambda: False  # type: ignore[assignment]
+    yield
+    moderation.enabled = original  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True)
 def _offline_provider_registry():
     """Serve an EMPTY provider registry to every test by default.
 

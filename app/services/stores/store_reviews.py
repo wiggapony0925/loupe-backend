@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User
 from app.schemas.stores import StoreReviewRead, StoreReviewUpsert
 from app.social.models import SocialProfile, StoreReview
+from app.social.services import safety
 
 MAX_REVIEWS = 50
 
@@ -123,6 +124,23 @@ async def upsert_review(
             )
         )
     ).scalar_one_or_none()
+
+    # A shop review is public text signed with a handle — same chokepoint as
+    # a post. It was the last user-authored surface anyone could read that
+    # nothing screened.
+    if (payload.body or "").strip():
+        await safety.enforce(
+            db,
+            actor=user,
+            surface=safety.TARGET_REVIEW,
+            target_id=existing.id if existing else uuid.uuid4(),
+            text=payload.body,
+            excerpt=f"review of {store_id}: {payload.body}",
+            refusal=(
+                "That review looks like it breaks the community rules. "
+                "Keep it about the shop."
+            ),
+        )
 
     if existing is None:
         existing = StoreReview(

@@ -18,13 +18,20 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.card import Card
 from app.models.notification import CATEGORY_SOCIAL
 from app.models.user import User
 from app.services import notification_service
-from app.social.models import SocialPost, SocialPostComment, SocialProfile
+from app.social.models import (
+    SocialFollow,
+    SocialPost,
+    SocialPostComment,
+    SocialPostMedia,
+    SocialProfile,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger("social.feed.notify")
@@ -156,6 +163,81 @@ async def mentioned_in_post(
         )
 
 
+#: How many followers a single post notifies. A cap, not a policy: past
+#: this, fanning out inline would make posting slow for the author and
+#: bury everyone else's inbox. Beyond it the feed itself is the delivery
+#: mechanism — which is what a feed is for.
+MAX_POST_FANOUT = 500
+
+
+async def posted(
+    db: AsyncSession,
+    *,
+    author: User,
+    author_profile: SocialProfile,
+    post: SocialPost,
+) -> None:
+    """ "@x posted" — to everyone who follows the author.
+
+    The summary is the caption's opening words, or a description of what
+    the post actually is when there's no caption. A notification reading
+    just "new post" tells you nothing about whether to open it.
+    """
+    follower_ids = [
+        row[0]
+        for row in (
+            await db.execute(
+                select(SocialFollow.follower_id)
+                .where(SocialFollow.followee_id == author.id)
+                .limit(MAX_POST_FANOUT)
+            )
+        ).all()
+    ]
+    if not follower_ids:
+        return
+
+    who = _name(author_profile, author)
+    summary = _preview(post.body, limit=120) or await _describe(db, post)
+    href = post_href(post.id)
+    for user_id in follower_ids:
+        if user_id == author.id:
+            continue
+        await _send(
+            db,
+            user_id,
+            kind="social_new_post",
+            title=f"{who} posted",
+            body=summary,
+            href=href,
+            data={"post_id": str(post.id), "actor_id": str(author.id)},
+            # One per (post, recipient) — a retry or a re-run can't double up.
+            dedupe_key=f"social_new_post:{post.id}:{user_id}",
+        )
+
+
+async def _describe(db: AsyncSession, post: SocialPost) -> str:
+    """What a captionless post IS, so the line still says something."""
+    photos = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(SocialPostMedia)
+                .where(SocialPostMedia.post_id == post.id)
+            )
+        ).scalar_one()
+        or 0
+    )
+    if post.card_id is not None:
+        card = await db.get(Card, post.card_id)
+        if card is not None and card.name:
+            return f"Showed off {card.name}"
+    if photos == 1:
+        return "Shared a photo"
+    if photos > 1:
+        return f"Shared {photos} photos"
+    return "Shared a post"
+
+
 async def followed(db: AsyncSession, *, actor: User, target_id: uuid.UUID) -> None:
     """ "@x started following you" — the bell's most common entry."""
     if target_id == actor.id:
@@ -213,9 +295,11 @@ async def _send(
 
 
 __all__ = [
+    "MAX_POST_FANOUT",
     "commented",
     "followed",
     "mentioned_in_post",
     "post_href",
     "post_liked",
+    "posted",
 ]

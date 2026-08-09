@@ -24,6 +24,7 @@ from app.schemas.collection import (
     CollectionSummary,
     CollectionUpdate,
 )
+from app.social.services import safety
 
 
 def holdings_scope(
@@ -81,6 +82,10 @@ async def list_for_user(db: AsyncSession, user: User) -> list[Collection]:
 
 
 async def create(db: AsyncSession, user: User, payload: CollectionCreate) -> Collection:
+    # Collection names and descriptions surface on a collector's PUBLIC
+    # profile (see SocialPortfolioRead), so they are user-authored text other
+    # people read — same chokepoint as a post.
+    await _screen(db, user, payload.name, payload.description)
     row = Collection(
         user_id=user.id,
         name=payload.name,
@@ -101,6 +106,7 @@ async def update(
     payload: CollectionUpdate,
 ) -> Collection:
     row = await get_owned(db, user, collection_id)
+    await _screen(db, user, payload.name, payload.description, target_id=collection_id)
     if payload.name is not None:
         row.name = payload.name
     if payload.description is not None:
@@ -112,6 +118,29 @@ async def update(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+async def _screen(
+    db: AsyncSession,
+    user: User,
+    name: str | None,
+    description: str | None,
+    *,
+    target_id: uuid.UUID | None = None,
+) -> None:
+    """Screen a binder's public-facing text. No-op when there's none."""
+    text = "\n".join(part for part in (name or "", description or "") if part).strip()
+    if not text:
+        return
+    await safety.enforce(
+        db,
+        actor=user,
+        surface=safety.TARGET_COLLECTION,
+        target_id=target_id or uuid.uuid4(),
+        text=text,
+        excerpt=f"collection: {text}",
+        refusal="That collection name looks like it breaks the community rules.",
+    )
 
 
 async def delete(db: AsyncSession, user: User, collection_id: uuid.UUID) -> None:

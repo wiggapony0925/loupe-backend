@@ -6,14 +6,14 @@ import uuid
 from collections.abc import Sequence
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_admin_user
 from app.models.user import User
-from app.social import moderation
 from app.social.models import (
     SocialCommentLike,
+    SocialModerationCase,
     SocialPost,
     SocialPostComment,
     SocialProfile,
@@ -203,21 +203,19 @@ async def add_comment(
             detail=f"Comment is longer than {MAX_COMMENT_BODY} characters",
         )
 
-    # Comments are text-only, so screening is a cheap single call. Same
-    # policy as posts: refuse the zero-tolerance set, publish-and-queue the
-    # rest (see app/social/moderation.py).
-    verdict = await moderation.screen(text)
-    if verdict.blocked:
-        await safety.open_auto_case(
-            db,
-            target_type=safety.TARGET_COMMENT,
-            target_id=uuid.uuid4(),
-            author_id=author.id,
-            verdict=verdict,
-            excerpt=text,
-        )
-        await db.commit()
-        raise HTTPException(status_code=422, detail=verdict.message())
+    # Same chokepoint as every other publish path.
+    provisional_id = uuid.uuid4()
+    verdict = await safety.enforce(
+        db,
+        actor=author,
+        surface=safety.TARGET_COMMENT,
+        target_id=provisional_id,
+        text=text,
+        refusal=(
+            "That comment looks like it breaks the community rules. "
+            "Keep it about the cards."
+        ),
+    )
 
     replied_to: SocialPostComment | None = None
     if parent_id is not None:
@@ -233,13 +231,11 @@ async def add_comment(
     db.add(comment)
     await db.flush()
     if verdict.needs_review:
-        await safety.open_auto_case(
-            db,
-            target_type=safety.TARGET_COMMENT,
-            target_id=comment.id,
-            author_id=author.id,
-            verdict=verdict,
-            excerpt=text,
+        # Repoint the case enforce() opened before this row existed.
+        await db.execute(
+            update(SocialModerationCase)
+            .where(SocialModerationCase.target_id == provisional_id)
+            .values(target_id=comment.id)
         )
     await db.commit()
     await db.refresh(comment)

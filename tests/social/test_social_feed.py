@@ -929,3 +929,86 @@ def test_social_migrations_create_exactly_what_the_models_declare(filename, tabl
             }
             missing = expected_ix - actual_ix
             assert not missing, f"{name}: migration is missing index(es) {missing}"
+
+
+# ── "Someone you follow posted" ──
+
+
+@pytest.mark.asyncio
+async def test_posting_notifies_your_followers_with_a_readable_summary(
+    client, db_session, created_user
+):
+    """The line has to say something. "New post" tells you nothing about
+    whether to open it, so the summary is the caption's opening words."""
+    follower = await make_user(db_session)
+    stranger = await make_user(db_session)
+    await _claim(client, created_user, "author20")
+    await _claim(client, follower, "follower20")
+    await _claim(client, stranger, "stranger20")
+    await _follow(client, follower, "author20")
+
+    await _post(client, created_user, "Pulled the Umbreon alt art #pokemon")
+
+    rows = (
+        (
+            await db_session.execute(
+                select(Notification).where(Notification.kind == "social_new_post")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # The follower, and only the follower.
+    assert [r.user_id for r in rows] == [follower.id]
+    assert rows[0].body == "Pulled the Umbreon alt art #pokemon"
+    # …and it opens the post it's about.
+    assert rows[0].href.endswith(str(rows[0].data["post_id"]))
+
+
+@pytest.mark.asyncio
+async def test_a_captionless_post_still_says_what_it_is(
+    client, db_session, created_user
+):
+    follower = await make_user(db_session)
+    await _claim(client, created_user, "author21")
+    await _claim(client, follower, "follower21")
+    await _follow(client, follower, "author21")
+
+    await _post(client, created_user, None, image=True)
+
+    row = (
+        (
+            await db_session.execute(
+                select(Notification).where(Notification.kind == "social_new_post")
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert row.body == "Shared a photo"
+
+
+@pytest.mark.asyncio
+async def test_you_are_not_notified_about_your_own_post(
+    client, db_session, created_user
+):
+    other = await make_user(db_session)
+    await _claim(client, created_user, "author22")
+    await _claim(client, other, "follower22")
+    # created_user follows `other`, then posts themselves.
+    await _follow(client, created_user, "follower22")
+    await _post(client, created_user, "mine")
+
+    rows = (
+        (
+            await db_session.execute(
+                select(Notification).where(
+                    Notification.user_id == created_user.id,
+                    Notification.kind == "social_new_post",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []

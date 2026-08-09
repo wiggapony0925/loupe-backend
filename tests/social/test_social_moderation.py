@@ -466,3 +466,39 @@ async def test_removing_a_profile_case_clears_the_picture(
         await client.get("/v1/social/me", headers=_headers(created_user))
     )
     assert me["profile"]["avatar_url"] is None
+
+
+# ── The chokepoint ──
+
+
+def test_every_publish_path_goes_through_enforce():
+    """A guard against the failure mode this design exists to prevent.
+
+    Screening policy sprinkled across call sites gets implemented five times
+    and forgotten once — and the forgotten one is the hole. Every service
+    that writes user-authored text or images others can read must call
+    `safety.enforce`, never `moderation.screen` directly.
+    """
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[2] / "app"
+    publish_paths = [
+        "social/services/posts.py",  # captions + photos
+        "social/services/comments.py",  # comments
+        "social/services/profiles.py",  # handle, bio, location, avatar
+        "services/stores/store_reviews.py",  # shop reviews
+        "services/collection/collection_service.py",  # binder names
+    ]
+    for rel in publish_paths:
+        src = (root / rel).read_text()
+        assert "safety.enforce(" in src, f"{rel} publishes without the chokepoint"
+
+    # And only the chokepoint itself may call the classifier directly.
+    for path in root.rglob("*.py"):
+        if path.name in ("moderation.py", "safety.py"):
+            continue
+        src = path.read_text()
+        assert "moderation.screen(" not in src, (
+            f"{path.relative_to(root)} calls the classifier directly — "
+            "route it through safety.enforce so the policy stays in one place"
+        )

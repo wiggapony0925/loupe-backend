@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.social import avatars, moderation
+from app.social import avatars
 from app.social.models import (
     SocialFollow,
     SocialFollowRequest,
@@ -72,6 +72,28 @@ async def upsert_me(
 
     profile = await get_profile(db, user.id)
     was_private = bool(profile.is_private) if profile else False
+
+    # THE HANDLE, BIO AND LOCATION ARE PUBLIC TEXT. They sit on the profile
+    # header, and the handle rides along on every post byline, comment and
+    # follower row — so an unscreened bio reaches further than most posts do.
+    # Screened together in one call rather than three.
+    await safety.enforce(
+        db,
+        actor=user,
+        surface=safety.TARGET_PROFILE,
+        target_id=user.id,
+        text="\n".join(
+            part
+            for part in (username, payload.bio or "", payload.location or "")
+            if part
+        ),
+        excerpt=f"@{username} · {payload.bio or ''} · {payload.location or ''}",
+        refusal=(
+            "That profile text looks like it breaks the community rules. "
+            "Keep your handle and bio about you and your collection."
+        ),
+    )
+
     if profile is None:
         profile = SocialProfile(user_id=user.id, username=username)
         db.add(profile)
@@ -160,37 +182,22 @@ async def set_avatar(
             status_code=409, detail="Claim a username before adding a picture"
         )
 
-    verdict = await moderation.screen(images=[(body, content_type)])
-    if verdict.blocked:
-        # Nothing is written — not the object, not the version bump. The
-        # case IS the record that this was attempted and refused.
-        await safety.open_auto_case(
-            db,
-            target_type=safety.TARGET_PROFILE,
-            target_id=profile.user_id,
-            author_id=user.id,
-            verdict=verdict,
-            excerpt=f"@{profile.username} profile picture",
-        )
-        await db.commit()
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "That picture looks like it breaks the community rules. "
-                "Try a photo of you or your collection."
-            ),
-        )
+    # Nothing is written when this refuses — not the object, not the version
+    # bump; enforce() raises and the case IS the record of the attempt.
+    await safety.enforce(
+        db,
+        actor=user,
+        surface=safety.TARGET_PROFILE,
+        target_id=profile.user_id,
+        images=[(body, content_type)],
+        excerpt=f"@{profile.username} profile picture",
+        refusal=(
+            "That picture looks like it breaks the community rules. "
+            "Try a photo of you or your collection."
+        ),
+    )
 
     await avatars.store_avatar(profile, body, content_type)
-    if verdict.needs_review:
-        await safety.open_auto_case(
-            db,
-            target_type=safety.TARGET_PROFILE,
-            target_id=profile.user_id,
-            author_id=user.id,
-            verdict=verdict,
-            excerpt=f"@{profile.username} profile picture",
-        )
     await db.commit()
     await db.refresh(profile)
     return profile_read(profile)
