@@ -48,6 +48,10 @@ ADMIN_PAGE_FLAGS: tuple[tuple[str, str, str], ...] = (
     ("admin_announce", "Admin · Announcements", "Monetization: global banner editor."),
     (
         "admin_community",
+        "Admin · Community",
+        "People: story lifecycle bench + social dev tools.",
+    ),
+    (
         "admin_moderation",
         "Admin · Moderation",
         "People: community review queue (reports + auto-flags).",
