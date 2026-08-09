@@ -23,14 +23,21 @@ from app.schemas.user import (
 )
 from app.services import billing_service, email_service, entitlement_service
 from app.services.auth import email_verify_service, user_service
+from app.utils import phone as phone_utils
 
 router = APIRouter(prefix="/me", tags=["users"])
 
 
 def _to_user_read(user: User) -> UserRead:
-    """Serialize a user, stamping effective `is_admin` (DB grant or allowlist)."""
+    """Serialize a user, stamping effective `is_admin` (DB grant or allowlist).
+
+    The phone is MASKED here rather than in the schema so there is exactly
+    one place the raw number could ever escape, and it doesn't.
+    """
     out = UserRead.model_validate(user)
     out.is_admin = is_admin_user(user)
+    out.phone = phone_utils.mask(user.phone)
+    out.phone_verified = user.phone_verified_at is not None
     return out
 
 

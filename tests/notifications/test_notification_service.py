@@ -265,3 +265,64 @@ async def test_title_is_truncated_to_the_column_width(db_session):
         push=False,
     )
     assert row is not None and len(row.title) == 200
+
+
+# ── The inbox header ──
+
+
+@pytest.mark.asyncio
+async def test_summary_counts_unread_per_category(db_session):
+    """The filter-strip badges come from one query, and they must add up."""
+    user = await make_user(db_session)
+    for category, n in (("social", 3), ("market", 2), ("news", 1)):
+        for i in range(n):
+            await notification_service.notify(
+                db_session, user.id, category=category, kind="t", title=f"{category}{i}"
+            )
+    read = await notification_service.notify(
+        db_session, user.id, category="social", kind="t", title="already read"
+    )
+    assert read is not None
+    await notification_service.mark_read(db_session, user.id, [read.id])
+
+    out = await notification_service.summary(db_session, user.id)
+    counts = {c["key"]: c["unread"] for c in out["categories"]}
+    assert counts == {"social": 3, "market": 2, "news": 1, "system": 0}
+    assert out["unread"] == 6
+    # The strip is server-defined: labels ship alongside the counts, so the
+    # clients never hardcode the tabs.
+    assert [c["label"] for c in out["categories"]] == [
+        "Community",
+        "Price alerts",
+        "News",
+        "Account",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_summary_folds_untabbed_categories_into_account(db_session):
+    """`billing` is a stored category with no tab of its own.
+
+    Dropped from the summary, the tab badges would not sum to the app-icon
+    badge and one notification would be unreachable through the filter strip.
+    """
+    user = await make_user(db_session)
+    await notification_service.notify(
+        db_session, user.id, category="billing", kind="t", title="Card declined"
+    )
+    out = await notification_service.summary(db_session, user.id)
+    counts = {c["key"]: c["unread"] for c in out["categories"]}
+    assert counts["system"] == 1
+    assert out["unread"] == sum(c["unread"] for c in out["categories"])
+
+
+@pytest.mark.asyncio
+async def test_summary_is_scoped_to_one_user(db_session):
+    mine = await make_user(db_session)
+    theirs = await make_user(db_session)
+    await notification_service.notify(
+        db_session, theirs.id, category="social", kind="t", title="not yours"
+    )
+    out = await notification_service.summary(db_session, mine.id)
+    assert out["unread"] == 0
+    assert all(c["unread"] == 0 for c in out["categories"])

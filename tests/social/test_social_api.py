@@ -632,3 +632,80 @@ async def test_search_finds_a_collector_by_account_id(
         )
     )
     assert [u["username"] for u in data] == ["findme"]
+
+
+# ── "People your friends follow" ──
+
+
+@pytest.mark.asyncio
+async def test_friends_of_friends_ranks_by_how_many_of_your_friends_follow_them(
+    client, db_session, created_user
+):
+    """Three mutuals is a far better reason to look at someone than "they
+    have a lot of followers" — which is what a global ranking gives you,
+    and which shows every new user the same six accounts forever."""
+    friends = [await make_user(db_session) for _ in range(3)]
+    popular = await make_user(db_session)
+    niche = await make_user(db_session)
+
+    await _claim(client, created_user, "meff")
+    for i, f in enumerate(friends):
+        await _claim(client, f, f"friendff{i}")
+    await _claim(client, popular, "popularff")
+    await _claim(client, niche, "nicheff")
+
+    # I follow all three friends.
+    for i in range(3):
+        await client.post(
+            f"/v1/social/users/friendff{i}/follow", headers=_headers(created_user)
+        )
+    # All three follow `popular`; only one follows `niche`.
+    for f in friends:
+        await client.post("/v1/social/users/popularff/follow", headers=_headers(f))
+    await client.post("/v1/social/users/nicheff/follow", headers=_headers(friends[0]))
+
+    body = assert_envelope_ok(
+        await client.get("/v1/social/discover", headers=_headers(created_user))
+    )
+    fof = [u["username"] for u in body["followed_by_friends"]]
+    assert fof[0] == "popularff", fof
+    assert "nicheff" in fof
+    # Never suggests people I already follow, nor me.
+    assert not any(h.startswith("friendff") for h in fof)
+    assert "meff" not in fof
+
+
+@pytest.mark.asyncio
+async def test_the_shelves_stay_disjoint(client, db_session, created_user):
+    """Clients render the shelves verbatim, so the same person appearing on
+    two of them on one screen is the backend's bug, not theirs."""
+    friend = await make_user(db_session)
+    target = await make_user(db_session)
+    await _claim(client, created_user, "medisj")
+    await _claim(client, friend, "frienddisj")
+    await _claim(client, target, "targetdisj")
+    await client.post(
+        "/v1/social/users/frienddisj/follow", headers=_headers(created_user)
+    )
+    await client.post("/v1/social/users/targetdisj/follow", headers=_headers(friend))
+
+    body = assert_envelope_ok(
+        await client.get("/v1/social/discover", headers=_headers(created_user))
+    )
+    shelves = [
+        {u["user_id"] for u in body["featured"]},
+        {u["user_id"] for u in body["followed_by_friends"]},
+        {u["user_id"] for u in body["more"]},
+    ]
+    for i, a in enumerate(shelves):
+        for b in shelves[i + 1 :]:
+            assert not (a & b), "shelves overlap"
+
+
+@pytest.mark.asyncio
+async def test_no_friends_means_an_empty_shelf_not_an_error(client, created_user):
+    await _claim(client, created_user, "lonely")
+    body = assert_envelope_ok(
+        await client.get("/v1/social/discover", headers=_headers(created_user))
+    )
+    assert body["followed_by_friends"] == []

@@ -45,6 +45,43 @@ CATEGORIES = frozenset(
 )
 
 
+#: What each category *is*, in the words the user reads. Server-owned on
+#: purpose: the filter strip is the same four choices on iOS, Android and
+#: web, and when a fifth category ships no client needs a release to show
+#: it. Order is display order. `tone` is a semantic name, not a hex value —
+#: each platform maps it onto its own palette (see [[shared design tokens]]).
+CATEGORY_CATALOGUE: tuple[dict[str, str], ...] = (
+    {
+        "key": CATEGORY_SOCIAL,
+        "label": "Community",
+        "description": "Follows, likes, comments and posts from people you follow.",
+        "icon": "people",
+        "tone": "accent",
+    },
+    {
+        "key": CATEGORY_MARKET,
+        "label": "Price alerts",
+        "description": "Cards you watch hitting the price you set.",
+        "icon": "trending-up",
+        "tone": "positive",
+    },
+    {
+        "key": CATEGORY_NEWS,
+        "label": "News",
+        "description": "Articles, guides and product announcements.",
+        "icon": "newspaper",
+        "tone": "info",
+    },
+    {
+        "key": CATEGORY_SYSTEM,
+        "label": "Account",
+        "description": "Messages from the Loupe team, security and billing.",
+        "icon": "shield-checkmark",
+        "tone": "neutral",
+    },
+)
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 

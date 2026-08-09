@@ -23,7 +23,11 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.notification import Notification
+from app.models.notification import (
+    CATEGORY_CATALOGUE,
+    CATEGORY_SYSTEM,
+    Notification,
+)
 from app.models.user import User, UserSettings
 from app.services import push_service
 from app.utils.logger import get_logger
@@ -266,6 +270,43 @@ async def unread_count(db: AsyncSession, user_id: uuid.UUID) -> int:
     )
 
 
+async def summary(db: AsyncSession, user_id: uuid.UUID) -> dict[str, Any]:
+    """The whole inbox header in one round trip.
+
+    The clients render a filter strip with a badge per category. Built from
+    the list endpoint that would be one request per tab *plus* one for the
+    total — five requests to draw a header, refetched on every focus. This
+    is a single GROUP BY, and it also hands back the category catalogue so
+    the strip itself is server-defined rather than hardcoded three times.
+
+    Billing is folded into "Account": it is real as a stored category (so
+    receipts stay queryable) but it is not worth a tab of its own.
+    """
+    rows = (
+        await db.execute(
+            select(Notification.category, func.count())
+            .where(Notification.user_id == user_id, Notification.read_at.is_(None))
+            .group_by(Notification.category)
+        )
+    ).all()
+    counts = {str(category): int(n) for category, n in rows}
+
+    # Categories with no tab of their own still have to be counted somewhere,
+    # or the tab badges silently fail to add up to the app icon badge.
+    shown = {c["key"] for c in CATEGORY_CATALOGUE}
+    counts[CATEGORY_SYSTEM] = counts.get(CATEGORY_SYSTEM, 0) + sum(
+        n for key, n in counts.items() if key not in shown
+    )
+
+    return {
+        "unread": sum(int(n) for _, n in rows),
+        "categories": [
+            {**meta, "unread": counts.get(meta["key"], 0)}
+            for meta in CATEGORY_CATALOGUE
+        ],
+    }
+
+
 async def mark_read(db: AsyncSession, user_id: uuid.UUID, ids: list[uuid.UUID]) -> int:
     """Mark specific notifications read. Scoped to the owner."""
     if not ids:
@@ -301,5 +342,6 @@ __all__ = [
     "mark_all_read",
     "mark_read",
     "notify",
+    "summary",
     "unread_count",
 ]

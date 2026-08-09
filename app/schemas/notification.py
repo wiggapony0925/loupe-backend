@@ -48,6 +48,24 @@ class NotificationPage(BaseModel):
     unread: int = 0
 
 
+class NotificationCategoryRead(BaseModel):
+    """One tab of the inbox filter strip, as the server defines it."""
+
+    key: str
+    label: str
+    description: str
+    icon: str
+    tone: str
+    unread: int
+
+
+class NotificationSummaryRead(BaseModel):
+    """Everything needed to draw the inbox header in one request."""
+
+    unread: int
+    categories: list[NotificationCategoryRead]
+
+
 class MarkReadRequest(BaseModel):
     """Mark specific notifications read, or all of them."""
 

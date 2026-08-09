@@ -153,6 +153,57 @@ FEATURED_COUNT = 8
 DISCOVER_POOL = 40
 
 
+async def followed_by_friends(
+    db: AsyncSession, viewer: User, limit: int = 12
+) -> list[SocialUserCard]:
+    """ "People your friends follow" — the strongest signal a social graph has.
+
+    Ranked by HOW MANY of the people you follow also follow them. Three
+    mutuals is a much better reason to look at someone than "they have a
+    lot of followers", which is what a global ranking gives you and which
+    shows every new user the same six accounts forever.
+
+    One query: join the follow table to itself — my followees, then THEIR
+    followees — grouped by the candidate. Excludes anyone I already follow
+    or have asked to, and me.
+    """
+    friends = select(SocialFollow.followee_id).where(
+        SocialFollow.follower_id == viewer.id
+    )
+    requested = select(SocialFollowRequest.target_id).where(
+        SocialFollowRequest.requester_id == viewer.id
+    )
+
+    # friend_edge: edges OUT of the people I follow.
+    friend_edge = SocialFollow.__table__.alias("friend_edge")
+    mutuals = func.count(friend_edge.c.follower_id).label("mutuals")
+
+    rows = (
+        await db.execute(
+            select(SocialProfile, User, mutuals)
+            .join(User, User.id == SocialProfile.user_id)
+            .join(friend_edge, friend_edge.c.followee_id == SocialProfile.user_id)
+            .where(
+                friend_edge.c.follower_id.in_(friends),
+                SocialProfile.user_id != viewer.id,
+                SocialProfile.user_id.not_in(friends),
+                SocialProfile.user_id.not_in(requested),
+                User.deleted_at.is_(None),
+                User.banned_at.is_(None),
+            )
+            .group_by(SocialProfile.user_id, User.id)
+            .order_by(mutuals.desc(), SocialProfile.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+
+    peeks = await collection_peeks(db, [r[0].user_id for r in rows])
+    return [
+        user_card(profile, account, "none", peeks.get(profile.user_id))
+        for profile, account, _ in rows
+    ]
+
+
 async def discover(db: AsyncSession, viewer: User) -> DiscoverRead:
     """The Community page's people shelves, composed and RANKED server-side.
 
@@ -207,10 +258,24 @@ async def discover(db: AsyncSession, viewer: User) -> DiscoverRead:
     # CURATION WINS. An operator's featured list replaces the algorithmic
     # top slice; with no curation the ranking stands, so the page works out
     # of the box and an operator only intervenes when they want to.
+    # "People your friends follow" — computed here so the shelf's MEANING
+    # and its ranking live server-side with everything else.
+    friends_of_friends = await followed_by_friends(db, viewer)
+    fof_ids = {c.user_id for c in friends_of_friends}
+
+    # Friends-of-friends WINS over the global ranking: "three people you
+    # follow also follow them" is a better reason than "they are popular",
+    # so those cards are removed from the algorithmic pool before it is
+    # split. Without this the same person lands on two shelves of one
+    # screen — the exact thing the disjointness contract exists to prevent.
+    pool = [c for c in cards if c.user_id not in fof_ids]
+
     curated_handles = await featured_usernames()
     if not curated_handles:
         return DiscoverRead(
-            featured=cards[:FEATURED_COUNT], more=cards[FEATURED_COUNT:]
+            featured=pool[:FEATURED_COUNT],
+            more=pool[FEATURED_COUNT:],
+            followed_by_friends=friends_of_friends,
         )
 
     curated_rows = await resolve_featured(db, curated_handles)
@@ -232,9 +297,16 @@ async def discover(db: AsyncSession, viewer: User) -> DiscoverRead:
     ]
     featured_ids = {c.user_id for c in featured}
     # `more` must stay disjoint from `featured` (the contract clients rely on).
+    # Every shelf stays disjoint — the contract clients rely on, so nobody
+    # has to dedupe and nobody sees the same person twice on one screen.
+    # Curation outranks everything, so a featured collector is removed from
+    # the other two shelves rather than the other way round.
     return DiscoverRead(
         featured=featured,
-        more=[c for c in cards if c.user_id not in featured_ids],
+        followed_by_friends=[
+            c for c in friends_of_friends if c.user_id not in featured_ids
+        ],
+        more=[c for c in pool if c.user_id not in featured_ids],
     )
 
 

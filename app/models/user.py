@@ -43,6 +43,24 @@ class User(Base):
     # When the user proved they own their email (clicked the signed link, or
     # arrived via Apple/Google which verify addresses upstream). NULL =
     # unverified; nothing is gated on it yet — it's trust signal + a nudge.
+    #: E.164 ("+14155550123"). Normalised on write so one person can't hold
+    #: two rows for the same line, and UNIQUE for the same reason email is —
+    #: it is an identity, and a future SMS login or 2FA needs it to resolve
+    #: to exactly one account. NULL until the user supplies it.
+    #:
+    #: NEVER leaves the server on a public payload. It is absent from every
+    #: social schema on purpose (see SocialUserCard / SocialProfileView):
+    #: a directory that hands out phone numbers is a harvesting tool.
+    phone: Mapped[str | None] = mapped_column(
+        String(20), unique=True, index=True, nullable=True
+    )
+    #: Set once an OTP has actually been confirmed. Deliberately separate
+    #: from `phone` being present: a number someone typed is a claim, and
+    #: treating an unverified claim as proof is how account recovery gets
+    #: abused. Nothing security-sensitive may key off `phone` alone.
+    phone_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     email_verified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

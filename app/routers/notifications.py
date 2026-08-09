@@ -19,6 +19,7 @@ from app.schemas.notification import (
     MarkReadRequest,
     NotificationPage,
     NotificationRead,
+    NotificationSummaryRead,
     UnreadCountRead,
 )
 from app.services import notification_service
@@ -69,6 +70,25 @@ async def get_unread_count(
 ) -> UnreadCountRead:
     """Cheap enough to poll — answered from the (user_id, read_at) index."""
     return UnreadCountRead(unread=await notification_service.unread_count(db, user.id))
+
+
+@router.get(
+    "/summary",
+    response_model=NotificationSummaryRead,
+    summary="Inbox header: per-category unread counts",
+)
+async def get_summary(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationSummaryRead:
+    """Per-category unread counts *and* the category catalogue itself.
+
+    Clients render the filter strip straight from `categories` — order,
+    labels and icons included — so adding a category is a backend change.
+    """
+    return NotificationSummaryRead.model_validate(
+        await notification_service.summary(db, user.id)
+    )
 
 
 @router.post(

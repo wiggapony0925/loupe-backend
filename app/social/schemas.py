@@ -140,6 +140,11 @@ class DiscoverRead(BaseModel):
     """
 
     featured: list[SocialUserCard] = []
+    #: "People your friends follow", ranked by how many of the viewer's
+    #: followees also follow them. The strongest signal a social graph has,
+    #: and the antidote to every new user seeing the same six accounts.
+    #: Empty until the viewer follows somebody.
+    followed_by_friends: list[SocialUserCard] = []
     more: list[SocialUserCard] = []
 
 

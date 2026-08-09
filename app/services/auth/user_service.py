@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from app.auth.passwords import hash_password, needs_rehash, verify_password
 from app.config import get_settings
 from app.models.user import User, UserSettings
 from app.schemas.user import UserSettingsUpdate, UserUpdate
+from app.utils import phone as phone_utils
 from app.utils.logger import get_logger
 
 logger = get_logger("services.user")
@@ -387,6 +389,38 @@ async def update_profile(db: AsyncSession, user: User, patch: UserUpdate) -> Use
         user.display_name = patch.display_name
     if patch.avatar_url is not None:
         user.avatar_url = patch.avatar_url
+
+    # `None` means "not sent"; "" means "remove it" — two different acts, so
+    # this keys off the field being present rather than on truthiness.
+    if "phone" in patch.model_fields_set:
+        raw = (patch.phone or "").strip()
+        if not raw:
+            user.phone = None
+            user.phone_verified_at = None
+        else:
+            try:
+                e164 = phone_utils.normalise(raw)
+            except phone_utils.InvalidPhone as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if e164 != user.phone:
+                # The UNIQUE index is the real guard against two accounts
+                # claiming one line; checking first turns the ordinary
+                # "someone already has this" into a clean 409 instead of an
+                # IntegrityError that would also poison the session.
+                taken = (
+                    await db.execute(
+                        select(User.id).where(User.phone == e164, User.id != user.id)
+                    )
+                ).first()
+                if taken:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="That phone number is already on another account",
+                    )
+                user.phone = e164
+                # Changing the number invalidates any prior proof.
+                user.phone_verified_at = None
+
     await db.commit()
     await db.refresh(user)
     return user

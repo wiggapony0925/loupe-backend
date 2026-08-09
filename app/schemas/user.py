@@ -21,6 +21,14 @@ class UserRead(BaseModel):
     # Whether they've proven ownership of the address (verify link clicked,
     # or a social provider vouched for it). Informational — nothing gated.
     email_verified: bool = False
+    #: The caller's OWN number, masked (+1 ••• ••• 0123). Recognisable to
+    #: its owner, not worth reading off a shoulder. Absent from every
+    #: social payload — a directory that hands out phone numbers is a
+    #: harvesting tool.
+    phone: str | None = None
+    #: Whether an OTP has actually been confirmed. Separate from `phone`
+    #: being present, because a number someone typed is a claim, not proof.
+    phone_verified: bool = False
     # Whether this user is in the admin allowlist — drives access to the
     # developer portal in the clients. Computed server-side; never trusted
     # from the client. Set by the `/me` handler from the email allowlist.
@@ -32,6 +40,10 @@ class UserUpdate(BaseModel):
 
     display_name: str | None = Field(None, max_length=120)
     avatar_url: str | None = Field(None, max_length=1024)
+    #: Any shape a person types — "(415) 555-0123", "+1 415 555 0123",
+    #: "00441…". Normalised to E.164 server-side (app/utils/phone.py) so
+    #: the UNIQUE index means something. Send "" to remove it.
+    phone: str | None = Field(None, max_length=32)
 
 
 class UserSettingsRead(BaseModel):

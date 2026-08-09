@@ -549,6 +549,9 @@
   "/v1/me/notifications/read": [
     "POST"
   ],
+  "/v1/me/notifications/summary": [
+    "GET"
+  ],
   "/v1/me/notifications/unread-count": [
     "GET"
   ],
