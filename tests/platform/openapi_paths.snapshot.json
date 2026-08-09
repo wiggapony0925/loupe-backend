@@ -255,6 +255,15 @@
   "/v1/admin/social/moderation/{case_id}/resolve": [
     "POST"
   ],
+  "/v1/admin/social/stories": [
+    "GET"
+  ],
+  "/v1/admin/social/stories/seed": [
+    "POST"
+  ],
+  "/v1/admin/social/stories/{story_id}/expire": [
+    "POST"
+  ],
   "/v1/admin/users": [
     "GET"
   ],

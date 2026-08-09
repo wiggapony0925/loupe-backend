@@ -13,14 +13,25 @@ leave the Community page blank.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_admin
 from app.db import get_db
 from app.models.user import User
+from app.social import post_media, story_media
+from app.social.models import (
+    SocialPost,
+    SocialPostMedia,
+    SocialProfile,
+    SocialStory,
+    SocialStoryComment,
+    SocialStoryView,
+)
 from app.social.schemas import (
     ModerationCaseRead,
     ModerationQueueRead,
@@ -175,6 +186,251 @@ async def resolve_case(
     """Resolving one case answers every other open case about the same
     thing — nine duplicate reports left open is how a queue becomes noise."""
     return await safety.resolve(db, admin, case_id, action=action)
+
+
+# ── Stories: dev tools ──
+#
+# The 24-hour lifecycle is the one part of stories nobody can test by
+# waiting — so the portal gets the two levers that close the loop: make
+# the seeded accounts post stories, and force one to expire NOW. If the
+# expiry predicate is right, an expired story leaves every live surface
+# the moment the button is pressed, and re-seeding lights the tray again.
+
+
+class AdminStoryRead(BaseModel):
+    id: uuid.UUID
+    username: str
+    kind: str
+    caption: str | None
+    created_at: datetime
+    expires_at: datetime
+    live: bool
+    view_count: int
+    comment_count: int
+
+
+class StorySeedResult(BaseModel):
+    created: int
+    #: Accounts skipped because they already have live stories — the
+    #: retrigger contract: while a story is up, seeding is a no-op for
+    #: that account; expire it (or wait 24h) and seeding works again.
+    skipped_live: int
+    authors: list[str]
+
+
+@router.get(
+    "/stories",
+    response_model=list[AdminStoryRead],
+    summary="Every story, live and expired",
+)
+async def admin_stories(
+    limit: int = Query(60, ge=1, le=200),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[AdminStoryRead]:
+    rows = (
+        await db.execute(
+            select(SocialStory, SocialProfile.username)
+            .join(SocialProfile, SocialProfile.user_id == SocialStory.author_id)
+            .where(SocialStory.deleted_at.is_(None))
+            .order_by(SocialStory.created_at.desc())
+            .limit(limit)
+        )
+    ).all()
+    ids = [story.id for story, _ in rows]
+    views = {
+        sid: int(n)
+        for sid, n in (
+            await db.execute(
+                select(SocialStoryView.story_id, func.count())
+                .where(SocialStoryView.story_id.in_(ids or [uuid.uuid4()]))
+                .group_by(SocialStoryView.story_id)
+            )
+        ).all()
+    }
+    comments = {
+        sid: int(n)
+        for sid, n in (
+            await db.execute(
+                select(SocialStoryComment.story_id, func.count())
+                .where(
+                    SocialStoryComment.story_id.in_(ids or [uuid.uuid4()]),
+                    SocialStoryComment.deleted_at.is_(None),
+                )
+                .group_by(SocialStoryComment.story_id)
+            )
+        ).all()
+    }
+    now = datetime.now(UTC)
+
+    def _aware(value: datetime) -> datetime:
+        # SQLite hands columns back naive; Postgres hands them back aware.
+        # The rows were WRITTEN as UTC on both, so naive means "UTC with the
+        # label lost", not "unknown".
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+    return [
+        AdminStoryRead(
+            id=story.id,
+            username=username,
+            kind="video" if story_media.is_video(story.content_type) else "image",
+            caption=story.caption,
+            created_at=story.created_at,
+            expires_at=story.expires_at,
+            live=_aware(story.expires_at) > now,
+            view_count=views.get(story.id, 0),
+            comment_count=comments.get(story.id, 0),
+        )
+        for story, username in rows
+    ]
+
+
+@router.post(
+    "/stories/seed",
+    response_model=StorySeedResult,
+    summary="Make the test accounts post stories",
+)
+async def seed_stories(
+    accounts: int = Query(6, ge=1, le=12),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> StorySeedResult:
+    """Stories built from each account's own recent post photos — a
+    server-side blob copy, so this works in prod without fetching anything
+    from outside. The card counts vary on purpose (2, 1, 3, …): a tray
+    where every reel is one card never exercises the tap-through.
+    """
+    now = datetime.now(UTC)
+
+    # Accounts that have posts with media and NO live story. The skip is
+    # the retrigger contract — see StorySeedResult.skipped_live.
+    live_authors = select(SocialStory.author_id).where(
+        SocialStory.deleted_at.is_(None), SocialStory.expires_at > func.now()
+    )
+    candidates = (
+        await db.execute(
+            select(SocialProfile, func.max(SocialPost.created_at).label("last"))
+            .join(SocialPost, SocialPost.author_id == SocialProfile.user_id)
+            .join(SocialPostMedia, SocialPostMedia.post_id == SocialPost.id)
+            .where(
+                SocialPost.deleted_at.is_(None),
+                SocialProfile.user_id.notin_(live_authors),
+                SocialProfile.user_id != admin.id,
+            )
+            .group_by(SocialProfile.user_id)
+            .order_by(func.max(SocialPost.created_at).desc())
+            .limit(accounts)
+        )
+    ).all()
+
+    skipped = (
+        await db.execute(
+            select(func.count(func.distinct(SocialStory.author_id))).where(
+                SocialStory.deleted_at.is_(None),
+                SocialStory.expires_at > func.now(),
+            )
+        )
+    ).scalar_one()
+
+    captions = [
+        "mail day 📬",
+        "fresh from the shop",
+        "sunday sorting",
+        "one more for the PC",
+        "look at this centering",
+        "grading pile update",
+    ]
+    counts = (2, 1, 3, 1, 2, 1, 2, 1, 3, 1, 2, 1)
+
+    created = 0
+    authors: list[str] = []
+    for index, (profile, _last) in enumerate(candidates):
+        media_rows = (
+            (
+                await db.execute(
+                    select(SocialPostMedia)
+                    .join(SocialPost, SocialPost.id == SocialPostMedia.post_id)
+                    .where(
+                        SocialPost.author_id == profile.user_id,
+                        SocialPost.deleted_at.is_(None),
+                    )
+                    .order_by(SocialPost.created_at.desc())
+                    .limit(counts[index % len(counts)])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not media_rows:
+            continue
+
+        for slot, media_row in enumerate(media_rows):
+            body = await post_media.load(media_row.id)
+            if body is None:
+                continue
+            story_id = uuid.uuid4()
+            await story_media.store(story_id, body, media_row.content_type)
+            created_at = now - timedelta(minutes=index * 47 + slot * 13)
+            db.add(
+                SocialStory(
+                    id=story_id,
+                    author_id=profile.user_id,
+                    storage_key=story_media.storage_key(story_id),
+                    content_type=media_row.content_type,
+                    width=media_row.width,
+                    height=media_row.height,
+                    duration_ms=(
+                        6000 if story_media.is_video(media_row.content_type) else None
+                    ),
+                    caption=captions[(index + slot) % len(captions)],
+                    created_at=created_at,
+                    expires_at=created_at
+                    + timedelta(hours=story_media.STORY_TTL_HOURS),
+                )
+            )
+            created += 1
+        authors.append(profile.username)
+
+    await db.commit()
+    return StorySeedResult(created=created, skipped_live=int(skipped), authors=authors)
+
+
+@router.post(
+    "/stories/{story_id}/expire",
+    response_model=AdminStoryRead,
+    summary="Force a story to expire NOW",
+)
+async def expire_story(
+    story_id: uuid.UUID,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminStoryRead:
+    """Sets `expires_at` to now. If the lifecycle is right, the story
+    leaves the tray, the reel and the counts immediately — while staying
+    in the author's archive, which is the other half of the contract."""
+    story = await db.get(SocialStory, story_id)
+    if story is None or story.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    profile = await db.get(SocialProfile, story.author_id)
+    # A second into the PAST, not now. `expires_at > now()` compares a
+    # microsecond-precise stored value against CURRENT_TIMESTAMP, which on
+    # SQLite has no fractional part — set to the same second, the string
+    # comparison keeps the story "live" until the clock ticks over. The
+    # feed's created_at column documents the same trap.
+    story.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    await db.commit()
+    await db.refresh(story)
+    return AdminStoryRead(
+        id=story.id,
+        username=profile.username if profile else "?",
+        kind="video" if story_media.is_video(story.content_type) else "image",
+        caption=story.caption,
+        created_at=story.created_at,
+        expires_at=story.expires_at,
+        live=False,
+        view_count=0,
+        comment_count=0,
+    )
 
 
 __all__ = ["router"]
