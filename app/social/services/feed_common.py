@@ -195,6 +195,31 @@ def visible_posts_predicate(viewer_id: uuid.UUID) -> ColumnElement[bool]:
     )
 
 
+def discoverable_posts_predicate() -> ColumnElement[bool]:
+    """Whose posts may be *recommended*. Public authors only — no exceptions.
+
+    Distinct from :func:`visible_posts_predicate`, and the difference is the
+    whole point. "Can this viewer see it if they go looking" and "may we put
+    it in front of them unasked" are different questions, and answering the
+    second with the first is how private accounts leak.
+
+    Going private means "my posts go to my followers", not "my posts go to
+    my followers *and* the ranking algorithm". A follower opening For You
+    and finding a private friend's photo sitting between two strangers'
+    would be right to read that as the setting not working — and on a tag
+    page it is worse, because tags are how a stranger finds a post.
+
+    Takes no viewer: the answer does not depend on who is asking, which is
+    exactly what makes it safe. There is no "unless they follow them"
+    branch to get wrong.
+    """
+    return and_(
+        SocialPost.deleted_at.is_(None),
+        SocialProfile.user_id.is_not(None),
+        SocialProfile.is_private.is_(False),
+    )
+
+
 def base_post_query(viewer_id: uuid.UUID) -> Select:
     """``SocialPost`` joined to its author, gated to what the viewer may see."""
     return (
@@ -211,7 +236,7 @@ def base_post_query(viewer_id: uuid.UUID) -> Select:
 
 def visible_post_ids(viewer_id: uuid.UUID) -> Select:
     """Just the ids from :func:`base_post_query` — for ``IN`` sub-selects
-    (trending counts, tag pages) where the author rows aren't needed."""
+    where the author rows aren't needed."""
     return (
         select(SocialPost.id)
         .join(SocialProfile, SocialProfile.user_id == SocialPost.author_id)
@@ -220,6 +245,22 @@ def visible_post_ids(viewer_id: uuid.UUID) -> Select:
             User.deleted_at.is_(None),
             User.banned_at.is_(None),
             visible_posts_predicate(viewer_id),
+        )
+    )
+
+
+def discoverable_post_ids() -> Select:
+    """Ids of posts eligible for recommendation — the ``IN`` sub-select form
+    of :func:`discoverable_posts_predicate`, for trending counts and tag
+    pages."""
+    return (
+        select(SocialPost.id)
+        .join(SocialProfile, SocialProfile.user_id == SocialPost.author_id)
+        .join(User, User.id == SocialPost.author_id)
+        .where(
+            User.deleted_at.is_(None),
+            User.banned_at.is_(None),
+            discoverable_posts_predicate(),
         )
     )
 
@@ -299,12 +340,14 @@ async def post_payloads(
             media=media.get(post.id, []),
             card=cards.get(post.card_id) if post.card_id else None,
             created_at=post.created_at,
+            edited_at=post.edited_at,
             like_count=like_counts.get(post.id, 0),
             comment_count=comment_counts.get(post.id, 0),
             viewer_has_liked=post.id in liked_by_viewer,
             hashtags=tags.get(post.id, []),
             mentions=mentions.get(post.id, []),
             can_delete=staff or post.author_id == viewer.id,
+            can_edit=post.author_id == viewer.id,
         )
         for post, profile, account in rows
     ]
@@ -441,6 +484,8 @@ __all__ = [
     "base_post_query",
     "decode_cursor",
     "decode_offset",
+    "discoverable_post_ids",
+    "discoverable_posts_predicate",
     "encode_cursor",
     "encode_offset",
     "extract_hashtags",

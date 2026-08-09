@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_admin_user
@@ -44,13 +44,13 @@ from app.social.services.feed_common import (
     base_post_query,
     decode_cursor,
     decode_offset,
+    discoverable_posts_predicate,
     encode_cursor,
     encode_offset,
     extract_hashtags,
     extract_mention_handles,
     post_payloads,
     resolve_mentions,
-    visible_posts_predicate,
 )
 
 #: How far back "For You" looks. A discovery feed that can reach months into
@@ -198,6 +198,130 @@ async def _retarget_case(
     )
 
 
+async def edit_post(
+    db: AsyncSession,
+    viewer: User,
+    post_id: uuid.UUID,
+    *,
+    body: str | None,
+) -> PostRead:
+    """Rewrite a post's caption. Author only — staff can delete, not rewrite.
+
+    **The caption only.** Photos are immutable once published, which is
+    Instagram's rule and the right one: swapping the image under a post
+    people have already liked and commented on changes what they endorsed.
+    Editing words is a correction; editing the picture is a bait-and-switch.
+
+    A new caption is NEW USER CONTENT, so it goes through the same
+    moderation chokepoint as the original — otherwise "post something
+    innocent, then edit it" is an open door straight past the screen.
+    Hashtags and mentions are re-derived rather than patched, because a
+    diff would have to be exactly right about removals to avoid leaving a
+    post indexed under a tag its caption no longer contains.
+    """
+    post = await db.get(SocialPost, post_id)
+    if post is None or post.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    # Not `is_admin_user`: a moderator's tools are remove and resolve. An
+    # admin silently rewriting someone's words, still bylined to them, is
+    # not moderation.
+    if post.author_id != viewer.id:
+        raise HTTPException(status_code=403, detail="Not your post")
+
+    text = (body or "").strip()
+    if len(text) > MAX_POST_BODY:
+        raise HTTPException(
+            status_code=422, detail=f"Caption is longer than {MAX_POST_BODY} characters"
+        )
+
+    # A post is allowed to have no caption, but only if something else
+    # carries it. Clearing the text of a text-only post is a delete, and
+    # should be done as one so the author knows that's what happened.
+    if not text:
+        has_media = (
+            await db.execute(
+                select(func.count())
+                .select_from(SocialPostMedia)
+                .where(SocialPostMedia.post_id == post.id)
+            )
+        ).scalar_one()
+        if not has_media and post.card_id is None:
+            raise HTTPException(
+                status_code=422,
+                detail="A post needs a caption or a photo — delete it instead",
+            )
+
+    if text == (post.body or ""):
+        # Nothing changed. Don't stamp `edited_at` for a no-op save, or
+        # opening the editor and hitting Save marks the post as rewritten.
+        return await get_post(db, viewer, post_id)
+
+    verdict = await safety.enforce(
+        db,
+        actor=viewer,
+        surface=safety.TARGET_POST,
+        target_id=post.id,
+        text=text,
+    )
+
+    post.body = text or None
+    post.edited_at = datetime.now(UTC)
+
+    # Re-index from scratch: delete then re-derive. See the docstring —
+    # patching the difference is where a stale tag row survives.
+    await db.execute(
+        delete(SocialPostHashtag).where(SocialPostHashtag.post_id == post.id)
+    )
+    for tag in hashtag_policy.indexable(extract_hashtags(text)):
+        db.add(SocialPostHashtag(post_id=post.id, tag=tag))
+
+    # Mentions added by an edit notify; ones already there don't re-notify,
+    # and ones removed lose the row but keep the notification already sent —
+    # that notification was true when it fired.
+    existing = set(
+        (
+            await db.execute(
+                select(SocialPostMention.user_id).where(
+                    SocialPostMention.post_id == post.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    mentioned = await resolve_mentions(db, extract_mention_handles(text))
+    keep = {uid for uid in mentioned.values() if uid != viewer.id}
+    await db.execute(
+        delete(SocialPostMention).where(
+            SocialPostMention.post_id == post.id,
+            SocialPostMention.user_id.notin_(keep or [uuid.uuid4()]),
+        )
+    )
+    for user_id in sorted(keep - existing, key=str):
+        db.add(SocialPostMention(post_id=post.id, user_id=user_id))
+
+    await db.commit()
+
+    newly_mentioned = keep - existing
+    if newly_mentioned:
+        profile = await get_profile(db, viewer.id)
+        if profile is not None:
+            await feed_notify.mentioned_in_post(
+                db,
+                actor=viewer,
+                actor_profile=profile,
+                post=post,
+                user_ids=sorted(newly_mentioned, key=str),
+            )
+
+    # enforce() has already opened the case against the real post id (unlike
+    # create_post, there is a row to point at from the start), so a flagged
+    # edit needs nothing further here.
+    del verdict
+
+    return await get_post(db, viewer, post_id)
+
+
 async def delete_post(db: AsyncSession, viewer: User, post_id: uuid.UUID) -> None:
     """Soft-delete. Author or staff only.
 
@@ -338,6 +462,10 @@ async def _foryou_feed(
     Posts the viewer already follows are NOT excluded — someone you follow
     going viral is exactly what a discovery feed should show you — but your
     own posts are, because being recommended your own photos is absurd.
+
+    Private authors are excluded outright, even ones the viewer follows.
+    See :func:`discoverable_posts_predicate`: "can they see it" and "may we
+    recommend it" are different questions, and this feed asks the second.
     """
     offset = decode_offset(cursor)
     since = datetime.now(UTC) - FORYOU_WINDOW
@@ -373,7 +501,7 @@ async def _foryou_feed(
             User.banned_at.is_(None),
             SocialPost.author_id != viewer.id,
             SocialPost.created_at >= since,
-            visible_posts_predicate(viewer.id),
+            discoverable_posts_predicate(),
         )
         .order_by(score.desc(), SocialPost.created_at.desc(), SocialPost.id.desc())
         .offset(offset)
@@ -448,6 +576,7 @@ __all__ = [
     "NewImage",
     "create_post",
     "delete_post",
+    "edit_post",
     "feed",
     "get_post",
     "like_post",

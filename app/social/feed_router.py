@@ -35,6 +35,7 @@ from app.social.schemas import (
     FeedRead,
     HashtagRead,
     ModerationCaseRead,
+    PostEdit,
     PostLikeRead,
     PostRead,
     ReportCreate,
@@ -193,6 +194,25 @@ async def get_post(
     return await posts_service.get_post(db, user, post_id)
 
 
+@router.patch(
+    "/posts/{post_id}",
+    response_model=PostRead,
+    summary="Edit a post's caption",
+)
+async def edit_post(
+    post_id: uuid.UUID,
+    payload: PostEdit,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> PostRead:
+    """Rewrite the caption. Author only, re-moderated, tags re-indexed.
+
+    JSON rather than multipart because photos are deliberately immutable:
+    a post's images are what people liked and commented on.
+    """
+    return await posts_service.edit_post(db, user, post_id, body=payload.body)
+
+
 @router.delete("/posts/{post_id}", status_code=204, summary="Delete a post")
 async def delete_post(
     post_id: uuid.UUID,
@@ -326,6 +346,20 @@ async def unlike_comment(
 
 
 # ── Hashtags + unified search ──
+
+
+@router.get(
+    "/hashtags/recent",
+    response_model=list[HashtagRead],
+    summary="Tags you have used before",
+)
+async def recent_hashtags(
+    limit: int = Query(12, ge=1, le=30),
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[HashtagRead]:
+    """The composer's suggestion row: your own tags first, trending after."""
+    return await hashtags_service.recent_for_author(db, user, limit=limit)
 
 
 @router.get(

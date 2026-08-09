@@ -396,6 +396,10 @@ class PostRead(BaseModel):
     media: list[PostMediaRead] = []
     card: PostCardRef | None = None
     created_at: datetime
+    #: When the caption was last rewritten, or None. Clients render
+    #: "· edited" beside the timestamp — comments underneath may be
+    #: answering words that are no longer there.
+    edited_at: datetime | None = None
     like_count: int = 0
     comment_count: int = 0
     #: Drives the filled heart — computed for the requesting viewer.
@@ -409,6 +413,16 @@ class PostRead(BaseModel):
     mentions: list[str] = []
     #: Whether the viewer may remove this post (author or staff).
     can_delete: bool = False
+    #: Author only — staff can remove a post but never rewrite one under
+    #: someone else's byline. Sent rather than derived so the clients don't
+    #: each re-implement the rule and disagree about the staff case.
+    can_edit: bool = False
+
+
+class PostEdit(BaseModel):
+    """A caption rewrite. Images are not editable — see `edit_post`."""
+
+    body: str | None = None
 
 
 class FeedRead(BaseModel):

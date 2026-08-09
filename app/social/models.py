@@ -251,6 +251,14 @@ class SocialPost(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    #: When the caption was last changed, or NULL if never. Shown as
+    #: "· edited" next to the timestamp, which is the honest thing to do
+    #: when comments underneath may be replying to words that no longer
+    #: exist. Deliberately NOT `updated_at`: a like or a moderation flag
+    #: touching the row must not make a post look rewritten.
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     #: THE FEED'S SORT KEY, which is why it carries a Python-side default on
     #: top of the server one. Two things depend on that:
     #:

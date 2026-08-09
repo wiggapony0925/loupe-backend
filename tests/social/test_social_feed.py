@@ -860,10 +860,14 @@ async def test_non_image_uploads_are_refused(client, created_user):
 
 
 @pytest.mark.parametrize(
-    ("filename", "tables"),
+    ("filenames", "tables"),
     [
         (
-            "0050_social_feed.py",
+            # The CHAIN, in order — not just the creating migration. A later
+            # additive migration (0053 added social_posts.edited_at) has to
+            # be part of the comparison, or this test fails for the one
+            # reason that is not drift and gets weakened to make it pass.
+            ["0050_social_feed.py", "0053_post_edited_at.py"],
             [
                 "social_posts",
                 "social_post_media",
@@ -874,17 +878,17 @@ async def test_non_image_uploads_are_refused(client, created_user):
                 "social_post_mentions",
             ],
         ),
-        ("0051_social_moderation.py", ["social_moderation_cases"]),
+        (["0051_social_moderation.py"], ["social_moderation_cases"]),
     ],
 )
-def test_social_migrations_create_exactly_what_the_models_declare(filename, tables):
-    """The feed's migration and its models must not drift apart.
+def test_social_migrations_create_exactly_what_the_models_declare(filenames, tables):
+    """The feed's migrations and its models must not drift apart.
 
     This is the shape of the worst outage this backend has had: a column
     added to a model without a matching migration, so every query naming it
     500s in production while passing locally against a metadata-built test
-    schema. Here the migration is executed for real and the result compared
-    to the ORM, column for column and index for index.
+    schema. Here the migrations are executed for real and the result
+    compared to the ORM, column for column and index for index.
     """
     import sqlalchemy as sa
     from alembic.migration import MigrationContext
@@ -894,13 +898,16 @@ def test_social_migrations_create_exactly_what_the_models_declare(filename, tabl
 
     # Loaded by path: the versions directory is not an importable package
     # (alembic loads revisions by file), so there is no module name for it.
-    spec = importlib.util.spec_from_file_location(
-        f"migration_{filename}",
-        Path(__file__).resolve().parents[2] / "app/db/alembic/versions" / filename,
-    )
-    assert spec and spec.loader
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
+    versions = Path(__file__).resolve().parents[2] / "app/db/alembic/versions"
+    migrations = []
+    for filename in filenames:
+        spec = importlib.util.spec_from_file_location(
+            f"migration_{filename}", versions / filename
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        migrations.append(module)
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
@@ -915,7 +922,8 @@ def test_social_migrations_create_exactly_what_the_models_declare(filename, tabl
         )
         ctx = MigrationContext.configure(conn)
         with Operations.context(ctx):
-            migration.upgrade()
+            for module in migrations:
+                module.upgrade()
 
         inspector = sa.inspect(conn)
         for name in tables:
@@ -1072,3 +1080,363 @@ async def test_top_is_the_default_for_a_tag_page(client, db_session, created_use
         )
     )
     assert page["items"][0]["id"] == loved["id"]
+
+
+# ── Private accounts stay out of discovery ──
+
+
+@pytest.mark.asyncio
+async def test_for_you_never_recommends_a_private_account_you_follow(
+    client, db_session, created_user, second_user
+):
+    """"Can they see it" and "may we recommend it" are different questions.
+
+    A follower can open a private friend's post from Following or from a
+    permalink. Finding it in For You, ranked between two strangers' posts,
+    would be the privacy setting visibly not working.
+    """
+    await _claim(client, created_user, "viewerfy")
+    await _claim(client, second_user, "privatefy", is_private=True)
+    # Accept the follow so the viewer genuinely follows a private account.
+    await client.post(
+        "/v1/social/users/privatefy/follow", headers=_headers(created_user)
+    )
+    reqs = assert_envelope_ok(
+        await client.get("/v1/social/requests", headers=_headers(second_user))
+    )
+    await client.post(
+        f"/v1/social/requests/{reqs[0]['id']}/accept", headers=_headers(second_user)
+    )
+
+    post = await _post(client, second_user, "secret pull #chase")
+
+    # Following: yes — they asked for this person's posts.
+    following = assert_envelope_ok(
+        await client.get(
+            "/v1/social/feed", params={"tab": "following"}, headers=_headers(created_user)
+        )
+    )
+    assert post["id"] in [p["id"] for p in following["items"]]
+
+    # The permalink: yes — they may go looking.
+    assert_envelope_ok(
+        await client.get(
+            f"/v1/social/posts/{post['id']}", headers=_headers(created_user)
+        )
+    )
+
+    # For You: NO.
+    foryou = assert_envelope_ok(
+        await client.get(
+            "/v1/social/feed", params={"tab": "foryou"}, headers=_headers(created_user)
+        )
+    )
+    assert post["id"] not in [p["id"] for p in foryou["items"]]
+
+
+@pytest.mark.asyncio
+async def test_a_private_post_never_lands_on_a_hashtag_page(
+    client, db_session, created_user, second_user
+):
+    """A tag page is how a STRANGER finds a post, so a private account's
+    photo has no business on one — not even for its own followers."""
+    await _claim(client, created_user, "viewerht")
+    await _claim(client, second_user, "privateht", is_private=True)
+    await client.post("/v1/social/users/privateht/follow", headers=_headers(created_user))
+    reqs = assert_envelope_ok(
+        await client.get("/v1/social/requests", headers=_headers(second_user))
+    )
+    await client.post(
+        f"/v1/social/requests/{reqs[0]['id']}/accept", headers=_headers(second_user)
+    )
+    post = await _post(client, second_user, "grail #vintagegrail")
+
+    for sort in ("recent", "top"):
+        page = assert_envelope_ok(
+            await client.get(
+                "/v1/social/hashtags/vintagegrail/posts",
+                params={"sort": sort},
+                headers=_headers(created_user),
+            )
+        )
+        assert post["id"] not in [p["id"] for p in page["items"]], sort
+
+    # …and the tag doesn't get counted into trending or typeahead either,
+    # or the chip would promise a page it can't deliver.
+    trending = assert_envelope_ok(
+        await client.get("/v1/social/hashtags/trending", headers=_headers(created_user))
+    )
+    assert "vintagegrail" not in [t["tag"] for t in trending]
+    found = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/suggest",
+            params={"q": "vintagegrail"},
+            headers=_headers(created_user),
+        )
+    )
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_going_private_retroactively_pulls_posts_out_of_discovery(
+    client, created_user, second_user
+):
+    """The gate is evaluated per read, not stamped on the row at write time,
+    so flipping the switch takes effect on posts that already exist."""
+    await _claim(client, created_user, "viewerret")
+    await _claim(client, second_user, "authorret")
+    post = await _post(client, second_user, "public for now #retro")
+    page = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/retro/posts", headers=_headers(created_user)
+        )
+    )
+    assert post["id"] in [p["id"] for p in page["items"]]
+
+    await _claim(client, second_user, "authorret", is_private=True)
+
+    page = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/retro/posts", headers=_headers(created_user)
+        )
+    )
+    assert post["id"] not in [p["id"] for p in page["items"]]
+
+
+# ── Editing a caption ──
+
+
+@pytest.mark.asyncio
+async def test_author_can_edit_their_caption(client, created_user):
+    await _claim(client, created_user, "editor1")
+    post = await _post(client, created_user, "frist post #tpyo")
+
+    resp = await client.patch(
+        f"/v1/social/posts/{post['id']}",
+        json={"body": "first post #charizard"},
+        headers=_headers(created_user),
+    )
+    updated = assert_envelope_ok(resp)
+    assert updated["body"] == "first post #charizard"
+    assert updated["edited_at"] is not None
+    # Tags are RE-DERIVED, not patched: the old one is gone, not merely
+    # unlinked, or the post stays browsable under a tag it no longer says.
+    assert updated["hashtags"] == ["charizard"]
+
+    page = assert_envelope_ok(
+        await client.get(
+            "/v1/social/hashtags/tpyo/posts", headers=_headers(created_user)
+        )
+    )
+    assert page["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_only_the_author_can_edit(client, created_user, second_user):
+    await _claim(client, created_user, "owner1")
+    await _claim(client, second_user, "stranger1")
+    post = await _post(client, created_user, "mine")
+
+    resp = await client.patch(
+        f"/v1/social/posts/{post['id']}",
+        json={"body": "not yours"},
+        headers=_headers(second_user),
+    )
+    assert_envelope_error(resp, expected_status=403)
+
+
+@pytest.mark.asyncio
+async def test_an_edit_is_re_screened(client, created_user, monkeypatch):
+    """The open door this closes: publish something innocuous, then edit it
+    into whatever you actually wanted to say. If the edit path skipped
+    moderation, the screen on create would be decoration.
+    """
+    from app.social import moderation
+
+    async def block_the_second_thing(text=None, images=None):
+        if text and "banned" in text:
+            return moderation.Verdict(
+                action=moderation.BLOCK, categories=["harassment"], score=0.99
+            )
+        return moderation.Verdict()
+
+    monkeypatch.setattr(moderation, "screen", block_the_second_thing)
+
+    await _claim(client, created_user, "sneaky1")
+    post = await _post(client, created_user, "cute pikachu")
+
+    resp = await client.patch(
+        f"/v1/social/posts/{post['id']}",
+        json={"body": "banned words here"},
+        headers=_headers(created_user),
+    )
+    assert_envelope_error(resp, expected_status=422)
+
+    # And the original survives untouched.
+    still = assert_envelope_ok(
+        await client.get(f"/v1/social/posts/{post['id']}", headers=_headers(created_user))
+    )
+    assert still["body"] == "cute pikachu"
+    assert still["edited_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_saving_an_unchanged_caption_does_not_mark_it_edited(
+    client, created_user
+):
+    """Opening the editor and hitting Save is not a rewrite."""
+    await _claim(client, created_user, "noop1")
+    post = await _post(client, created_user, "unchanged")
+    updated = assert_envelope_ok(
+        await client.patch(
+            f"/v1/social/posts/{post['id']}",
+            json={"body": "unchanged"},
+            headers=_headers(created_user),
+        )
+    )
+    assert updated["edited_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_caption_of_a_text_only_post_is_refused(
+    client, created_user
+):
+    """That's a delete, and the author should be told so rather than left
+    with an invisible empty post."""
+    await _claim(client, created_user, "empty1")
+    post = await _post(client, created_user, "words only")
+    resp = await client.patch(
+        f"/v1/social/posts/{post['id']}",
+        json={"body": "   "},
+        headers=_headers(created_user),
+    )
+    assert_envelope_error(resp, expected_status=422)
+
+
+@pytest.mark.asyncio
+async def test_a_photo_post_may_lose_its_caption(client, created_user):
+    await _claim(client, created_user, "photo1")
+    post = await _post(client, created_user, "caption to remove", image=True)
+    updated = assert_envelope_ok(
+        await client.patch(
+            f"/v1/social/posts/{post['id']}",
+            json={"body": ""},
+            headers=_headers(created_user),
+        )
+    )
+    assert updated["body"] in (None, "")
+
+
+@pytest.mark.asyncio
+async def test_editing_a_deleted_post_is_a_404(client, created_user):
+    await _claim(client, created_user, "gone1")
+    post = await _post(client, created_user, "here now")
+    await client.delete(
+        f"/v1/social/posts/{post['id']}", headers=_headers(created_user)
+    )
+    resp = await client.patch(
+        f"/v1/social/posts/{post['id']}",
+        json={"body": "back again"},
+        headers=_headers(created_user),
+    )
+    assert_envelope_error(resp, expected_status=404)
+
+
+@pytest.mark.asyncio
+async def test_an_edit_notifies_newly_mentioned_people_only_once(
+    client, db_session, created_user, second_user
+):
+    await _claim(client, created_user, "mentioner1")
+    await _claim(client, second_user, "mentioned1")
+    post = await _post(client, created_user, "no mentions yet")
+
+    async def mention_notifications() -> int:
+        rows = (
+            await db_session.execute(
+                select(Notification).where(
+                    Notification.user_id == second_user.id,
+                    Notification.kind == "social_mention",
+                )
+            )
+        ).scalars().all()
+        return len(rows)
+
+    assert await mention_notifications() == 0
+
+    await client.patch(
+        f"/v1/social/posts/{post['id']}",
+        json={"body": "thanks @mentioned1"},
+        headers=_headers(created_user),
+    )
+    assert await mention_notifications() == 1
+
+    # Editing around them again must not re-ping.
+    await client.patch(
+        f"/v1/social/posts/{post['id']}",
+        json={"body": "big thanks @mentioned1 !"},
+        headers=_headers(created_user),
+    )
+    assert await mention_notifications() == 1
+
+
+# ── The composer's tag suggestions ──
+
+
+@pytest.mark.asyncio
+async def test_recent_hashtags_are_the_authors_own_most_recent_first(
+    client, created_user
+):
+    """People tag their own posts consistently. Retyping #psa10 by hand
+    every time is the friction this removes — trending can't, because it
+    answers a different question."""
+    await _claim(client, created_user, "tagger1")
+    await _post(client, created_user, "one #oldest")
+    await _post(client, created_user, "two #middle")
+    await _post(client, created_user, "three #newest")
+
+    rows = assert_envelope_ok(
+        await client.get("/v1/social/hashtags/recent", headers=_headers(created_user))
+    )
+    tags = [r["tag"] for r in rows]
+    assert tags[:3] == ["newest", "middle", "oldest"]
+
+
+@pytest.mark.asyncio
+async def test_recent_hashtags_fall_back_to_trending_for_a_new_account(
+    client, created_user, second_user
+):
+    """A brand-new account has no habit yet; an empty row would read as the
+    feature being broken."""
+    await _claim(client, created_user, "newbie1")
+    await _claim(client, second_user, "veteran1")
+    await _post(client, second_user, "popular thing #everyoneusesthis")
+
+    rows = assert_envelope_ok(
+        await client.get("/v1/social/hashtags/recent", headers=_headers(created_user))
+    )
+    assert "everyoneusesthis" in [r["tag"] for r in rows]
+
+
+@pytest.mark.asyncio
+async def test_recent_hashtags_never_repeat_a_tag(client, created_user):
+    """Own tags rank first; the trending backfill must not list them again."""
+    await _claim(client, created_user, "dedupe1")
+    await _post(client, created_user, "mine #shared")
+    rows = assert_envelope_ok(
+        await client.get("/v1/social/hashtags/recent", headers=_headers(created_user))
+    )
+    tags = [r["tag"] for r in rows]
+    assert len(tags) == len(set(tags))
+
+
+@pytest.mark.asyncio
+async def test_a_deleted_posts_tags_stop_being_suggested(client, created_user):
+    await _claim(client, created_user, "cleanup1")
+    post = await _post(client, created_user, "oops #mistaketag")
+    await client.delete(
+        f"/v1/social/posts/{post['id']}", headers=_headers(created_user)
+    )
+    rows = assert_envelope_ok(
+        await client.get("/v1/social/hashtags/recent", headers=_headers(created_user))
+    )
+    assert "mistaketag" not in [r["tag"] for r in rows]

@@ -20,10 +20,11 @@ from app.social.services.feed_common import (
     base_post_query,
     decode_cursor,
     decode_offset,
+    discoverable_post_ids,
+    discoverable_posts_predicate,
     encode_cursor,
     encode_offset,
     post_payloads,
-    visible_post_ids,
 )
 
 #: Trending looks at the last week. A day is too jumpy to be a stable row of
@@ -47,9 +48,10 @@ async def trending(
 ) -> list[HashtagRead]:
     """The chip row above the For You feed.
 
-    Counts only tags on posts this viewer may actually open — a chip that
-    leads to an empty page because the posts behind it are private is worse
-    than no chip.
+    Counts only *discoverable* posts, so the chips agree with the page they
+    open. Counting posts the viewer can merely see would inflate a tag with
+    private-account posts and then land them on a page that doesn't show
+    any of them — a chip promising 40 posts and delivering 3.
     """
     since = datetime.now(UTC) - TRENDING_WINDOW
     rows = (
@@ -58,7 +60,7 @@ async def trending(
             .select_from(SocialPostHashtag)
             .join(SocialPost, SocialPost.id == SocialPostHashtag.post_id)
             .where(
-                SocialPost.id.in_(visible_post_ids(viewer.id)),
+                SocialPost.id.in_(discoverable_post_ids()),
                 SocialPost.created_at >= since,
             )
             .group_by(SocialPostHashtag.tag)
@@ -72,7 +74,11 @@ async def trending(
 async def search(
     db: AsyncSession, viewer: User, query: str, *, limit: int = 10
 ) -> list[HashtagRead]:
-    """Tag typeahead — prefix matches first, then anything containing it."""
+    """Tag typeahead — prefix matches first, then anything containing it.
+
+    Scoped to discoverable posts for the same reason as :func:`trending`:
+    every suggestion here is a link to a tag page.
+    """
     needle = normalise(query)
     if not needle:
         return []
@@ -81,7 +87,7 @@ async def search(
             select(SocialPostHashtag.tag, func.count().label("n"))
             .join(SocialPost, SocialPost.id == SocialPostHashtag.post_id)
             .where(
-                SocialPost.id.in_(visible_post_ids(viewer.id)),
+                SocialPost.id.in_(discoverable_post_ids()),
                 SocialPostHashtag.tag.like(f"%{needle}%"),
             )
             .group_by(SocialPostHashtag.tag)
@@ -98,6 +104,52 @@ async def search(
     return [HashtagRead(tag=tag, post_count=int(n)) for tag, n in rows]
 
 
+async def recent_for_author(
+    db: AsyncSession, viewer: User, *, limit: int = 12
+) -> list[HashtagRead]:
+    """Tags this author has used before, most recently used first.
+
+    The composer's suggestion row. Trending answers "what is the app
+    talking about"; this answers "what do YOU tag things", which is the
+    more useful question when the box is empty — people tag their own
+    posts consistently (#psa10, #vintagebase) and retyping the same eight
+    tags by hand is the friction worth removing.
+
+    Backfilled with trending when someone hasn't posted enough to have a
+    habit yet, so the row is never empty on a new account. Their own tags
+    always rank above the borrowed ones.
+    """
+    mine = (
+        await db.execute(
+            select(
+                SocialPostHashtag.tag,
+                func.count().label("n"),
+                func.max(SocialPost.created_at).label("last_used"),
+            )
+            .join(SocialPost, SocialPost.id == SocialPostHashtag.post_id)
+            .where(
+                SocialPost.author_id == viewer.id,
+                SocialPost.deleted_at.is_(None),
+            )
+            .group_by(SocialPostHashtag.tag)
+            .order_by(func.max(SocialPost.created_at).desc())
+            .limit(limit)
+        )
+    ).all()
+
+    out = [HashtagRead(tag=tag, post_count=int(n)) for tag, n, _ in mine]
+    if len(out) >= limit:
+        return out
+
+    seen = {row.tag for row in out}
+    for row in await trending(db, viewer, limit=limit - len(out) + len(seen)):
+        if row.tag not in seen:
+            out.append(row)
+        if len(out) >= limit:
+            break
+    return out
+
+
 async def tag_feed(
     db: AsyncSession,
     viewer: User,
@@ -107,18 +159,25 @@ async def tag_feed(
     cursor: str | None = None,
     limit: int = DEFAULT_PAGE,
 ) -> FeedRead:
-    """Every post carrying this tag that the viewer may see.
+    """Every PUBLIC post carrying this tag.
 
     ``sort="top"`` puts the most-engaged first — what a hashtag page is
     FOR. Arriving on #pokemon and seeing whatever was posted ninety seconds
     ago tells you nothing about the tag; the best of it does. ``recent`` is
     the second tab, for people watching a tag live.
+
+    Private authors never appear here, not even for their own followers.
+    A tag page is how a stranger finds a post, so putting a private
+    account's photo on one defeats the setting — and a page whose contents
+    changed depending on who you follow would make "who can see this tag?"
+    unanswerable for the person who wrote it.
     """
     needle = normalise(tag)
     stmt = base_post_query(viewer.id).where(
+        discoverable_posts_predicate(),
         SocialPost.id.in_(
             select(SocialPostHashtag.post_id).where(SocialPostHashtag.tag == needle)
-        )
+        ),
     )
 
     if sort == "top":

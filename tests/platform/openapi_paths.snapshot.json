@@ -731,6 +731,9 @@
   "/v1/social/feed": [
     "GET"
   ],
+  "/v1/social/hashtags/recent": [
+    "GET"
+  ],
   "/v1/social/hashtags/suggest": [
     "GET"
   ],
@@ -759,7 +762,8 @@
   ],
   "/v1/social/posts/{post_id}": [
     "DELETE",
-    "GET"
+    "GET",
+    "PATCH"
   ],
   "/v1/social/posts/{post_id}/comments": [
     "GET",
