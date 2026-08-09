@@ -577,12 +577,148 @@ async def _seed_stories(
     logger.info("seeded %s live stories across %s accounts", made, len(authors))
 
 
+async def backfill_media(handle: str) -> None:
+    """Upgrade posts that already exist: add carousel slides and video.
+
+    Additive and idempotent. Nothing is deleted and no post is touched
+    twice — a post that already has more than one slide is skipped, which
+    is also what makes a re-run safe.
+
+    Exists because the first seed put exactly one photo on every post. That
+    is a feed that never exercises the swipe, the dots, the position
+    ordering or the video player, and re-running the seeder from scratch to
+    fix it would mean deleting real rows people have already commented on.
+    """
+    sm = get_sessionmaker()
+    async with sm() as db:
+        viewer_profile = (
+            await db.execute(
+                select(SocialProfile).where(SocialProfile.username == handle.lower())
+            )
+        ).scalar_one_or_none()
+        if viewer_profile is None:
+            raise SystemExit(f"No collector @{handle}.")
+        viewer = await db.get(User, viewer_profile.user_id)
+        assert viewer is not None
+
+        singles = list(
+            (
+                await db.execute(
+                    select(SocialPost.id)
+                    .join(SocialPostMedia, SocialPostMedia.post_id == SocialPost.id)
+                    .where(SocialPost.deleted_at.is_(None))
+                    .group_by(SocialPost.id)
+                    .having(func.count(SocialPostMedia.id) == 1)
+                    .order_by(SocialPost.created_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        logger.info("%s single-slide posts to upgrade", len(singles))
+        if not singles:
+            return
+
+        photos = await gather_photos()
+        random.shuffle(photos)
+        logger.info("%s photographs available", len(photos))
+
+        async with httpx.AsyncClient(
+            follow_redirects=True, headers={"User-Agent": SEED_USER_AGENT}
+        ) as http:
+            clip_sources: list[bytes] = []
+            for source in photos[:6]:
+                fetched = await _download(http, source.url)
+                if fetched is not None:
+                    clip_sources.append(fetched[0])
+            clips = await seed_video.clips(clip_sources)
+
+            carousels = videos = 0
+            for i, post_id in enumerate(singles):
+                # Every fifth gets a video appended; every third becomes a
+                # carousel. Deliberately overlapping, so some posts end up
+                # as a clip plus photos — the mixed case is the one most
+                # likely to be broken.
+                added = 0
+                if clips and i % 5 == 2:
+                    clip = clips[i % len(clips)]
+                    media_id = uuid.uuid4()
+                    key = await post_media.store(media_id, clip, "video/mp4")
+                    width, height = post_media.probe_size(clip)
+                    db.add(
+                        SocialPostMedia(
+                            id=media_id,
+                            post_id=post_id,
+                            position=1 + added,
+                            storage_key=key,
+                            content_type="video/mp4",
+                            width=width,
+                            height=height,
+                        )
+                    )
+                    added += 1
+                    videos += 1
+
+                if photos and i % 3 != 0:
+                    for slot in range((2, 3, 1)[i % 3]):
+                        if 1 + added >= post_media.MAX_IMAGES_PER_POST:
+                            break
+                        fetched = await _download(
+                            http, photos[(i + slot * 5) % len(photos)].url
+                        )
+                        if fetched is None:
+                            continue
+                        data, content_type = fetched
+                        media_id = uuid.uuid4()
+                        key = await post_media.store(media_id, data, content_type)
+                        width, height = post_media.probe_size(data)
+                        db.add(
+                            SocialPostMedia(
+                                id=media_id,
+                                post_id=post_id,
+                                position=1 + added,
+                                storage_key=key,
+                                content_type=content_type,
+                                width=width,
+                                height=height,
+                            )
+                        )
+                        added += 1
+                    if added:
+                        carousels += 1
+
+                if (i + 1) % 10 == 0:
+                    await db.commit()
+                    logger.info("  %s/%s", i + 1, len(singles))
+
+            await db.commit()
+            logger.info(
+                "upgraded %s posts into carousels, %s now carry video",
+                carousels,
+                videos,
+            )
+
+            cast = await _ensure_profiles(db)
+            await _seed_stories(
+                db, http, cast, viewer=viewer, photos=photos, clips=clips
+            )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handle", default=DEFAULT_VIEWER)
     parser.add_argument("--count", type=int, default=TARGET_POSTS)
+    parser.add_argument(
+        "--backfill-media",
+        action="store_true",
+        help="Add carousel slides + video to posts that already exist, and "
+        "seed stories. Additive: deletes nothing.",
+    )
     args = parser.parse_args()
-    asyncio.run(seed(args.handle, args.count))
+    if args.backfill_media:
+        asyncio.run(backfill_media(args.handle))
+    else:
+        asyncio.run(seed(args.handle, args.count))
 
 
 if __name__ == "__main__":

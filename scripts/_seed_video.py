@@ -60,10 +60,12 @@ async def clips(images: list[bytes], *, limit: int = 6) -> list[bytes]:
 def _render(image: bytes, index: int) -> bytes | None:
     """One still → one panning clip.
 
-    `zoompan` does the Ken Burns move. The scale-then-crop before it is not
-    decoration: zoompan works on the input frame, so a small source image
-    would produce a clip the size of the source, and the pan would be a few
-    pixels wide.
+    The pan is a time-driven `crop` over a slightly oversized scale, NOT
+    `zoompan`. zoompan is the obvious filter for a Ken Burns move and it is
+    ruinously slow here: it re-scales the source for every output frame, so
+    a 1440x2560 input at 180 frames took longer than a two-minute timeout
+    to produce six seconds of video. Panning a fixed-size crop window is
+    one scale plus a memcpy per frame, and renders in about a second.
 
     ``+faststart`` moves the moov atom to the front, which is what lets a
     player begin before the whole file has arrived — and what lets the
@@ -74,10 +76,17 @@ def _render(image: bytes, index: int) -> bytes | None:
         target = Path(tmp) / "out.mp4"
         source.write_bytes(image)
 
-        # Alternate the pan direction so a feed of these doesn't look like
-        # one clip posted six times.
-        drift = "iw/2-(iw/zoom/2)" if index % 2 == 0 else "iw-(iw/zoom)"
-        frames = CLIP_SECONDS * 30
+        # The frame is scaled 1.3x the output so there is somewhere to pan
+        # to; the crop window then walks across it over CLIP_SECONDS.
+        over_w, over_h = int(WIDTH * 1.3), int(HEIGHT * 1.3)
+        # Alternate the direction so a feed of these doesn't look like one
+        # clip posted six times.
+        if index % 2 == 0:
+            x_expr = f"(iw-ow)*t/{CLIP_SECONDS}"
+            y_expr = "(ih-oh)/2"
+        else:
+            x_expr = "(iw-ow)/2"
+            y_expr = f"(ih-oh)*t/{CLIP_SECONDS}"
 
         command = [
             "ffmpeg",
@@ -86,18 +95,20 @@ def _render(image: bytes, index: int) -> bytes | None:
             "-y",
             "-loop",
             "1",
+            "-framerate",
+            "30",
             "-i",
             str(source),
             "-vf",
             (
-                f"scale={WIDTH * 2}:{HEIGHT * 2}:force_original_aspect_ratio=increase,"
-                f"crop={WIDTH * 2}:{HEIGHT * 2},"
-                f"zoompan=z='min(zoom+0.0012,1.3)':x='{drift}':y='ih/2-(ih/zoom/2)'"
-                f":d={frames}:s={WIDTH}x{HEIGHT}:fps=30,"
+                f"scale={over_w}:{over_h}:force_original_aspect_ratio=increase,"
+                f"crop={WIDTH}:{HEIGHT}:x='{x_expr}':y='{y_expr}',"
                 "format=yuv420p"
             ),
             "-t",
             str(CLIP_SECONDS),
+            "-r",
+            "30",
             "-c:v",
             "libx264",
             "-preset",
@@ -112,7 +123,13 @@ def _render(image: bytes, index: int) -> bytes | None:
             str(target),
         ]
         try:
-            subprocess.run(command, check=True, capture_output=True, timeout=120)
+            # A good render is well under a second. The generous-looking
+            # ceiling is for the FAILURE case, not the slow one: `-loop 1`
+            # on bytes ffmpeg can't decode (a 403 page saved as .jpg, which
+            # is exactly what a throttled Commons fetch produces) makes it
+            # wait for input that never comes rather than exiting, so the
+            # timeout is the only thing that ends it.
+            subprocess.run(command, check=True, capture_output=True, timeout=30)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             logger.warning("ffmpeg failed on clip %d (%s)", index, exc)
             return None
