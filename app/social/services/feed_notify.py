@@ -113,17 +113,13 @@ async def commented(
 
     if post.author_id not in told:
         told.add(post.author_id)
-        await _send(
-            db, post.author_id, "social_post_comment", data=payload, **shared
-        )
+        await _send(db, post.author_id, "social_post_comment", data=payload, **shared)
 
     for user_id in mentioned_user_ids:
         if user_id in told:
             continue
         told.add(user_id)
-        await _send(
-            db, user_id, "social_mention_comment", data=payload, **shared
-        )
+        await _send(db, user_id, "social_mention_comment", data=payload, **shared)
 
 
 async def mentioned_in_post(
@@ -303,9 +299,7 @@ async def _send(
 ) -> None:
     """Best-effort delivery — a failed notification never fails the action."""
     try:
-        await notification_templates.send(
-            db, user_id, template_id, data=data, **params
-        )
+        await notification_templates.send(db, user_id, template_id, data=data, **params)
     except Exception:
         logger.exception("social notification failed user=%s", user_id)
         await db.rollback()

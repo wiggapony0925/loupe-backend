@@ -532,9 +532,7 @@ async def test_the_tray_is_built_from_the_follow_graph(
     )
     assert tray["entries"] == []
 
-    await client.post(
-        "/v1/social/users/poster11/follow", headers=_headers(second_user)
-    )
+    await client.post("/v1/social/users/poster11/follow", headers=_headers(second_user))
     tray = assert_envelope_ok(
         await client.get("/v1/social/stories/tray", headers=_headers(second_user))
     )

@@ -173,9 +173,7 @@ async def follow(db: AsyncSession, viewer: User, username: str) -> FollowStateRe
         await db.commit()
         # Tell the owner someone is waiting — a request that only surfaces
         # when they happen to open the inbox page is a request unanswered.
-        await feed_notify.follow_requested(
-            db, actor=viewer, target_id=profile.user_id
-        )
+        await feed_notify.follow_requested(db, actor=viewer, target_id=profile.user_id)
         return FollowStateRead(relationship="requested")
 
     db.add(SocialFollow(follower_id=viewer.id, followee_id=profile.user_id))
@@ -293,10 +291,8 @@ async def accept_request(db: AsyncSession, user: User, request_id: uuid.UUID) ->
     # After the commit: the follow is the fact, the notification is delivery.
     # Only the explicit yes notifies — the public-account sweep above
     # (apply_pending_requests) stays silent, because "your old request went
-    # through when they flipped public" × N requests is noise, not news.
-    await feed_notify.follow_request_accepted(
-        db, owner=user, requester_id=requester_id
-    )
+    # through when they flipped public" times N requests is noise, not news.
+    await feed_notify.follow_request_accepted(db, owner=user, requester_id=requester_id)
 
 
 async def decline_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> None:

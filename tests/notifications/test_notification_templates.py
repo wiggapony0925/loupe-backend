@@ -48,8 +48,13 @@ def test_dedupe_keys_are_recipient_or_actor_scoped() -> None:
 def test_a_none_param_drops_the_body_instead_of_printing_none() -> None:
     r = render(
         "social_post_like",
-        {"actor": "Ash", "actor_id": "a", "post_id": "p", "preview": None,
-         "recipient_id": "r"},
+        {
+            "actor": "Ash",
+            "actor_id": "a",
+            "post_id": "p",
+            "preview": None,
+            "recipient_id": "r",
+        },
     )
     assert r.body is None
     assert r.title == "Ash liked your post"
@@ -61,8 +66,13 @@ def test_a_missing_title_param_is_a_loud_caller_bug() -> None:
 
 
 def test_mention_surfaces_share_a_kind_but_not_copy() -> None:
-    base = {"actor": "Ash", "post_id": "p", "comment_id": "c",
-            "preview": "look", "recipient_id": "r"}
+    base = {
+        "actor": "Ash",
+        "post_id": "p",
+        "comment_id": "c",
+        "preview": "look",
+        "recipient_id": "r",
+    }
     in_post = render("social_mention_post", base)
     in_comment = render("social_mention_comment", base)
     assert in_post.kind == in_comment.kind == "social_mention"

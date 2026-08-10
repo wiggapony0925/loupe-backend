@@ -190,9 +190,7 @@ def render(template_id: str, params: dict[str, Any]) -> RenderedNotification:
     """
     t = TEMPLATES[template_id]
     body: str | None = None
-    if t.body is not None and all(
-        params.get(f) is not None for f in _fields(t.body)
-    ):
+    if t.body is not None and all(params.get(f) is not None for f in _fields(t.body)):
         body = t.body.format(**params)
     return RenderedNotification(
         kind=t.kind,

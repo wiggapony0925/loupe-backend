@@ -124,7 +124,16 @@ async def create_post(
         surface=safety.TARGET_POST,
         target_id=provisional_id,
         text=text,
-        images=[(image.body, image.content_type) for image in images],
+        # Stills only — the same rule the story publisher applies. The
+        # moderation API takes images; feeding it a base64'd MP4 meant every
+        # video post "failed screening" and landed in the review queue.
+        # The caption is still screened, and the reporting path covers the
+        # frames.
+        images=[
+            (image.body, image.content_type)
+            for image in images
+            if not post_media.is_video(image.content_type)
+        ],
     )
 
     post = SocialPost(author_id=author.id, body=text or None, card_id=card_id)

@@ -51,7 +51,7 @@ async def get_me(db: AsyncSession, user: User) -> SocialMeRead:
     if not profile.is_private:
         try:
             await apply_pending_requests(db, user)
-        except Exception:  # noqa: BLE001 — degrade to skipping the sweep
+        except Exception:  # degrade to skipping the sweep
             logger.exception("pending-request sweep failed; serving /me anyway")
             await db.rollback()
     pending = await count(
