@@ -26,7 +26,7 @@ from app.db import get_sessionmaker
 from app.models.card import Card
 from app.models.price import PriceSnapshot
 from app.models.user import User
-from app.services import email_service, notification_service
+from app.services import email_service, notification_templates
 from app.services.catalog import card_resolver_service, card_search_service
 from app.services.collection import holding_valuation_service
 from app.services.market import price_alert_service
@@ -182,29 +182,21 @@ async def backfill_prices(
                 # the phone was off used to leave no trace anywhere. It also
                 # must not sit behind the "has an email address" guard below —
                 # an Apple relay user with a hidden address still set the alert
-                # and still deserves to see it fire.
-                await notification_service.notify(
+                # and still deserves to see it fire. Copy, link and dedupe all
+                # come from the shared template catalog.
+                await notification_templates.send(
                     session,
                     notice["user_id"],
-                    category="market",
-                    kind="price_alert",
-                    title=(
-                        f"{arrow} {notice['card_name']} — "
-                        f"${float(notice['price_usd']):,.2f}"
-                    ),
-                    body=(
-                        f"Just {moved} your "
-                        f"${float(notice['threshold_usd']):,.2f} alert."
-                    ),
-                    href=f"/cards/{notice['card_id']}",
+                    "price_alert",
+                    arrow=arrow,
+                    moved=moved,
+                    card_name=notice["card_name"],
+                    card_id=notice["card_id"],
+                    price=f"${float(notice['price_usd']):,.2f}",
+                    threshold=f"${float(notice['threshold_usd']):,.2f}",
+                    alert_ref=notice.get("alert_id") or notice["card_id"],
                     image_url=notice.get("image_url"),
                     data={"type": "price_alert", "cardId": str(notice["card_id"])},
-                    # Keyed on the alert row: a re-run of the job can't post
-                    # the same fire twice.
-                    dedupe_key=(
-                        f"alert:{notice.get('alert_id') or notice['card_id']}"
-                        f":{notice['user_id']}"
-                    ),
                 )
 
                 email = emails.get(notice["user_id"])

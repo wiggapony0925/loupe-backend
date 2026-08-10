@@ -1,8 +1,10 @@
-"""Feed events → the notification inbox.
+"""Feed events → the notification inbox (and the phone).
 
-One module so the *wording* of every community notification lives together
-and stays consistent, and so the feed services never touch the notification
-table directly.
+This module COMPOSES: it works out who should hear about a feed event and
+with what parameters. The wording, category, deep link, dedupe key and
+push policy all live in :mod:`app.services.notification_templates` — one
+catalog for every notification the product sends, so the inbox row and the
+push can never drift.
 
 Two rules, both learned from the shape of :mod:`app.services.notification_service`:
 
@@ -10,6 +12,11 @@ Two rules, both learned from the shape of :mod:`app.services.notification_servic
 * **Never let delivery break the action.** A like that 500s because the
   inbox write failed is a much worse bug than a missing notification, so
   everything here is best-effort and swallows its own errors.
+
+And one scoping rule that is the whole design: **nothing here broadcasts.**
+A new post notifies the author's FOLLOWERS (capped); everything else goes
+to exactly the person acted upon. If a notification kind ever needs to
+reach "everyone", it does not belong in this module.
 """
 
 from __future__ import annotations
@@ -22,9 +29,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.card import Card
-from app.models.notification import CATEGORY_SOCIAL
 from app.models.user import User
-from app.services import notification_service
+from app.services import notification_templates
 from app.social.models import (
     SocialFollow,
     SocialPost,
@@ -65,14 +71,12 @@ async def post_liked(db: AsyncSession, *, actor: User, post: SocialPost) -> None
     await _send(
         db,
         post.author_id,
-        kind="social_post_like",
-        title=f"{_name(profile, actor)} liked your post",
-        body=_preview(post.body),
-        href=post_href(post.id),
+        "social_post_like",
+        actor=_name(profile, actor),
+        actor_id=actor.id,
+        post_id=post.id,
+        preview=_preview(post.body),
         data={"post_id": str(post.id), "actor_id": str(actor.id)},
-        # One notification per (liker, post): unliking and liking again
-        # should not be a way to ping someone repeatedly.
-        dedupe_key=f"social_post_like:{post.id}:{actor.id}",
     )
 
 
@@ -93,33 +97,24 @@ async def commented(
     three. ``told`` tracks who has already been covered.
     """
     told: set[uuid.UUID] = {actor.id}
-    who = _name(actor_profile, actor)
-    preview = _preview(comment.body)
+    shared: dict[str, Any] = {
+        "actor": _name(actor_profile, actor),
+        "post_id": post.id,
+        "comment_id": comment.id,
+        "preview": _preview(comment.body),
+    }
+    payload = {"post_id": str(post.id), "comment_id": str(comment.id)}
 
     if replied_to is not None and replied_to.author_id not in told:
         told.add(replied_to.author_id)
         await _send(
-            db,
-            replied_to.author_id,
-            kind="social_comment_reply",
-            title=f"{who} replied to your comment",
-            body=preview,
-            href=post_href(post.id),
-            data={"post_id": str(post.id), "comment_id": str(comment.id)},
-            dedupe_key=f"social_comment:{comment.id}:{replied_to.author_id}",
+            db, replied_to.author_id, "social_comment_reply", data=payload, **shared
         )
 
     if post.author_id not in told:
         told.add(post.author_id)
         await _send(
-            db,
-            post.author_id,
-            kind="social_post_comment",
-            title=f"{who} commented on your post",
-            body=preview,
-            href=post_href(post.id),
-            data={"post_id": str(post.id), "comment_id": str(comment.id)},
-            dedupe_key=f"social_comment:{comment.id}:{post.author_id}",
+            db, post.author_id, "social_post_comment", data=payload, **shared
         )
 
     for user_id in mentioned_user_ids:
@@ -127,14 +122,7 @@ async def commented(
             continue
         told.add(user_id)
         await _send(
-            db,
-            user_id,
-            kind="social_mention",
-            title=f"{who} mentioned you in a comment",
-            body=preview,
-            href=post_href(post.id),
-            data={"post_id": str(post.id), "comment_id": str(comment.id)},
-            dedupe_key=f"social_comment:{comment.id}:{user_id}",
+            db, user_id, "social_mention_comment", data=payload, **shared
         )
 
 
@@ -154,12 +142,11 @@ async def mentioned_in_post(
         await _send(
             db,
             user_id,
-            kind="social_mention",
-            title=f"{who} mentioned you in a post",
-            body=_preview(post.body),
-            href=post_href(post.id),
+            "social_mention_post",
+            actor=who,
+            post_id=post.id,
+            preview=_preview(post.body),
             data={"post_id": str(post.id), "actor_id": str(actor.id)},
-            dedupe_key=f"social_post_mention:{post.id}:{user_id}",
         )
 
 
@@ -177,11 +164,13 @@ async def posted(
     author_profile: SocialProfile,
     post: SocialPost,
 ) -> None:
-    """ "@x posted" — to everyone who follows the author.
+    """ "@x posted" — to the author's FOLLOWERS, and nobody else.
 
-    The summary is the caption's opening words, or a description of what
-    the post actually is when there's no caption. A notification reading
-    just "new post" tells you nothing about whether to open it.
+    The recipient list is the follow graph, full stop: someone who does not
+    follow the author must never hear about the post. The summary is the
+    caption's opening words, or a description of what the post actually is
+    when there's no caption — a notification reading just "new post" tells
+    you nothing about whether to open it.
     """
     follower_ids = [
         row[0]
@@ -198,20 +187,18 @@ async def posted(
 
     who = _name(author_profile, author)
     summary = _preview(post.body, limit=120) or await _describe(db, post)
-    href = post_href(post.id)
+    payload = {"post_id": str(post.id), "actor_id": str(author.id)}
     for user_id in follower_ids:
         if user_id == author.id:
             continue
         await _send(
             db,
             user_id,
-            kind="social_new_post",
-            title=f"{who} posted",
-            body=summary,
-            href=href,
-            data={"post_id": str(post.id), "actor_id": str(author.id)},
-            # One per (post, recipient) — a retry or a re-run can't double up.
-            dedupe_key=f"social_new_post:{post.id}:{user_id}",
+            "social_new_post",
+            actor=who,
+            post_id=post.id,
+            summary=summary,
+            data=payload,
         )
 
 
@@ -248,14 +235,55 @@ async def followed(db: AsyncSession, *, actor: User, target_id: uuid.UUID) -> No
     await _send(
         db,
         target_id,
-        kind="social_follow",
-        title=f"{_name(profile, actor)} started following you",
-        body=None,
-        href=f"/app/u/{profile.username}",
+        "social_follow",
+        actor=_name(profile, actor),
+        actor_id=actor.id,
+        actor_username=profile.username,
         data={"actor_id": str(actor.id), "username": profile.username},
-        # Per (follower, followee) forever: unfollow/refollow cycling is not
-        # a notification channel.
-        dedupe_key=f"social_follow:{actor.id}:{target_id}",
+    )
+
+
+async def follow_requested(
+    db: AsyncSession, *, actor: User, target_id: uuid.UUID
+) -> None:
+    """ "@x wants to follow you" — a private account's pending request.
+
+    Without this the request sat silently in the inbox page until the owner
+    happened to visit it. (A dead twin of this function existed for months
+    in ``social_notify.py`` — written, never called.)
+    """
+    if target_id == actor.id:
+        return
+    profile = await _profile(db, actor.id)
+    if profile is None:
+        return
+    await _send(
+        db,
+        target_id,
+        "social_follow_request",
+        actor=_name(profile, actor),
+        actor_id=actor.id,
+        data={"actor_id": str(actor.id), "username": profile.username},
+    )
+
+
+async def follow_request_accepted(
+    db: AsyncSession, *, owner: User, requester_id: uuid.UUID
+) -> None:
+    """ "@x accepted your follow request" — tell the person who asked."""
+    if requester_id == owner.id:
+        return
+    profile = await _profile(db, owner.id)
+    if profile is None:
+        return
+    await _send(
+        db,
+        requester_id,
+        "social_follow_accepted",
+        actor=_name(profile, owner),
+        actor_id=owner.id,
+        actor_username=profile.username,
+        data={"actor_id": str(owner.id), "username": profile.username},
     )
 
 
@@ -268,26 +296,15 @@ async def _profile(db: AsyncSession, user_id: uuid.UUID) -> SocialProfile | None
 async def _send(
     db: AsyncSession,
     user_id: uuid.UUID,
+    template_id: str,
     *,
-    kind: str,
-    title: str,
-    body: str | None,
-    href: str,
     data: dict[str, Any],
-    dedupe_key: str,
+    **params: Any,
 ) -> None:
     """Best-effort delivery — a failed notification never fails the action."""
     try:
-        await notification_service.notify(
-            db,
-            user_id,
-            category=CATEGORY_SOCIAL,
-            kind=kind,
-            title=title,
-            body=body,
-            href=href,
-            data=data,
-            dedupe_key=dedupe_key,
+        await notification_templates.send(
+            db, user_id, template_id, data=data, **params
         )
     except Exception:
         logger.exception("social notification failed user=%s", user_id)
@@ -297,6 +314,8 @@ async def _send(
 __all__ = [
     "MAX_POST_FANOUT",
     "commented",
+    "follow_request_accepted",
+    "follow_requested",
     "followed",
     "mentioned_in_post",
     "post_href",

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import func, select
 
+from app.models.notification import Notification
 from app.social.models import SocialFollow, SocialFollowRequest
 from tests.conftest import assert_envelope_error, assert_envelope_ok
 from tests.factories import make_user
@@ -891,3 +892,80 @@ async def test_collector_rows_flag_admins(client, created_user, admin_user):
         await client.get("/v1/social/search?q=viewer", headers=_headers(admin_user))
     )
     assert mine[0]["is_admin"] is False
+
+
+# ── Request notifications ──
+
+
+@pytest.mark.asyncio
+async def test_a_follow_request_notifies_the_private_owner(
+    client, created_user, second_user, db_session
+):
+    """A request that only surfaces when the owner happens to open the
+    inbox page is a request unanswered — the ask itself must ring the bell."""
+    await _claim(client, created_user, "asker30")
+    await _claim(client, second_user, "gate30", is_private=True)
+
+    await client.post("/v1/social/users/gate30/follow", headers=_headers(created_user))
+
+    row = (
+        (
+            await db_session.execute(
+                select(Notification).where(
+                    Notification.user_id == second_user.id,
+                    Notification.kind == "social_follow_request",
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert "wants to follow you" in row.title
+    # Asking twice (idempotent follow) must not ring twice.
+    await client.post("/v1/social/users/gate30/follow", headers=_headers(created_user))
+    rows = (
+        (
+            await db_session.execute(
+                select(Notification).where(
+                    Notification.user_id == second_user.id,
+                    Notification.kind == "social_follow_request",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_accepting_a_request_notifies_the_requester(
+    client, created_user, second_user, db_session
+):
+    await _claim(client, created_user, "asker31")
+    await _claim(client, second_user, "gate31", is_private=True)
+    await client.post("/v1/social/users/gate31/follow", headers=_headers(created_user))
+
+    pending = assert_envelope_ok(
+        await client.get("/v1/social/requests", headers=_headers(second_user))
+    )
+    await client.post(
+        f"/v1/social/requests/{pending[0]['id']}/accept",
+        headers=_headers(second_user),
+    )
+
+    row = (
+        (
+            await db_session.execute(
+                select(Notification).where(
+                    Notification.user_id == created_user.id,
+                    Notification.kind == "social_follow_accepted",
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert "accepted your follow request" in row.title
+    # The deep link opens the account that let them in.
+    assert row.href == "/app/u/gate31"
