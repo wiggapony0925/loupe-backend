@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.db.types import UuidCol
+from app.db.types import JsonCol, UuidCol
 
 
 class SocialProfile(Base):
@@ -51,6 +51,12 @@ class SocialProfile(Base):
     # Instagram semantics: private profiles require an approved follow
     # request before their collection (and follower lists) are visible.
     is_private: Mapped[bool] = mapped_column(Boolean(), default=False, nullable=False)
+    # Per-platform social links, `{platform: canonical https URL}`. A JSON
+    # column rather than a link table: the platform set is a fixed allowlist
+    # the service enforces (services/links.py), the whole dict is read and
+    # written as one unit with the profile, and nothing ever queries "who
+    # links to X" — so link rows would buy a join and nothing else.
+    links: Mapped[dict | None] = mapped_column(JsonCol, nullable=True)
     # Object key of the uploaded profile picture in blob storage; NULL until
     # one is uploaded. `avatar_version` bumps on every upload so the public
     # avatar URL is cache-busted (`?v=N`) without signed URLs.

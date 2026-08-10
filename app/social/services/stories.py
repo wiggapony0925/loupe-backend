@@ -60,6 +60,10 @@ MAX_LIVE_STORIES = 30
 
 MAX_CAPTION = 280
 
+#: Hard ceiling on rows the tray query may return (newest first, so the
+#: oldest stories fall off for accounts following an enormous graph).
+TRAY_ROW_CAP = 600
+
 
 @dataclass(slots=True)
 class NewStory:
@@ -154,6 +158,11 @@ async def create_story(
             raise HTTPException(
                 status_code=422, detail=f"Videos can be up to {seconds} seconds"
             )
+        if duration is not None and duration <= 0:
+            # A zero/negative length would drive the viewer's progress bar,
+            # advancing the story before its first frame renders. Store the
+            # unknown, which clients already handle with a fallback dwell.
+            duration = None
     else:
         # A still has no duration. Accepting one from the client would put a
         # number in the column that the progress bar would then honour.
@@ -228,8 +237,29 @@ async def tray(db: AsyncSession, viewer: User) -> StoryTrayRead:
     tray uses and the reason it works — the row is a queue of what you
     haven't watched, not a leaderboard of who posts most.
     """
+    # The tray is BUILT FROM THE FOLLOW GRAPH — yourself plus accounts you
+    # follow — which is what the module docstring always promised. The
+    # visibility predicate alone admits every public account in the product,
+    # which put strangers' rings in front of brand-new users and made the
+    # row count grow with total signups rather than with who you follow.
+    followed = select(SocialFollow.followee_id).where(
+        SocialFollow.follower_id == viewer.id
+    )
     rows = (
-        await db.execute(_base(viewer.id).order_by(SocialStory.created_at.desc()))
+        await db.execute(
+            _base(viewer.id)
+            .where(
+                or_(
+                    SocialStory.author_id == viewer.id,
+                    SocialStory.author_id.in_(followed),
+                )
+            )
+            .order_by(SocialStory.created_at.desc())
+            # Backstop, not pagination: newest-first means an account
+            # following an enormous graph loses only the OLDEST stories,
+            # and the grouping below never handles an unbounded row set.
+            .limit(TRAY_ROW_CAP)
+        )
     ).all()
     if not rows:
         return StoryTrayRead()
@@ -266,6 +296,7 @@ async def tray(db: AsyncSession, viewer: User) -> StoryTrayRead:
             has_unseen=any(story.id not in seen_ids for story, _, _ in group),
             latest_at=newest.created_at,
             preview_url=story_media.media_url(newest.id),
+            kind="video" if story_media.is_video(newest.content_type) else "image",
         )
         if author_id == viewer.id:
             # Your own ring is never lit — you've seen your own stories, and

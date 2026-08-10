@@ -6,6 +6,7 @@ import uuid
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -126,11 +127,24 @@ async def apply_pending_requests(db: AsyncSession, user: User) -> int:
             db.add(SocialFollow(follower_id=rid, followee_id=user.id))
             added.add(rid)
             applied += 1
-        # Every pending row goes, applied or not: none of them can ever be
-        # answered while the account is public.
-        await db.delete(req)
 
-    await db.commit()
+    # Every pending row goes, applied or not: none of them can ever be
+    # answered while the account is public. A bulk DELETE (not per-row ORM
+    # deletes) carries no expected row count, so a concurrent caller having
+    # already swept them is a no-op instead of a StaleDataError.
+    await db.execute(
+        delete(SocialFollowRequest).where(SocialFollowRequest.target_id == user.id)
+    )
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        # The docstring's "concurrent callers" promise, actually kept: two
+        # overlapping requests both read `existing` before either committed,
+        # so the loser's INSERT hits the composite PK. The winner already
+        # did the work — roll back and report nothing applied.
+        await db.rollback()
+        return 0
     if applied:
         logger.info("auto-accepted %s follow request(s) for a public account", applied)
     return applied
@@ -157,6 +171,11 @@ async def follow(db: AsyncSession, viewer: User, username: str) -> FollowStateRe
     if profile.is_private:
         db.add(SocialFollowRequest(requester_id=viewer.id, target_id=profile.user_id))
         await db.commit()
+        # Tell the owner someone is waiting — a request that only surfaces
+        # when they happen to open the inbox page is a request unanswered.
+        await feed_notify.follow_requested(
+            db, actor=viewer, target_id=profile.user_id
+        )
         return FollowStateRead(relationship="requested")
 
     db.add(SocialFollow(follower_id=viewer.id, followee_id=profile.user_id))
@@ -258,6 +277,7 @@ async def _load_my_request(
 
 async def accept_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> None:
     req = await _load_my_request(db, user, request_id)
+    requester_id = req.requester_id
     already = (
         await db.execute(
             select(SocialFollow.follower_id).where(
@@ -270,6 +290,13 @@ async def accept_request(db: AsyncSession, user: User, request_id: uuid.UUID) ->
         db.add(SocialFollow(follower_id=req.requester_id, followee_id=user.id))
     await db.delete(req)
     await db.commit()
+    # After the commit: the follow is the fact, the notification is delivery.
+    # Only the explicit yes notifies — the public-account sweep above
+    # (apply_pending_requests) stays silent, because "your old request went
+    # through when they flipped public" × N requests is noise, not news.
+    await feed_notify.follow_request_accepted(
+        db, owner=user, requester_id=requester_id
+    )
 
 
 async def decline_request(db: AsyncSession, user: User, request_id: uuid.UUID) -> None:

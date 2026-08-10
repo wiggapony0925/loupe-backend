@@ -30,6 +30,10 @@ from app.social.services._common import (
     profile_read,
 )
 from app.social.services.graph import apply_pending_requests
+from app.social.services.links import normalize_links
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 # ── My profile ──
 
@@ -41,8 +45,15 @@ async def get_me(db: AsyncSession, user: User) -> SocialMeRead:
     # Enforce the public-account invariant before REPORTING the count: this
     # endpoint is what draws the inbox badge, so healing anywhere later would
     # still show a badge for requests that can never be answered.
+    # Housekeeping must never fail the READ: /social/me is the gate the whole
+    # Community tab hangs off, and a hiccup here used to 500 it — which the
+    # app rendered as "claim a username" to people who already had one.
     if not profile.is_private:
-        await apply_pending_requests(db, user)
+        try:
+            await apply_pending_requests(db, user)
+        except Exception:  # noqa: BLE001 — degrade to skipping the sweep
+            logger.exception("pending-request sweep failed; serving /me anyway")
+            await db.rollback()
     pending = await count(
         db,
         select(func.count())
@@ -73,10 +84,20 @@ async def upsert_me(
     profile = await get_profile(db, user.id)
     was_private = bool(profile.is_private) if profile else False
 
-    # THE HANDLE, BIO AND LOCATION ARE PUBLIC TEXT. They sit on the profile
-    # header, and the handle rides along on every post byline, comment and
-    # follower row — so an unscreened bio reaches further than most posts do.
-    # Screened together in one call rather than three.
+    # Canonicalised BEFORE screening, so the safety gate sees the URLs as
+    # they will actually be published, not the raw shorthand the client
+    # typed. None means "the client didn't send the field" and leaves the
+    # stored links untouched further down.
+    normalized_links = (
+        normalize_links(payload.links) if payload.links is not None else None
+    )
+
+    # THE HANDLE, BIO, LOCATION AND LINKS ARE PUBLIC TEXT. They sit on the
+    # profile header, and the handle rides along on every post byline,
+    # comment and follower row — so an unscreened bio reaches further than
+    # most posts do. Links go through the same gate: an impersonation-shaped
+    # handle is no less impersonation for being inside a URL.
+    # Screened together in one call rather than several.
     await safety.enforce(
         db,
         actor=user,
@@ -84,7 +105,12 @@ async def upsert_me(
         target_id=user.id,
         text="\n".join(
             part
-            for part in (username, payload.bio or "", payload.location or "")
+            for part in (
+                username,
+                payload.bio or "",
+                payload.location or "",
+                *(normalized_links or {}).values(),
+            )
             if part
         ),
         excerpt=f"@{username} · {payload.bio or ''} · {payload.location or ''}",
@@ -101,6 +127,12 @@ async def upsert_me(
     profile.bio = payload.bio
     profile.location = payload.location
     profile.is_private = payload.is_private
+    # Only when the field was sent: links ride a settings form the clients
+    # may submit without them, and an omitted field wiping a profile's
+    # links would punish every client that hasn't heard of the feature.
+    # Sending {} is the explicit "clear them" (it normalises to None).
+    if payload.links is not None:
+        profile.links = normalized_links
 
     await db.commit()
 

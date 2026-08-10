@@ -92,6 +92,9 @@ async def view_profile(
         avatar_url=avatars.avatar_url(profile),
         bio=profile.bio,
         location=profile.location,
+        # Already canonical https URLs — normalised on write (services/
+        # links.py), so the public read serves them verbatim.
+        links=profile.links or None,
         is_private=profile.is_private,
         is_pro=is_pro(account),
         joined_at=profile.created_at,

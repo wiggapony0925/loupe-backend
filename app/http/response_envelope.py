@@ -47,10 +47,17 @@ def _looks_like_envelope(body: object) -> bool:
 
 
 def _looks_like_legacy_pagination(body: object) -> bool:
-    """Detect the legacy ``Pagination[...]`` shape so we can lift it."""
+    """Detect the legacy ``Pagination[...]`` shape so we can lift it.
+
+    EXACT key match, not a subset: a page model that carries anything beyond
+    the four legacy fields is a typed payload its clients consume verbatim.
+    The subset check silently flattened ``NotificationPage`` — its ``items``
+    replaced ``data`` and its ``unread`` badge count was dropped on the
+    floor, so every client rendered an empty inbox with no badge.
+    """
     return (
         isinstance(body, dict)
-        and {"items", "total", "page", "page_size"}.issubset(body.keys())
+        and set(body.keys()) == {"items", "total", "page", "page_size"}
         and isinstance(body.get("items"), list)
         and isinstance(body.get("total"), int)
     )
@@ -105,8 +112,12 @@ class EnvelopeMiddleware(BaseHTTPMiddleware):
         elif _looks_like_legacy_pagination(payload):
             pagination = build_pagination(
                 total=int(payload["total"]),
-                page=int(payload["page"]),
-                page_size=int(payload["page_size"]),
+                # Clamped into Pagination's own validation range — the
+                # middleware re-validating arbitrary body values used to be
+                # able to 500 a response that the endpoint itself had
+                # already served successfully.
+                page=max(1, int(payload["page"])),
+                page_size=min(100, max(1, int(payload["page_size"]))),
             )
             envelope_dict = {
                 "data": payload["items"],
