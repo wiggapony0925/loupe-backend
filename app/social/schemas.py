@@ -31,6 +31,9 @@ class SocialProfileUpsert(BaseModel):
         None, max_length=120, description="Self-reported 'City, Region' — optional."
     )
     is_private: bool = False
+    #: Social links keyed by platform; values become canonical https URLs.
+    #: None/omitted = leave existing links alone; {} = clear them all.
+    links: dict[str, str] | None = None
 
 
 class SocialProfileRead(BaseModel):
@@ -43,6 +46,8 @@ class SocialProfileRead(BaseModel):
     bio: str | None = None
     location: str | None = None
     is_private: bool = False
+    #: Canonical https URLs keyed by platform (see services/links.py).
+    links: dict[str, str] | None = None
     avatar_url: str | None = None
     created_at: datetime
 
@@ -99,6 +104,8 @@ class SocialProfileView(BaseModel):
     avatar_url: str | None = None
     bio: str | None = None
     location: str | None = None
+    #: Canonical https URLs keyed by platform (see services/links.py).
+    links: dict[str, str] | None = None
     is_private: bool = False
     is_pro: bool = False
     joined_at: datetime
