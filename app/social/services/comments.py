@@ -211,10 +211,6 @@ async def add_comment(
         surface=safety.TARGET_COMMENT,
         target_id=provisional_id,
         text=text,
-        refusal=(
-            "That comment looks like it breaks the community rules. "
-            "Keep it about the cards."
-        ),
     )
 
     replied_to: SocialPostComment | None = None

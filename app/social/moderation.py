@@ -73,6 +73,36 @@ ALLOW = "allow"
 REVIEW = "review"
 BLOCK = "block"
 
+#: Every refusal the product can utter, in ONE place. Clients render these
+#: verbatim (the moderato hook surfaces the 422 detail as-is) — no client
+#: invents moderation copy, so changing the voice of a refusal is a backend
+#: edit, not an app release. Keyed by the surface passed to
+#: ``safety.enforce``; "avatar" is the one override a caller passes
+#: explicitly (the profile surface screens both text and picture).
+REFUSALS: dict[str, str] = {
+    "post": (
+        "This post looks like it breaks the community rules. "
+        "Loupe is for trading cards — keep it about the cards."
+    ),
+    "comment": (
+        "That comment looks like it breaks the community rules. "
+        "Keep it about the cards."
+    ),
+    "profile": (
+        "That profile text looks like it breaks the community rules. "
+        "Keep your handle and bio about you and your collection."
+    ),
+    "avatar": (
+        "That picture looks like it breaks the community rules. "
+        "Try a photo of you or your collection."
+    ),
+}
+
+
+def refusal_for(surface: str) -> str:
+    """The copy a refused write on ``surface`` returns to its author."""
+    return REFUSALS.get(surface) or Verdict().message()
+
 
 @dataclass(frozen=True)
 class Verdict:

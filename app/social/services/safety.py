@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -139,9 +140,14 @@ async def enforce(
     )
     if verdict.blocked:
         # The case is the record that this was attempted and refused, so it
-        # has to survive the caller's rollback — commit it here.
+        # has to survive the caller's rollback — commit it here. The copy
+        # comes from ONE registry (moderation.REFUSALS): the backend owns
+        # every refusal the user ever reads.
         await db.commit()
-        raise HTTPException(status_code=422, detail=refusal or verdict.message())
+        raise HTTPException(
+            status_code=422,
+            detail=refusal or moderation.refusal_for(surface),
+        )
     return verdict
 
 
@@ -202,6 +208,29 @@ async def report(
     return _case_read(case, None, None)
 
 
+#: Pseudo-status for the queue filter: content the classifier REFUSED at
+#: write time. Born with status=removed and no resolver — no human ever
+#: touched it, nothing was ever published.
+STATUS_BLOCKED = "blocked"
+
+
+def _status_conditions(status: str) -> list[Any]:
+    """The queue's filter, kept disjoint so every case lives in exactly one
+    tab: "blocked" is the machine's refusals, "removed" is a human's."""
+    if status == STATUS_BLOCKED:
+        return [
+            SocialModerationCase.status == STATUS_REMOVED,
+            SocialModerationCase.source == "auto",
+            SocialModerationCase.resolved_by_id.is_(None),
+        ]
+    if status == STATUS_REMOVED:
+        return [
+            SocialModerationCase.status == STATUS_REMOVED,
+            SocialModerationCase.resolved_by_id.is_not(None),
+        ]
+    return [SocialModerationCase.status == status]
+
+
 async def queue(
     db: AsyncSession,
     *,
@@ -211,13 +240,14 @@ async def queue(
 ) -> ModerationQueueRead:
     """The admin queue. Highest classifier score first, then newest —
     a moderator with ten minutes should spend them on the worst things."""
-    base = select(SocialModerationCase).where(SocialModerationCase.status == status)
+    conditions = _status_conditions(status)
+    base = select(SocialModerationCase).where(*conditions)
     total = int(
         (
             await db.execute(
                 select(func.count())
                 .select_from(SocialModerationCase)
-                .where(SocialModerationCase.status == status)
+                .where(*conditions)
             )
         ).scalar_one()
         or 0
@@ -424,6 +454,7 @@ def _case_read(
 
 __all__ = [
     "REPORT_REASONS",
+    "STATUS_BLOCKED",
     "STATUS_DISMISSED",
     "STATUS_OPEN",
     "STATUS_REMOVED",

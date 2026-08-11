@@ -161,7 +161,13 @@ async def delete_featured(
     summary="The review queue (auto-flags + user reports, worst first)",
 )
 async def moderation_queue(
-    status: str = Query("open", description="`open`, `dismissed` or `removed`."),
+    status: str = Query(
+        "open",
+        description=(
+            "`open`, `dismissed`, `removed` (a human removed it) or "
+            "`blocked` (the classifier refused it at write — never published)."
+        ),
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     admin: User = Depends(require_admin),

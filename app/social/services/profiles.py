@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.social import avatars
+from app.social import avatars, moderation
 from app.social.models import (
     SocialFollow,
     SocialFollowRequest,
@@ -114,10 +114,6 @@ async def upsert_me(
             if part
         ),
         excerpt=f"@{username} · {payload.bio or ''} · {payload.location or ''}",
-        refusal=(
-            "That profile text looks like it breaks the community rules. "
-            "Keep your handle and bio about you and your collection."
-        ),
     )
 
     if profile is None:
@@ -223,10 +219,7 @@ async def set_avatar(
         target_id=profile.user_id,
         images=[(body, content_type)],
         excerpt=f"@{profile.username} profile picture",
-        refusal=(
-            "That picture looks like it breaks the community rules. "
-            "Try a photo of you or your collection."
-        ),
+        refusal=moderation.REFUSALS["avatar"],
     )
 
     await avatars.store_avatar(profile, body, content_type)

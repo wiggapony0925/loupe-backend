@@ -276,6 +276,63 @@ async def test_an_unknown_reason_is_refused(
 
 
 @pytest.mark.asyncio
+async def test_blocked_and_removed_tabs_are_disjoint(
+    client, db_session, created_user, monkeypatch
+):
+    """ "blocked" is the machine's refusals (never published, no resolver);
+    "removed" is a human's decisions. A case lives in exactly one tab, or
+    the same row nags a moderator twice."""
+    admin_user = await _make_admin(db_session)
+    await _claim(client, created_user, "poster20")
+
+    # 1. An auto-BLOCKED write: refused, case born resolved with no resolver.
+    monkeypatch.setattr(
+        moderation, "screen", _verdict(moderation.BLOCK, ["sexual/minors"])
+    )
+    resp = await client.post(
+        "/v1/social/posts",
+        data={"body": "refused outright"},
+        headers=_headers(created_user),
+    )
+    err = assert_envelope_error(resp, expected_status=422)
+    # The refusal copy is the backend's, from the ONE registry.
+    assert err["message"] == moderation.REFUSALS["post"]
+
+    # 2. A published-then-REMOVED post: flagged open, then a human removes.
+    monkeypatch.setattr(
+        moderation, "screen", _verdict(moderation.REVIEW, ["harassment"])
+    )
+    await _post(client, created_user, "borderline but published")
+    open_queue = assert_envelope_ok(
+        await client.get("/v1/admin/social/moderation", headers=_headers(admin_user))
+    )
+    assert_envelope_ok(
+        await client.post(
+            f"/v1/admin/social/moderation/{open_queue['items'][0]['id']}/resolve",
+            params={"action": "remove"},
+            headers=_headers(admin_user),
+        )
+    )
+
+    blocked = assert_envelope_ok(
+        await client.get(
+            "/v1/admin/social/moderation",
+            params={"status": "blocked"},
+            headers=_headers(admin_user),
+        )
+    )
+    removed = assert_envelope_ok(
+        await client.get(
+            "/v1/admin/social/moderation",
+            params={"status": "removed"},
+            headers=_headers(admin_user),
+        )
+    )
+    assert [c["excerpt"] for c in blocked["items"]] == ["refused outright"]
+    assert [c["excerpt"] for c in removed["items"]] == ["borderline but published"]
+
+
+@pytest.mark.asyncio
 async def test_queue_is_admin_only(client, db_session, created_user, allow_all):
     resp = await client.get(
         "/v1/admin/social/moderation", headers=_headers(created_user)
