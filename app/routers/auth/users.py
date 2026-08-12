@@ -173,7 +173,11 @@ class CheckoutRequest(BaseModel):
 
 
 @router.get("/billing/config", summary="Pricing + checkout availability")
-async def get_billing_config() -> dict:
+async def get_billing_config(user: User = Depends(require_user)) -> dict:
+    # Session-scoped like the rest of `/me`, even though today's payload is only
+    # public pricing: the prefix is what clients and reviewers read as the
+    # access rule, so anything added to `public_config()` later is behind auth
+    # by default rather than exposed anonymously by default.
     return billing_service.public_config()
 
 

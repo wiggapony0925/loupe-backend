@@ -111,7 +111,7 @@ async def set_plan(
     db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> AdminUserRead:
-    result = await user_admin_service.set_plan(db, user_id, payload.plan)
+    result = await user_admin_service.set_plan(db, actor, user_id, payload.plan)
     await audit_service.record(
         db,
         request=request,

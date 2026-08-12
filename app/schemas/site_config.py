@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Partial-update schemas type their fields `X | None` so they can be omitted.
+# For fields backed by a NOT NULL column an *explicit* null is not a partial
+# update — it's a write the DB will refuse — so it is rejected here (a 422)
+# rather than at the INSERT (a 500). Omitting the field still means "leave it".
+_NULL_NOT_ALLOWED = "must not be null; omit the field to leave it unchanged"
 
 
 class PlanConfigRead(BaseModel):
@@ -36,6 +42,21 @@ class PlanConfigUpdate(BaseModel):
     clear_card_limit: bool = False
     clear_statement_limit: bool = False
 
+    # The limits above are genuinely nullable ("unlimited"); the gates are not.
+    @field_validator(
+        "gate_unlimited_cards",
+        "gate_scanner_import",
+        "gate_full_history",
+        "gate_unlimited_alerts",
+        "gate_statements",
+        mode="before",
+    )
+    @classmethod
+    def _reject_explicit_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError(_NULL_NOT_ALLOWED)
+        return value
+
 
 class AnnouncementRead(BaseModel):
     """Global banner shown to every user when enabled."""
@@ -55,6 +76,15 @@ class AnnouncementUpdate(BaseModel):
     tone: str | None = Field(default=None, pattern="^(info|success|warning|error)$")
     cta_label: str | None = Field(default=None, max_length=80)
     cta_href: str | None = Field(default=None, max_length=2000)
+
+    # `cta_label`/`cta_href` are nullable columns — null clears the CTA. The
+    # three fields below are NOT NULL, so null is a client error, not a clear.
+    @field_validator("enabled", "message", "tone", mode="before")
+    @classmethod
+    def _reject_explicit_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError(_NULL_NOT_ALLOWED)
+        return value
 
 
 class SiteConfigRead(BaseModel):

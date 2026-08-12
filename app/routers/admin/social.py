@@ -426,6 +426,26 @@ async def expire_story(
     story.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     await db.commit()
     await db.refresh(story)
+    # Expiry takes the story off the live surfaces; it does not erase what it
+    # earned. Count the same way the list does (comments exclude deleted ones)
+    # so the portal row keeps its engagement across the refresh.
+    view_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(SocialStoryView)
+            .where(SocialStoryView.story_id == story.id)
+        )
+    ).scalar_one()
+    comment_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(SocialStoryComment)
+            .where(
+                SocialStoryComment.story_id == story.id,
+                SocialStoryComment.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one()
     return AdminStoryRead(
         id=story.id,
         username=profile.username if profile else "?",
@@ -434,8 +454,8 @@ async def expire_story(
         created_at=story.created_at,
         expires_at=story.expires_at,
         live=False,
-        view_count=0,
-        comment_count=0,
+        view_count=int(view_count),
+        comment_count=int(comment_count),
     )
 
 

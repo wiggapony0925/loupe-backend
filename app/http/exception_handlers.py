@@ -6,6 +6,7 @@ These ensure every non-2xx response shares the envelope shape defined in
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -41,14 +42,26 @@ def _default_code(http_status: int) -> str:
     return _STATUS_CODE_DEFAULTS.get(http_status, f"error.{http_status}")
 
 
-def _envelope_response(env_dict: dict[str, Any], status_code: int) -> JSONResponse:
-    return JSONResponse(content=env_dict, status_code=status_code)
+def _envelope_response(
+    env_dict: dict[str, Any],
+    status_code: int,
+    # Mapping, not dict: Starlette types `HTTPException.headers` that way, and
+    # the rate limiter's `Retry-After` reaches us through it.
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    return JSONResponse(content=env_dict, status_code=status_code, headers=headers)
 
 
 async def http_exception_handler(
     _request: Request, exc: StarletteHTTPException
 ) -> JSONResponse:
-    """Translate ``HTTPException`` → envelope error response."""
+    """Translate ``HTTPException`` → envelope error response.
+
+    ``exc.headers`` is carried through: the body is ours to reshape, but the
+    headers are part of the protocol contract the raiser signed up for —
+    ``WWW-Authenticate: Bearer`` on a 401 (required by RFC 7235) and
+    ``Retry-After`` on a 429 (how a client knows when to come back).
+    """
     detail = exc.detail
     code: str
     message: str
@@ -66,7 +79,9 @@ async def http_exception_handler(
     env = fail(
         code=code, message=message, status=exc.status_code, field=field, details=details
     )
-    return _envelope_response(jsonable_encoder(env), exc.status_code)
+    return _envelope_response(
+        jsonable_encoder(env), exc.status_code, headers=exc.headers
+    )
 
 
 async def validation_exception_handler(

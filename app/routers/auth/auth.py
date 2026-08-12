@@ -57,6 +57,10 @@ from app.utils.logger import get_logger
 router = APIRouter(prefix="/auth", tags=["auth"])
 logger = get_logger("routers.auth")
 
+#: The only environments where the passwordless ``/auth/dev-login`` back door
+#: exists. Anything not listed here — production AND staging — 404s.
+_DEV_LOGIN_ENVS: frozenset[str] = frozenset({"development", "test"})
+
 
 def _build_pair(user_id, user_read: UserRead, *, token_version: int = 0) -> TokenPair:
     # `ver` pins each token to the user's current token epoch; bumping
@@ -223,9 +227,13 @@ async def dev_login(
 ) -> TokenPair:
     """Find-or-create a user by email, no password required.
 
-    Gated by ``APP_ENV``: only available outside of ``production``.
+    Gated by ``APP_ENV``: available ONLY in ``development`` and ``test``.
+    Allow-list, not deny-list — staging serves real accounts over the public
+    internet, so a passwordless route with no allowlist and no rate limit is
+    account takeover for anyone who knows an email address, and any env added
+    to the ``app_env`` Literal later must opt in deliberately.
     """
-    if get_settings().app_env == "production":
+    if get_settings().app_env not in _DEV_LOGIN_ENVS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
     user = await user_service.find_or_create_dev_user(
         db, email=payload.email, display_name=payload.display_name
@@ -548,10 +556,15 @@ async def mfa_disable(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     try:
-        await mfa_service.disable(db, user, payload.code)
+        turned_off = await mfa_service.disable(db, user, payload.code)
     except MfaError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    await email_service.send_mfa_disabled(user)  # best-effort security notice
+    # Only alert when the second factor actually came off. The call is
+    # idempotent (204 either way), so mailing on the no-op both cries wolf on
+    # the account's most important security notice and lets anyone holding a
+    # session loop the endpoint to send unbounded mail from our domain.
+    if turned_off:
+        await email_service.send_mfa_disabled(user)  # best-effort security notice
 
 
 __all__ = ["router"]

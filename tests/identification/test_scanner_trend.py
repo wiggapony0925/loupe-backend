@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
@@ -40,8 +40,8 @@ async def test_trend_buckets_days_and_fills_gaps(db_session) -> None:
     trend = await scanner_stats_service.trend(db_session, days=7)
 
     assert trend.window_days == 7
-    # A continuous x-axis: one point per day in the window (inclusive).
-    assert len(trend.points) == 8
+    # A continuous x-axis: exactly ``days`` points, one per day, ending today.
+    assert len(trend.points) == 7
     by_date = {p.date: p for p in trend.points}
 
     today = (datetime.now(UTC)).date().isoformat()
@@ -64,5 +64,43 @@ async def test_trend_buckets_days_and_fills_gaps(db_session) -> None:
 @pytest.mark.asyncio
 async def test_trend_empty_window_is_all_zero_points(db_session) -> None:
     trend = await scanner_stats_service.trend(db_session, days=14)
-    assert len(trend.points) == 15
+    assert len(trend.points) == 14
     assert all(p.count == 0 for p in trend.points)
+
+
+@pytest.mark.asyncio
+async def test_trend_oldest_bucket_covers_a_whole_day(db_session) -> None:
+    """Every bucket is a full UTC day, including the oldest one.
+
+    The window is anchored to midnight rather than to the current clock time,
+    so a scan from early on the first day of a 7-day window counts in full
+    instead of falling into a partial bucket — and a scan from the day before
+    the window is outside it entirely rather than half-counted.
+    """
+    first_day = (datetime.now(UTC) - timedelta(days=6)).date()
+    just_inside = datetime.combine(first_day, time(0, 5), tzinfo=UTC)
+    just_outside = just_inside - timedelta(hours=1)
+
+    db_session.add_all(
+        [
+            CardIdentification(
+                image_sha256=uuid.uuid4().hex,
+                ocr_provider="mock",
+                tcg_inferred="pokemon",
+                primary_source="phash",
+                top_confidence=0.9,
+                latency_ms=42,
+                created_at=when,
+            )
+            for when in (just_inside, just_outside)
+        ]
+    )
+    await db_session.commit()
+
+    trend = await scanner_stats_service.trend(db_session, days=7)
+
+    assert len(trend.points) == 7
+    assert trend.points[0].date == first_day.isoformat()
+    assert trend.points[0].count == 1  # the 00:05 scan, not dropped
+    # The scan from the previous day is outside the window, not in any bucket.
+    assert sum(p.count for p in trend.points) == 1

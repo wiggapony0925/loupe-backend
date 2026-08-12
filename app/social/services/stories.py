@@ -17,7 +17,10 @@ someone unasked" never comes up.
 
 **Moderation is the same chokepoint.** A story's media and caption go
 through :func:`safety.enforce` exactly like a post's. A surface where
-content expires is precisely the one people try things on.
+content expires is precisely the one people try things on. The case is
+filed under the story's OWN target type, never the post's: a moderator
+resolving it must act on the story or the story comment that was flagged,
+and a case pointing at a post id nothing holds removes nothing.
 """
 
 from __future__ import annotations
@@ -51,7 +54,7 @@ from app.social.schemas import (
 )
 from app.social.services._common import get_profile
 from app.social.services.feed_common import author_card, relationships_to
-from app.social.services.safety import TARGET_POST, enforce
+from app.social.services.safety import TARGET_STORY, TARGET_STORY_COMMENT, enforce
 
 #: How many live stories one account may hold. Past this the oldest is not
 #: deleted — posting is refused — because silently dropping something
@@ -169,13 +172,14 @@ async def create_story(
         duration = None
 
     # SCREENED BEFORE ANYTHING IS WRITTEN, through the same chokepoint as a
-    # post. `target_id` is provisional because nothing is stored yet — for a
+    # post — but filed as a STORY, because that is what `target_id` names.
+    # `target_id` is provisional because nothing is stored yet — for a
     # refusal the case IS the record.
     story_id = uuid.uuid4()
     await enforce(
         db,
         actor=author,
-        surface=TARGET_POST,
+        surface=TARGET_STORY,
         target_id=story_id,
         text=text or None,
         # Video frames are not screened: the moderation API takes stills, and
@@ -379,6 +383,12 @@ async def _hydrate(
         for sid, n in (
             await db.execute(
                 select(SocialStoryView.story_id, func.count())
+                # Counted through the SAME joins `viewers()` lists through,
+                # so the number and the names can never disagree: an account
+                # with no claimed username has nothing to show in the list,
+                # and "1 view" above an empty list is a bug report.
+                .join(SocialProfile, SocialProfile.user_id == SocialStoryView.viewer_id)
+                .join(User, User.id == SocialStoryView.viewer_id)
                 .where(SocialStoryView.story_id.in_(ids))
                 .group_by(SocialStoryView.story_id)
             )
@@ -457,6 +467,11 @@ async def mark_seen(db: AsyncSession, viewer: User, story_id: uuid.UUID) -> None
     Your own view is not recorded — an author checking their own story
     should not appear in their own viewer list, and it would make every
     story read "1 view" the moment it was posted.
+
+    A watcher who has not claimed a username is still recorded here (so the
+    view counts from the day they claim one) but is neither counted nor
+    named until then — see `_hydrate`, where the count uses the viewer
+    list's joins.
     """
     row = (await db.execute(_base(viewer.id).where(SocialStory.id == story_id))).first()
     if row is None:
@@ -534,7 +549,7 @@ async def comment(
     await enforce(
         db,
         actor=author,
-        surface=TARGET_POST,
+        surface=TARGET_STORY_COMMENT,
         target_id=comment_id,
         text=text,
     )

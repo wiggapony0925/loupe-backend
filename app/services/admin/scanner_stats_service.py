@@ -8,7 +8,7 @@ scan-job lifecycle counts. Read-only.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,8 +81,15 @@ async def trend(db: AsyncSession, *, days: int = 30) -> ScannerTrend:
     across Postgres/SQLite) and fills every day in the window so the chart has a
     continuous x-axis. Days with no scans report zeros — the frontend renders
     those as gaps in the accuracy/latency lines, not dips to zero.
+
+    ``days`` is a count of daily points, not an offset: ``days=30`` returns 30
+    buckets ending today. The cutoff is anchored to midnight of the oldest
+    bucket so that bucket covers a whole UTC day rather than a slice starting
+    at the current clock time, which used to under-count the first point.
     """
-    cutoff = datetime.now(UTC) - timedelta(days=days)
+    span = max(days, 1)
+    start = (datetime.now(UTC) - timedelta(days=span - 1)).date()
+    cutoff = datetime.combine(start, time.min, tzinfo=UTC)
     rows = (
         await db.execute(
             select(
@@ -99,9 +106,8 @@ async def trend(db: AsyncSession, *, days: int = 30) -> ScannerTrend:
         day = created_at.date().isoformat()
         buckets[day].append((float(conf or 0.0), int(latency or 0), source or "none"))
 
-    start = (datetime.now(UTC) - timedelta(days=days)).date()
     points: list[ScannerTrendPoint] = []
-    for i in range(days + 1):
+    for i in range(span):
         day = (start + timedelta(days=i)).isoformat()
         items = buckets.get(day, [])
         if items:

@@ -55,10 +55,17 @@ async def confirm_enrollment(db: AsyncSession, user: User, code: str) -> list[st
     return codes
 
 
-async def disable(db: AsyncSession, user: User, code: str) -> None:
-    """Turn MFA off after re-verifying a code (TOTP or backup)."""
+async def disable(db: AsyncSession, user: User, code: str) -> bool:
+    """Turn MFA off after re-verifying a code (TOTP or backup).
+
+    Returns True when this call actually turned the second factor off, and
+    False when it was already off (the idempotent no-op). Callers use the
+    return value to decide whether to raise a security alert — telling
+    someone their 2FA was disabled when nothing changed is a false alarm on
+    the one notice that must always be believed.
+    """
     if not user.mfa_enabled:
-        return
+        return False
     if not await verify_login(db, user, code):
         raise MfaError("That code didn't match.")
     user.mfa_enabled = False
@@ -66,6 +73,7 @@ async def disable(db: AsyncSession, user: User, code: str) -> None:
     user.mfa_backup_codes = None
     user.mfa_enrolled_at = None
     await db.commit()
+    return True
 
 
 async def verify_login(db: AsyncSession, user: User, code: str) -> bool:

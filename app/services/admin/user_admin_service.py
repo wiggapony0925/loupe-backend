@@ -175,10 +175,33 @@ async def set_admin(
     return to_read(target)
 
 
-async def set_plan(db: AsyncSession, user_id: uuid.UUID, plan: str) -> AdminUserRead:
+async def set_plan(
+    db: AsyncSession, actor: User, user_id: uuid.UUID, plan: str
+) -> AdminUserRead:
     """Comp a user to Loupe Pro (or revoke). A no-expiry grant — handy for
-    testers and support before Stripe is wired."""
+    testers and support before Stripe is wired.
+
+    Same rails as the other mutating actions: a comp is a paid entitlement, so
+    it takes a second party (never your own account) and a protected
+    super-admin's plan is off limits.
+
+    Refuses to drop a Stripe-backed subscriber to free: this route writes the
+    ``plan`` column only, so doing that would leave Stripe billing the account
+    while it reads as free. Cancelling is its own (super-admin) route, which
+    tells Stripe first and lets the webhook downgrade the plan.
+    """
     target = await _get(db, user_id)
+    _guard_not_super(target)
+    _guard_not_self(actor, target)
+    if plan != "pro" and target.plan == "pro" and target.stripe_subscription_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This user is on a Stripe subscription — cancel it first via "
+                "POST /v1/admin/users/{user_id}/subscription/cancel. Setting "
+                "the plan here would leave Stripe billing them."
+            ),
+        )
     target.plan = plan
     if plan == "pro":
         if target.pro_since is None:

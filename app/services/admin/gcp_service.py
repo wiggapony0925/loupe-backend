@@ -19,7 +19,7 @@ extra configuration beyond granting the service account Viewer.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.config import Settings, get_settings
 from app.schemas.ops import (
@@ -198,7 +198,10 @@ def _load_logs_sync(project: str, limit: int) -> list[CloudLogEntry]:
         resource_labels = getattr(entry.resource, "labels", {}) or {}
         entries.append(
             CloudLogEntry(
-                timestamp=entry.timestamp or datetime.now(),
+                # Every other entry carries a tz-aware UTC timestamp; a naive
+                # machine-local fallback would sort and render hours out of
+                # place in the tail.
+                timestamp=entry.timestamp or datetime.now(UTC),
                 severity=str(entry.severity or "DEFAULT"),
                 service=resource_labels.get("service_name"),
                 message=message[:1000],

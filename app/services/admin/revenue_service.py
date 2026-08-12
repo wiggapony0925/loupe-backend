@@ -40,10 +40,19 @@ async def summary(db: AsyncSession) -> RevenueSummary:
         User.stripe_subscription_id.is_not(None),
         User.pro_trialing.is_(False),
     )
+    # A trial is a *Stripe* trial on a live plan. Keying off ``pro_trialing``
+    # alone counts a demoted user forever: the admin "set plan" action drops
+    # them to free without clearing the flag (only the Stripe webhook does),
+    # and a comped user carrying a stale flag would land in two buckets at once.
+    trialing_cond = and_(
+        User.plan == "pro",
+        User.stripe_subscription_id.is_not(None),
+        User.pro_trialing.is_(True),
+    )
     comped_cond = and_(User.plan == "pro", User.stripe_subscription_id.is_(None))
 
     paying = await _count(db, paying_cond)
-    trialing = await _count(db, User.pro_trialing.is_(True))
+    trialing = await _count(db, trialing_cond)
     comped = await _count(db, comped_cond)
     total_users = await _count(db)
     free = max(total_users - paying - trialing - comped, 0)

@@ -59,11 +59,18 @@ def resolve_token(token: str) -> uuid.UUID | None:
 
 async def apply_unsubscribe(db: AsyncSession, user_id: uuid.UUID) -> bool:
     """Turn announcement email off for ``user_id``. Idempotent; True if the
-    user exists (already-unsubscribed still counts as success)."""
+    user exists and is live (already-unsubscribed still counts as success).
+
+    A soft-deleted account is treated exactly like a missing one — the same
+    rule ``email_verify_service.apply_verification`` already applies to the
+    sibling signed link. Otherwise this unauthenticated endpoint writes to a
+    closed account, and even creates its preferences row from scratch, for a
+    setting that can no longer mean anything.
+    """
     user = (
         await db.execute(select(User).where(User.id == user_id))
     ).scalar_one_or_none()
-    if user is None:
+    if user is None or user.deleted_at is not None:
         return False
     settings_row = (
         await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -37,10 +37,24 @@ async def stripe_webhook(
     event = billing_service.construct_event(payload, signature)
     try:
         await billing_service.handle_event(db, event)
-    except Exception:
-        # Returning 200 stops Stripe's retries from hammering us on a bug we
-        # need to fix forward; the error is logged for follow-up.
+    except HTTPException:
+        # A deliberate refusal — most often a half-configured deploy, where
+        # STRIPE_SECRET_KEY is missing so handle_event 503s on its first line.
+        # The event was *not* processed, so it must not be acknowledged.
+        logger.exception("billing webhook refused %s", event.get("type"))
+        raise
+    except Exception as exc:
+        # Anything unexpected (DB blip, lock timeout, deadlock) is transient
+        # until proven otherwise. A 200 here tells Stripe never to redeliver,
+        # which turns a momentary failure into a permanently lost subscription
+        # event; a 5xx puts it back on Stripe's retry schedule instead. Genuine
+        # no-ops — unknown customer, event type we don't subscribe to — return
+        # normally and still get their 200.
         logger.exception("billing webhook handler failed for %s", event.get("type"))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Webhook handling failed; please retry.",
+        ) from exc
     return {"received": True}
 
 

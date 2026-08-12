@@ -34,6 +34,13 @@ _STATUS_COPY: dict[str, str] = {
 
 
 def _track_url(application: JobApplication) -> str:
+    # NOTE: this is a link into the web app, not the API, and the email is the
+    # applicant's access credential. Carrying it in the query string leaves it
+    # in browser history and any outbound Referer. Moving it into the URL
+    # fragment (`#email=`) would keep it off the wire entirely, but the web
+    # tracking page reads it from the query today, so the shape is pinned until
+    # loupe-web can read the fragment. The API itself now prefers the
+    # `X-Applicant-Email` header (see app/routers/portal/careers.py).
     base = get_settings().app_public_url.rstrip("/")
     return f"{base}/careers/track?id={application.id}&email={quote(application.applicant_email)}"
 

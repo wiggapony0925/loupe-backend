@@ -83,6 +83,26 @@ class JobPostingUpdate(BaseModel):
     status: JobStatusEnum | None = None
     slug: str | None = Field(None, max_length=160)
 
+    # Every field below is NOT NULL on `job_postings`. They're typed nullable
+    # only so they can be *omitted* from a partial update; an explicit null
+    # would reach the INSERT and fail there, so it's a 422 here instead.
+    # (`slug` is excluded: a null slug already means "keep the current one".)
+    @field_validator(
+        "title",
+        "team",
+        "location",
+        "employment_type",
+        "summary",
+        "description",
+        "status",
+        mode="before",
+    )
+    @classmethod
+    def _reject_explicit_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("must not be null; omit the field to leave it unchanged")
+        return value
+
 
 # ── Applications ────────────────────────────────────────────────────────
 

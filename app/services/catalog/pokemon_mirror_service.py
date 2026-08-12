@@ -699,6 +699,10 @@ def _null_last(col):
     return case((col.is_(None), 1), else_=0)
 
 
+def _null_first(col):
+    return case((col.is_(None), 0), else_=1)
+
+
 async def browse_pokemon(
     page: int, page_size: int, sort: str, set_id: str | None = None
 ) -> dict[str, Any] | None:
@@ -1064,7 +1068,13 @@ async def mirror_status() -> dict[str, Any]:
 
 
 async def stale_price_set_ids(limit: int = 20) -> list[str]:
-    """Oldest-stale sets, for the admin price-refresh walker."""
+    """Oldest-stale sets, for the admin price-refresh walker.
+
+    A never-priced set is infinitely stale — it is showing users no price at
+    all — so nulls come first, ahead of sets whose prices are merely a day
+    old. The walker is budgeted per call, so this ordering decides what
+    actually gets refreshed.
+    """
     from app.models.catalog_mirror import CatalogMirrorSet
 
     S = CatalogMirrorSet
@@ -1080,7 +1090,7 @@ async def stale_price_set_ids(limit: int = 20) -> list[str]:
                         S.prices_synced_at < _now() - _PRICE_FRESH,
                     ),
                 )
-                .order_by(_null_last(S.prices_synced_at), S.prices_synced_at)
+                .order_by(_null_first(S.prices_synced_at), S.prices_synced_at)
                 .limit(limit)
             )
         ).all()

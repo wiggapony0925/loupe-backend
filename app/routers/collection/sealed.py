@@ -23,11 +23,12 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import require_user
+from app.auth.dependencies import optional_user, require_user
 from app.db import get_db
 from app.integrations import pricecharting
 from app.models.enums import SealedProductTypeEnum, TcgEnum
 from app.models.user import User
+from app.platform.rate_limit import catalog_read_limit
 from app.schemas.sealed import (
     SealedHoldingCreate,
     SealedHoldingRead,
@@ -100,10 +101,12 @@ async def get_catalog_item(
         "history, so this is a point-in-time snapshot; price fields are null "
         "when no source resolves a quote."
     ),
+    dependencies=[Depends(catalog_read_limit)],
 )
 async def get_market(
     product_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(optional_user),
 ) -> SealedMarketRead:
     row = await sealed_service.get_catalog_item(db, product_id)
     snap = await sealed_image_resolver.resolve_market(row) or {}
@@ -120,23 +123,42 @@ async def get_market(
             source = pc["source"]
     today = utcnow().date().isoformat()
 
-    # Accumulate today's observation into the product's history (dedupe by day),
-    # so the value line grows into a real multi-point curve over time.
     history = [
         h for h in (row.price_history or []) if h.get("d") and h.get("p") is not None
     ]
-    if market is not None and not any(h["d"] == today for h in history):
+
+    # Accumulate today's observation into the product's history (one entry per
+    # day). This is a WRITE to a shared catalog row, so it is gated on a
+    # signed-in caller: the route itself stays public, but an anonymous GET
+    # must never be able to make the server commit — otherwise a trivial loop
+    # against an unauthenticated read amplifies into unbounded DB writes.
+    stored_today = next((h for h in history if h["d"] == today), None)
+    if (
+        viewer is not None
+        and market is not None
+        and (stored_today is None or float(stored_today["p"]) != float(market))
+    ):
+        history = [h for h in history if h["d"] != today]
         history.append({"d": today, "p": float(market)})
-        row.price_history = sorted(history, key=lambda h: h["d"])
+        history.sort(key=lambda h: h["d"])
+        row.price_history = history
         await sealed_service.commit_quietly(db)
 
     # Value line: MSRP-at-release anchor + every accumulated daily observation.
+    # Today's point is pinned to the live headline quote so the last point on
+    # the chart can never contradict the big number rendered above it.
+    series = list(history)
+    if market is not None:
+        series = [h for h in series if h["d"] != today]
+        series.append({"d": today, "p": float(market)})
+    series.sort(key=lambda h: h["d"])
+
     points: list[SealedPricePoint] = []
     if row.release_date is not None and row.msrp_usd is not None:
         points.append(
             SealedPricePoint(ts=row.release_date.isoformat(), price=float(row.msrp_usd))
         )
-    for h in sorted(history, key=lambda h: h["d"]):
+    for h in series:
         if not points or points[-1].ts != h["d"]:
             points.append(SealedPricePoint(ts=h["d"], price=float(h["p"])))
 

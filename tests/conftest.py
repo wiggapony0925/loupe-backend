@@ -32,6 +32,17 @@ os.environ["S3_SECRET_ACCESS_KEY"] = ""
 os.environ["RESEND_API_KEY"] = ""
 os.environ["NOTIFICATIONS_FROM_EMAIL"] = ""
 os.environ["RESEND_WEBHOOK_SECRET"] = ""
+# Force the AI + payment providers OFF for the same reason, and for the same
+# reason they were missed: they only bite a developer whose .env actually
+# carries the keys. `test_ask_super_admin_unconfigured` asserts the insights
+# endpoint reports itself unconfigured — with a real ANTHROPIC_API_KEY present
+# it instead made a LIVE, billable call to api.anthropic.com and failed. CI
+# never saw it, because CI has no keys. Tests that exercise these paths
+# monkeypatch settings + the client, exactly like the email tests do.
+os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["STRIPE_SECRET_KEY"] = ""
+os.environ["STRIPE_WEBHOOK_SECRET"] = ""
 
 from app.config import reload_settings  # noqa: E402
 from app.db import Base, get_db, reset_engine  # noqa: E402

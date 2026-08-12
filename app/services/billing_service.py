@@ -31,9 +31,47 @@ from app.config import get_settings
 from app.models.user import User
 from app.services import email_service
 
-# Subscription statuses that grant Pro. `past_due` stays Pro through Stripe's
-# retry window; only a hard cancel/expiry drops access.
+# How Stripe's subscription statuses map onto our plan state. Stripe's full
+# list is: incomplete, incomplete_expired, active, past_due, canceled, unpaid,
+# trialing, paused — and it needs three outcomes, not two:
+#
+#   GRANT (`_ACTIVE_STATUSES`) — the member is entitled to Pro right now.
+#     active    paid and current.
+#     trialing  inside a trial we granted.
+#     past_due  a charge failed but Stripe is still retrying (~2 weeks); pulling
+#               access on the first decline punishes a member whose bank will
+#               happily re-authorise the very next attempt.
+#
+#   IGNORE (`_PENDING_STATUSES`) — the subscription has never been paid for, so
+#   it says nothing about the member's access: it must neither grant Pro nor
+#   take it away. `/me/billing/subscribe` creates subscriptions with
+#   `payment_behavior=default_incomplete`, so merely *opening* the in-app
+#   payment sheet (switching monthly → yearly, say) emits
+#   `customer.subscription.created` with status `incomplete`. Treating that as
+#   "not active" downgraded a member who was already paying on another
+#   subscription — before they had even entered a card — and repointed
+#   `stripe_subscription_id` at the unpaid one, so cancel/reactivate then
+#   targeted the wrong subscription.
+#     incomplete          initial payment not confirmed yet.
+#     incomplete_expired  that first payment was never confirmed and lapsed;
+#                         this subscription never granted anything, so there is
+#                         nothing for it to revoke.
+#
+#   REVOKE (everything else) — the subscription is over and no more money is
+#   coming: `canceled` (ended by us, the member, or Stripe's final dunning
+#   step), `unpaid` (Stripe exhausted its retries), and `paused` (trial ended
+#   with no payment method, collection stopped).
 _ACTIVE_STATUSES = {"active", "trialing", "past_due"}
+_PENDING_STATUSES = {"incomplete", "incomplete_expired"}
+
+
+# Shown inline by the client whenever Stripe isn't wired up yet. Both purchase
+# entry points (hosted checkout and the in-app Payment Element) return it, so
+# the same state always has the same copy to render.
+_UNAVAILABLE_MESSAGE = (
+    "Loupe Pro checkout isn't open yet — you're on the early list "
+    "and we'll let you know the moment it goes live."
+)
 
 
 def billing_configured() -> bool:
@@ -105,13 +143,7 @@ async def start_checkout(db: AsyncSession, user: User, interval: str) -> dict[st
             detail="interval must be 'monthly' or 'yearly'",
         )
     if not billing_configured():
-        return {
-            "status": "unavailable",
-            "message": (
-                "Loupe Pro checkout isn't open yet — you're on the early list "
-                "and we'll let you know the moment it goes live."
-            ),
-        }
+        return {"status": "unavailable", "message": _UNAVAILABLE_MESSAGE}
 
     _client()
     s = get_settings()
@@ -158,7 +190,9 @@ async def create_subscription(
             detail="interval must be 'monthly' or 'yearly'",
         )
     if not billing_configured():
-        return {"status": "unavailable"}
+        # Same shape as start_checkout's: the Payment Element path needs copy to
+        # render for this state too, not a bare status the client can't explain.
+        return {"status": "unavailable", "message": _UNAVAILABLE_MESSAGE}
 
     _client()
     s = get_settings()
@@ -349,12 +383,28 @@ def _period_end(sub: Any) -> datetime | None:
     return datetime.fromtimestamp(ts, tz=UTC) if ts else None
 
 
-async def _apply_subscription(db: AsyncSession, sub: Any) -> None:
-    """Reconcile a user's plan from a Stripe subscription object."""
-    user = await _user_by_customer(db, sub.get("customer"))
+async def _apply_subscription(
+    db: AsyncSession, sub: Any, user: User | None = None
+) -> None:
+    """Reconcile a user's plan from a Stripe subscription object.
+
+    *user* lets a caller that has already resolved the user skip the lookup by
+    customer id. Checkout completion needs that: it may have just assigned
+    ``stripe_customer_id`` on a user in this same session, and the sessionmaker
+    runs with ``autoflush=False``, so a ``SELECT`` on that column would not see
+    the pending assignment and the paid subscription would be dropped.
+    """
+    if user is None:
+        user = await _user_by_customer(db, sub.get("customer"))
     if user is None:
         return
     status_str = sub.get("status")
+    if status_str in _PENDING_STATUSES:
+        # No-op on plan state (see the status map above): an unpaid subscription
+        # neither grants Pro nor revokes it, and must not overwrite
+        # `stripe_subscription_id` — that would point cancel/reactivate at a
+        # subscription nobody has paid for.
+        return
     is_active = status_str in _ACTIVE_STATUSES
     was_pro = user.plan == "pro"
     user.stripe_subscription_id = sub.get("id")
@@ -395,10 +445,18 @@ async def _handle_checkout_completed(db: AsyncSession, session: Any) -> None:
         if user is None:
             return
         user.stripe_customer_id = customer_id
+        # Persist the link on its own: it is the only key later webhooks have
+        # to find this user, so it has to survive even if the reconciliation
+        # below turns out to be a no-op (an unpaid subscription, say).
+        await db.commit()
     sub_id = session.get("subscription")
     if sub_id:
         sub = stripe.Subscription.retrieve(sub_id)
-        await _apply_subscription(db, sub)
+        # Hand over the user we already resolved rather than making
+        # _apply_subscription look them up by customer id again — see its
+        # docstring: that lookup cannot see an assignment still pending in this
+        # session (autoflush=False), which silently dropped paid checkouts.
+        await _apply_subscription(db, sub, user=user)
     else:
         was_pro = user.plan == "pro"
         user.plan = "pro"

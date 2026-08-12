@@ -96,10 +96,15 @@ async def update_post(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> BlogPostRead:
-    # Capture publish state *before* the update so we only announce on the
-    # draft → published transition (never on edits to an already-live post).
+    # Capture publish state *before* the update so we only announce on a post's
+    # first publish (never on edits to an already-live post, and never again
+    # once it's been unpublished and republished). `published_at` is stamped on
+    # that first publish and never cleared, so it is the same "has this post
+    # already announced itself?" key the in-app notification dedupes on
+    # (`blog:<id>`) — the two must not disagree, or a republish mails the whole
+    # announcement list a second time while creating no new inbox item.
     before = await blog_service.admin_get(db, post_id)
-    was_published = before.status == _PUBLISHED
+    already_announced = before.published_at is not None
     row = await blog_service.update(db, post_id, payload)
     await audit_service.record(
         db,
@@ -110,7 +115,7 @@ async def update_post(
         target_id=row.id,
         payload=payload.model_dump(exclude_unset=True, mode="json"),
     )
-    if not was_published and row.status == _PUBLISHED:
+    if not already_announced and row.status == _PUBLISHED:
         await _announce(db, background, row)
     return BlogPostRead.model_validate(row)
 

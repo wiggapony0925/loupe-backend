@@ -204,6 +204,17 @@ async def list_log(
             )
         ).scalar_one()
     )
+    # Unread across the whole filtered log, not just this page — "was the
+    # broadcast opened?" is the question an operator is actually asking.
+    unread = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(Notification)
+                .where(*where, Notification.read_at.is_(None))
+            )
+        ).scalar_one()
+    )
     rows = (
         (
             await db.execute(
@@ -222,7 +233,7 @@ async def list_log(
         total=total,
         page=page,
         page_size=page_size,
-        unread=0,
+        unread=unread,
     )
 
 

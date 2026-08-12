@@ -24,6 +24,8 @@ from app.social.models import (
     SocialPost,
     SocialPostComment,
     SocialProfile,
+    SocialStory,
+    SocialStoryComment,
 )
 from app.social.schemas import (
     ModerationCaseRead,
@@ -39,6 +41,12 @@ TARGET_COMMENT = "comment"
 TARGET_PROFILE = "profile"
 TARGET_REVIEW = "review"
 TARGET_COLLECTION = "collection"
+#: Stories live in their own tables, so they get their own target types. A
+#: story case filed as a "post" points at an id no post table holds — the
+#: queue would show a dead "view post" link and resolving it would remove
+#: nothing while stamping the case handled.
+TARGET_STORY = "story"
+TARGET_STORY_COMMENT = "story_comment"
 
 #: What a USER may report. Deliberately narrower than what we SCREEN —
 #: nobody needs a "report this collection name" button, but the name still
@@ -426,6 +434,17 @@ async def _remove_target(
             profile.avatar_key = None
             profile.avatar_content_type = None
             profile.avatar_version = (profile.avatar_version or 0) + 1
+    elif target_type == TARGET_STORY:
+        # Soft-delete, the same thing the author's own delete does — every
+        # story read filters `deleted_at`, and the row is the record of what
+        # was taken down.
+        story = await db.get(SocialStory, target_id)
+        if story is not None and story.deleted_at is None:
+            story.deleted_at = datetime.now(UTC)
+    elif target_type == TARGET_STORY_COMMENT:
+        story_comment = await db.get(SocialStoryComment, target_id)
+        if story_comment is not None and story_comment.deleted_at is None:
+            story_comment.deleted_at = datetime.now(UTC)
 
 
 def _case_read(
@@ -463,6 +482,8 @@ __all__ = [
     "TARGET_POST",
     "TARGET_PROFILE",
     "TARGET_REVIEW",
+    "TARGET_STORY",
+    "TARGET_STORY_COMMENT",
     "enforce",
     "open_auto_case",
     "queue",

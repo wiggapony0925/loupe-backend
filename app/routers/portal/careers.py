@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -57,14 +57,43 @@ async def apply(
     "/applications/{application_id}",
     response_model=ApplicationTrackRead,
     summary="Track an application (gated on the applicant's email)",
+    description=(
+        "The applicant's email is the access credential for this record. "
+        "Send it in the `X-Applicant-Email` header — a query string is "
+        "retained by proxy access logs, browser history and outbound "
+        "`Referer`, none of which should ever hold a credential. The `email` "
+        "query parameter is still accepted for existing clients but is "
+        "deprecated; the header wins when both are present."
+    ),
     dependencies=[Depends(application_track_limit)],
 )
 async def track(
     application_id: uuid.UUID,
-    email: str = Query(..., description="The email used to apply."),
+    response: Response,
+    email: str | None = Query(
+        None,
+        description="Deprecated — use the X-Applicant-Email header instead.",
+        deprecated=True,
+    ),
+    x_applicant_email: str | None = Header(
+        None, description="The email used to apply."
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> ApplicationTrackRead:
-    return await career_service.track(db, application_id, email)
+    credential = x_applicant_email or email
+    if not credential or not credential.strip():
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "validation.failed",
+                "message": "The applicant email is required.",
+                "field": "email",
+            },
+        )
+    # The URL carries a credential whenever the deprecated query form is used,
+    # so keep the response (and its URL) out of any shared or on-disk cache.
+    response.headers["Cache-Control"] = "private, no-store"
+    return await career_service.track(db, application_id, credential)
 
 
 __all__ = ["router"]
