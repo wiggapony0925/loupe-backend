@@ -7,6 +7,7 @@ from app.models.blog import BlogPost
 from app.models.card import Card, CardSet
 from app.models.card_external_ref import CardExternalRef
 from app.models.career import ApplicationEvent, JobApplication, JobPosting
+from app.models.catalog_embedding import CatalogCardEmbedding
 from app.models.catalog_hash import CatalogImageHash
 from app.models.catalog_mirror import CatalogMirrorCard, CatalogMirrorSet
 from app.models.collection import Collection, CollectionItem
@@ -80,6 +81,7 @@ __all__ = [
     "CardExternalRef",
     "CardIdentification",
     "CardSet",
+    "CatalogCardEmbedding",
     "CatalogImageHash",
     "CatalogMirrorCard",
     "CatalogMirrorSet",

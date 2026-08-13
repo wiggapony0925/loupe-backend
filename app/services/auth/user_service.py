@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,13 +57,32 @@ async def bump_token_version(db: AsyncSession, user: User) -> int:
 
     Powers "sign out everywhere" and is the kill switch for a stolen token; any
     future password-change flow should call this too. Returns the new version.
+
+    The arithmetic happens in the database (``SET v = v + 1 ... RETURNING v``)
+    rather than in Python for the same reason as the failed-login counter
+    below: a read-modify-write can lose a bump when two revocations land
+    together, and a lost bump leaves alive a session that someone explicitly
+    asked to kill — e.g. a reset that minted ``ver = n + 1`` survives a
+    concurrent "sign out everywhere" that also lands on ``n + 1``.
     """
-    user.token_version = (user.token_version or 0) + 1
-    db.add(user)
+    new_version = (
+        await db.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(token_version=User.token_version + 1)
+            .returning(User.token_version)
+            # The authoritative value is the one RETURNING hands back; letting
+            # the ORM "synchronise" would write this request's stale snapshot
+            # back over the object.
+            .execution_options(synchronize_session=False)
+        )
+    ).scalar_one()
     await db.commit()
+    # The UPDATE went round the identity map, so the caller's `user` still
+    # carries the old epoch until it is re-read.
     await db.refresh(user)
-    logger.info("Bumped token_version for user=%s → %s", user.id, user.token_version)
-    return user.token_version
+    logger.info("Bumped token_version for user=%s → %s", user.id, new_version)
+    return new_version
 
 
 async def get_by_email(db: AsyncSession, email: str) -> User | None:
@@ -164,9 +183,18 @@ async def change_password(
     if not verify_password(current_password, user.password_hash):
         raise PasswordChangeError("wrong_current")
     user.password_hash = hash_password(new_password)
-    user.token_version = (user.token_version or 0) + 1
-    db.add(user)
+    # Same commit, but the epoch is incremented BY the database — a Python
+    # ``+ 1`` here would race a concurrent /logout-all and one of the two
+    # revocations would be silently lost (see :func:`bump_token_version`).
+    await db.execute(
+        update(User)
+        .where(User.id == user.id)
+        .values(token_version=User.token_version + 1)
+        .execution_options(synchronize_session=False)
+    )
     await db.commit()
+    # Refresh, so the caller reads the epoch the database actually stored and
+    # issues this device's replacement pair against it.
     await db.refresh(user)
     logger.info("Password changed; sessions revoked for user=%s", user.id)
     return user
@@ -211,6 +239,10 @@ async def authenticate_with_password(
     ``login_max_attempts`` consecutive failures the account is locked for
     ``login_lockout_seconds`` and this raises :class:`AccountLockedError`
     until the lock lifts. A correct password always resets the counter.
+
+    Every attempt counts exactly once, however many land at the same instant:
+    the counter is moved by the database, never by arithmetic done here on a
+    value that another request may already have changed.
     """
     user = await get_by_email(db, email)
     # Hash a dummy value when the user is missing (or is SSO-only) so attackers
@@ -235,11 +267,45 @@ async def authenticate_with_password(
         raise AccountLockedError(retry_after=int((locked_until - now).total_seconds()))
 
     if not verify_password(password, user.password_hash):
-        user.failed_login_count = (user.failed_login_count or 0) + 1
-        just_locked = user.failed_login_count >= settings.login_max_attempts
+        # Count the failure IN THE DATABASE. The obvious
+        # `user.failed_login_count += 1` is a read here and a write at commit,
+        # and at READ COMMITTED two attempts that land together both read n
+        # and both write n + 1 — one failure is uncounted. That is not a
+        # rounding error in a security control: an attacker guessing down k
+        # connections at once burns the threshold at a fraction of the rate it
+        # was configured for, so the lockout never trips. `SET n = n + 1`
+        # re-reads the row under the write lock it takes, so no window exists,
+        # and RETURNING gives us the value that was actually stored — the
+        # threshold below has to be tested against the real count, not against
+        # this request's snapshot of it.
+        stored = (
+            await db.execute(
+                update(User)
+                .where(User.id == user.id)
+                .values(failed_login_count=User.failed_login_count + 1)
+                .returning(User.failed_login_count)
+                .execution_options(synchronize_session=False)
+            )
+        ).scalar_one_or_none()
+        # None = the account was deleted between the lookup and the increment.
+        # Nothing left to lock, and the caller's answer is "no" either way.
+        just_locked = stored is not None and stored >= settings.login_max_attempts
         if just_locked:
-            user.locked_until = now + timedelta(seconds=settings.login_lockout_seconds)
-            user.failed_login_count = 0  # reset; the lock is the deterrent now
+            # Two statements are safe here even though one row is being
+            # decided on: the UPDATE above holds this row's write lock until
+            # we commit, so no other attempt can slip an increment in between.
+            # The alternative — folding both into one CASE expression — saves
+            # a round trip and costs everyone who has to read it later.
+            await db.execute(
+                update(User)
+                .where(User.id == user.id)
+                .values(
+                    locked_until=now
+                    + timedelta(seconds=settings.login_lockout_seconds),
+                    failed_login_count=0,  # reset; the lock is the deterrent now
+                )
+                .execution_options(synchronize_session=False)
+            )
             logger.warning(
                 "account locked after failed logins user=%s email=%s",
                 user.id,
@@ -260,9 +326,28 @@ async def authenticate_with_password(
         return None
 
     # Success — clear any failure state and opportunistically upgrade the hash.
-    if user.failed_login_count or user.locked_until is not None:
-        user.failed_login_count = 0
-        user.locked_until = None
+    # The "is there anything to clear?" test lives in the WHERE clause rather
+    # than in Python because the count we read at the top of this function may
+    # already be stale: a parallel guess can move it while argon2 is verifying,
+    # and a guard on the stale value would leave those failures on the account
+    # of someone who just proved they own it. Cost of doing it this way is one
+    # UPDATE that usually matches no rows, against an argon2 verify — nothing.
+    #
+    # The second predicate is the subtle one. A lock that is still in the
+    # future can only have been stamped by concurrent failures AFTER the
+    # pre-check above let us through, and a success that raced it must not
+    # quietly undo the lockout an attacker just triggered. An expired lock is
+    # exactly what this path is meant to tidy away, so that one still clears.
+    await db.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            (User.failed_login_count != 0) | User.locked_until.is_not(None),
+            User.locked_until.is_(None) | (User.locked_until <= now),
+        )
+        .values(failed_login_count=0, locked_until=None)
+        .execution_options(synchronize_session=False)
+    )
     if needs_rehash(user.password_hash):
         user.password_hash = hash_password(password)
     await db.commit()

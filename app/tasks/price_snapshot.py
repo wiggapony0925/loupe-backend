@@ -40,7 +40,11 @@ logger = get_logger("workers.price_snapshot")
 DEFAULT_BATCH_SIZE = 500
 
 #: Rolling window of daily points to retain. ~2 years lets the ALL
-#: range render real curves while keeping the JSONB payload small.
+#: range render real curves while keeping the payload small. Small
+#: matters because ``cards.metadata`` is a single jsonb document
+#: (``json`` until 0057_json_to_jsonb, jsonb since): postgres has no
+#: partial update for it, so appending one point rewrites the whole
+#: value — history, pricing summary and all — on every card, every day.
 MAX_HISTORY_POINTS = 730
 
 
@@ -67,8 +71,9 @@ def _upsert_today(
 ) -> tuple[list[dict], bool]:
     """Return a new history list with today's price upserted.
 
-    Second return value is ``True`` when the list actually changed
-    (avoids writing JSONB + bumping ``updated_at`` for no-op runs).
+    Second return value is ``True`` when the list actually changed, so a
+    no-op run skips the UPDATE entirely — which saves rewriting the whole
+    jsonb document and bumping ``updated_at`` on every card in the table.
     """
     today_iso = today.isoformat()
     out: list[dict] = []

@@ -47,10 +47,60 @@ arq app.worker.WorkerSettings
 |---|---|
 | `ruff check . --fix && ruff format .` | Lint + format |
 | `mypy app` | Static types |
-| `pytest -q` | Test suite (in-memory sqlite) |
+| `pytest -q` | Both test suites — see [Testing](#testing) |
+| `pytest tests/database -q` | Postgres-backed schema + constraint suite |
 | `alembic revision --autogenerate -m "msg"` | New migration |
 | `alembic upgrade head` | Apply migrations |
 | `docker compose up` | Local stack (postgres + redis + minio) |
+
+## Testing
+
+Two suites, two engines. Plain `pytest -q` runs both; so does CI.
+
+| Suite | Engine | Needs |
+|---|---|---|
+| everything outside `tests/database` | in-memory SQLite | nothing running |
+| `tests/database/` | a real Postgres 16 with `pgvector` | a live server |
+
+The SQLite suite is fast and hermetic on purpose and stays that way. The
+database suite covers what SQLite cannot answer at all: that the live schema
+matches the models, that constraints really refuse bad rows, that cascades
+cascade, that transactions isolate, and that the indexes the planner needs
+exist.
+
+### Running the database suite locally
+
+```bash
+docker compose up -d postgres      # pgvector/pgvector:pg16, published on :5433
+.venv/bin/pytest tests/database -q
+```
+
+The harness defaults to `postgresql+asyncpg://loupe:loupe@localhost:5433/loupe`
+— the port `docker-compose.yml` publishes. On that server it creates its own
+scratch database (`loupe_dbtest_<pid>_<rand>`), builds the schema into it, and
+drops it at the end; it never reads, writes or locks your `loupe` database.
+Point it elsewhere with `LOUPE_TEST_PG_URL`:
+
+```bash
+LOUPE_TEST_PG_URL=postgresql+asyncpg://loupe:loupe@localhost:5432/loupe \
+  .venv/bin/pytest tests/database -q
+```
+
+The image matters. Stock `postgres:16` does not ship the `vector` extension and
+the harness creates one, so `docker-compose.override.yml` pins the pgvector
+build (migration `0037_card_embeddings` needs it too).
+
+With no server reachable, every test in the directory skips with a reason
+naming the host it tried — so `pytest -q` still passes on a laptop with Docker
+off.
+
+### In CI
+
+`.github/workflows/ci.yml` runs the SQLite suite (with `--ignore=tests/database`
+so it is not collected twice), then runs the database suite against the
+`pgvector/pgvector:pg16` service the job already provisions. Skipping is the
+failure mode that looks like success, so the job writes a junit report and
+fails the build when a database test skips instead of running.
 
 ## Environment variables
 
