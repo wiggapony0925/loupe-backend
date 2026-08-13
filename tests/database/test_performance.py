@@ -327,10 +327,18 @@ async def test_a_lookup_by_primary_key_is_an_index_scan(
     reasons that have nothing to do with indexes. A primary key lookup is
     the one plan postgres will never get wrong, so if this passes, a
     failure elsewhere is a real finding.
-    """
-    user = await make_user(pg_session)
 
-    plan = await _plan(pg_session, "SELECT * FROM users WHERE id = :uid", uid=user.id)
+    SEEDED, for exactly the reason the tests below are. This used to make a
+    single user and assert the plan, which failed about half the time — not
+    on anything to do with the schema, but because on a one-row table a
+    sequential scan IS the cheaper plan and therefore the correct one. Which
+    way it went came down to whether autovacuum had reached the table yet,
+    so the control that exists to make other failures trustworthy was itself
+    the flakiest test in the file.
+    """
+    author_id, _ = await _seed_social_graph(pg_session)
+
+    plan = await _plan(pg_session, "SELECT * FROM users WHERE id = :uid", uid=author_id)
 
     assert "Seq Scan" not in _scans_of(plan, "users"), _shape(plan)
     assert "pk_users" in _indexes_used(plan), _shape(plan)
