@@ -1,0 +1,2387 @@
+{
+  "consumer": "loupe-frontend",
+  "version": "1.0.0",
+  "description": "What loupe-frontend needs from loupe-backend. Generated from real call sites and validated against the live OpenAPI schema. Verified by the provider in CI — see loupe-backend/contracts/README.md.",
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/alerts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/alerts/usePriceAlerts.ts:28",
+      "requiredResponseFields": [
+        "[].card_id",
+        "[].card_image_url",
+        "[].card_name",
+        "[].condition",
+        "[].id",
+        "[].threshold_usd",
+        "[].triggered_at"
+      ],
+      "requestFields": [
+        "pending (query, boolean — sent only when true)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/alerts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/alerts/usePriceAlerts.ts:39",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "card_id",
+        "condition (above|below)",
+        "note (nullable)",
+        "threshold_usd (sent as a NUMBER here, though the read model returns a decimal string)"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/alerts/{alert_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/alerts/usePriceAlerts.ts:53",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/analytics/overview",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/analyticsRepository.ts:24",
+      "requiredResponseFields": [
+        "concentration",
+        "concentration.top1.cardName",
+        "concentration.top1.valueUsd",
+        "concentration.top1Pct",
+        "concentration.top3Pct",
+        "concentration.top5Pct",
+        "gradeDistribution[].bucket",
+        "gradeDistribution[].count",
+        "kpis.avgGrade",
+        "kpis.gemRatePct",
+        "kpis.graderSplit.bgs",
+        "kpis.graderSplit.cgc",
+        "kpis.graderSplit.psa",
+        "kpis.lastScanAt",
+        "kpis.totalScans",
+        "movers.gainers[].cardId",
+        "movers.gainers[].cardImageUrl",
+        "movers.gainers[].cardName",
+        "movers.gainers[].changePct1y",
+        "movers.gainers[].gradeId",
+        "movers.gainers[].setName",
+        "movers.gainers[].valueUsd",
+        "movers.losers[].cardId",
+        "movers.losers[].cardImageUrl",
+        "movers.losers[].cardName",
+        "movers.losers[].changePct1y",
+        "movers.losers[].gradeId",
+        "movers.losers[].setName",
+        "movers.losers[].valueUsd",
+        "setIndexes[].changePct1y",
+        "setIndexes[].count",
+        "setIndexes[].setName",
+        "setIndexes[].sharePct",
+        "setIndexes[].totalValueUsd",
+        "stats.avgGrade",
+        "stats.avgValueUsd",
+        "stats.gemRatePct",
+        "stats.holdings",
+        "stats.oldestYear",
+        "stats.totalValueUsd",
+        "stats.uniqueSets",
+        "yearDistribution[].count",
+        "yearDistribution[].decade",
+        "yearDistribution[].valueUsd"
+      ],
+      "requestFields": [
+        "collection_id (query, only when a collection is active)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/announcement",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/config",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/apple",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/authRepository.ts:73",
+      "requiredResponseFields": [
+        "access_token",
+        "refresh_token",
+        "user",
+        "user.email",
+        "user.id"
+      ],
+      "requestFields": [
+        "display_name",
+        "identity_token"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/change-password",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/presentation/providers/AuthProvider.tsx:263",
+      "requiredResponseFields": [
+        "access_token",
+        "refresh_token",
+        "user",
+        "user.email",
+        "user.id"
+      ],
+      "requestFields": [
+        "current_password",
+        "new_password"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/dev-login",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/authRepository.ts:65",
+      "requiredResponseFields": [
+        "access_token",
+        "refresh_token",
+        "user",
+        "user.email",
+        "user.id"
+      ],
+      "requestFields": [
+        "display_name",
+        "email"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/forgot-password",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/authRepository.ts:106",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "email"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/google",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/authRepository.ts:81",
+      "requiredResponseFields": [
+        "access_token",
+        "refresh_token",
+        "user",
+        "user.email",
+        "user.id"
+      ],
+      "requestFields": [
+        "id_token"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/authRepository.ts:57",
+      "requiredResponseFields": [
+        "access_token",
+        "refresh_token",
+        "user",
+        "user.email",
+        "user.id"
+      ],
+      "requestFields": [
+        "email",
+        "password"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/logout-all",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/presentation/providers/AuthProvider.tsx:294",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/authRepository.ts:89",
+      "requiredResponseFields": [
+        "access_token",
+        "refresh_token"
+      ],
+      "requestFields": [
+        "refresh_token"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/register",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/authRepository.ts:49",
+      "requiredResponseFields": [
+        "access_token",
+        "refresh_token",
+        "user",
+        "user.email",
+        "user.id"
+      ],
+      "requestFields": [
+        "display_name",
+        "email",
+        "password"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/blog/posts",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/blog/posts/{slug}",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/identify",
+      "callSite": "src/infrastructure/repositories/identifyRepository.ts:86",
+      "requiredResponseFields": [
+        "candidates",
+        "candidates[].confidence",
+        "candidates[].name",
+        "identification_id"
+      ],
+      "requestFields": [
+        "image (multipart file part, required — a single viewfinder frame)",
+        "tcg (multipart text part, optional: \"pokemon\" | \"magic\" | \"yugioh\")"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/identify/text",
+      "callSite": "src/infrastructure/repositories/identifyRepository.ts:123",
+      "requiredResponseFields": [
+        "candidates",
+        "candidates[].confidence",
+        "candidates[].name",
+        "identification_id"
+      ],
+      "requestFields": [
+        "client_provider (JSON, defaults to \"client_fallback\")",
+        "ocr_confidence (JSON, defaults to 0)",
+        "tcg (JSON, optional)",
+        "text (JSON, required — OCR text extracted on-device)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/identify/{identification_id}/feedback",
+      "callSite": "src/infrastructure/repositories/identifyRepository.ts:106",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "chosen_card_id (JSON, nullable — the catalog id the user confirmed)",
+        "correct (JSON boolean, required)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/resolve",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/search",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardSearch.ts:24",
+      "requiredResponseFields": [
+        "results[].id",
+        "results[].name"
+      ],
+      "requestFields": [
+        "limit (query, default 20; 12 at the only call site)",
+        "q (query, trimmed, only fires at >= 2 chars)",
+        "tcg (query: pokemon|magic|yugioh|all)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/search/ai",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useAiSearch.ts:53",
+      "requiredResponseFields": [
+        "candidates",
+        "results[].id",
+        "results[].name"
+      ],
+      "requestFields": [
+        "q (query, required, truncated to the app-config queryMaxChars)",
+        "tcg (query, optional — omitted when game === 'all')"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/search/ai/feedback",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useAiSearch.ts:67",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "askId (body, string uuid — camelCase, matches the backend AiFeedbackIn schema)",
+        "verdict (body, 'up' | 'down')"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/trending",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/marketRepository.ts:101",
+      "requiredResponseFields": [
+        "cards",
+        "cards[].id",
+        "cards[].name"
+      ],
+      "requestFields": [
+        "limit (query, default 24)",
+        "limit (query, sent as 60)",
+        "max_price (query, optional — only sent when set)",
+        "sort (query: 'trending' | 'value')",
+        "tcg (query: pokemon|magic|yugioh|all)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCard.ts:11",
+      "requiredResponseFields": [
+        "id",
+        "name",
+        "tcg"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/analytics",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardAnalytics.ts:19",
+      "requiredResponseFields": [
+        "all_time_high_usd",
+        "all_time_low_usd",
+        "grade_premium",
+        "liquidity_30d",
+        "market_cap_usd",
+        "market_price_usd",
+        "momentum_1y",
+        "momentum_30d",
+        "momentum_7d",
+        "momentum_90d",
+        "pct_off_ath",
+        "population",
+        "volatility_pct"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/canonical",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCanonicalCard.ts:29",
+      "requiredResponseFields": [
+        "identity.tcg"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/comps",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardComps.ts:31",
+      "requiredResponseFields": [
+        "comps[].condition",
+        "comps[].grade",
+        "comps[].house",
+        "comps[].price.amount",
+        "comps[].sold_at",
+        "comps[].source",
+        "comps[].title",
+        "comps[].url"
+      ],
+      "requestFields": [
+        "days (query)",
+        "days (query, default 90)",
+        "grade (query, optional)",
+        "house (query, optional)",
+        "limit (query, optional — 12 or 100 at call sites)",
+        "limit (query, optional)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/grade-summary",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCardGradeSummary.ts:24",
+      "requiredResponseFields": [
+        "grades[].delta_pct",
+        "grades[].grade",
+        "grades[].last_sale",
+        "grades[].last_sale.amount",
+        "grades[].median_recent",
+        "grades[].sales_count"
+      ],
+      "requestFields": [
+        "window_days (query)",
+        "window_days (query, always 30 from the only consumer)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/listings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardListings.ts:24",
+      "requiredResponseFields": [
+        "listings[].condition",
+        "listings[].image_url",
+        "listings[].is_auction",
+        "listings[].price.amount",
+        "listings[].price.currency",
+        "listings[].source",
+        "listings[].time_left_seconds",
+        "listings[].title",
+        "listings[].url"
+      ],
+      "requestFields": [
+        "limit (query)",
+        "limit (query, default 20; 12 from LiveListingsSection)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/market",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardMarket.ts:19",
+      "requiredResponseFields": [
+        "snapshot",
+        "snapshot.history",
+        "snapshot.history.points[].price",
+        "snapshot.history.points[].ts",
+        "snapshot.history.summary.change_pct",
+        "snapshot.history.summary.current",
+        "snapshot.history.summary.max",
+        "snapshot.history.summary.min",
+        "snapshot.houses[].grades[].change_pct",
+        "snapshot.houses[].grades[].grade_label",
+        "snapshot.houses[].grades[].house",
+        "snapshot.houses[].grades[].market.amount",
+        "snapshot.houses[].grades[].population",
+        "snapshot.houses[].grades[].source",
+        "snapshot.houses[].house",
+        "snapshot.summary",
+        "snapshot.summary.graded_avg",
+        "snapshot.summary.graded_avg.amount",
+        "snapshot.summary.last_sale_at",
+        "snapshot.summary.pop_top",
+        "snapshot.summary.pop_top.amount",
+        "snapshot.summary.primary_house",
+        "snapshot.summary.raw",
+        "snapshot.summary.raw.amount",
+        "snapshot.tiers_total"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/marketplace-prices",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardMarketplacePrices.ts:24",
+      "requiredResponseFields": [
+        "providers[].label",
+        "providers[].price.amount",
+        "providers[].price.currency",
+        "providers[].search_url",
+        "providers[].source",
+        "providers[].url"
+      ],
+      "requestFields": [
+        "limit (query)",
+        "limit (query, default 50)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/nearby-listings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardNearbyListings.ts:46",
+      "requiredResponseFields": [
+        "listings[].condition",
+        "listings[].distance_km",
+        "listings[].image_url",
+        "listings[].location_label",
+        "listings[].price.amount",
+        "listings[].price.currency",
+        "listings[].title",
+        "listings[].url"
+      ],
+      "requestFields": [
+        "lat (query, REQUIRED)",
+        "lat (query, required)",
+        "limit (query)",
+        "limit (query, default 20)",
+        "lng (query, REQUIRED)",
+        "lng (query, required)",
+        "radius_km (query)",
+        "radius_km (query, default 40)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/ownership",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCardOwnership.ts:21",
+      "requiredResponseFields": [
+        "copies",
+        "cost_basis_usd",
+        "holding_value_usd",
+        "holdings[].condition",
+        "holdings[].estimated_value_usd",
+        "holdings[].grade",
+        "holdings[].graded_at",
+        "holdings[].holding_id",
+        "holdings[].house",
+        "holdings[].is_graded",
+        "holdings[].notes",
+        "holdings[].purchase_price_usd",
+        "holdings[].subgrades",
+        "holdings[].unrealized_pl_pct",
+        "holdings[].unrealized_pl_usd",
+        "owned",
+        "unrealized_pl_pct",
+        "unrealized_pl_usd"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/prices",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardPriceHistory.ts:37",
+      "requiredResponseFields": [
+        "points[].price",
+        "points[].ts"
+      ],
+      "requestFields": [
+        "grade (query, only when set)",
+        "grade (query, optional, e.g. '10')",
+        "house (query)",
+        "house (query: 'raw' by default, else psa/cgc/bgs/sgc/tag)",
+        "range (query)",
+        "range (query: 7d|30d|90d|180d|1y|all, default 30d)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/valuation",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardValuation.ts:23",
+      "requiredResponseFields": [
+        "fair_value",
+        "fair_value.amount"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCollectionMutations.ts:25",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "name"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/collections/overview",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCollectionsOverview.ts:30",
+      "requiredResponseFields": [
+        "[].card_count",
+        "[].color",
+        "[].deletable",
+        "[].id",
+        "[].is_all",
+        "[].name",
+        "[].total_value_usd"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/collections/{collection_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCollectionMutations.ts:56",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/collections/{collection_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCollectionMutations.ts:40",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "name"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/collections/{collection_id}/items",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items/bulk",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCollectionMutations.ts:78",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "graded_card_ids: string[]"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items/bulk-remove",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCollectionMutations.ts:100",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "graded_card_ids: string[]"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items/transfer",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useCollectionMutations.ts:124",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "graded_card_ids: string[]",
+        "source_id"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/forensicRepository.ts:189",
+      "requiredResponseFields": [
+        "[].card_id",
+        "[].card_image_url",
+        "[].card_name",
+        "[].card_number",
+        "[].card_set_name",
+        "[].card_tcg",
+        "[].card_year",
+        "[].condition",
+        "[].created_at",
+        "[].estimated_value_usd",
+        "[].fingerprint_hash",
+        "[].grade",
+        "[].graded_at",
+        "[].house",
+        "[].id",
+        "[].notes",
+        "[].scan_job_id",
+        "[].subgrades",
+        "[].updated_at",
+        "[].user_id"
+      ],
+      "requestFields": [
+        "collection_id (query)",
+        "cursor (query)",
+        "house (query, repeated)",
+        "limit (query)",
+        "max_grade (query)",
+        "max_value (query)",
+        "min_grade (query)",
+        "min_value (query)",
+        "q (query)",
+        "set (query, repeated)",
+        "sort (query)",
+        "tags (query, repeated)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/grades",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useGradeMutations.ts:90",
+      "requiredResponseFields": [
+        "id"
+      ],
+      "requestFields": [
+        "card_id (local UUID) OR upstream_id (composite, e.g. \"pokemontcg:base1-4\") — routed by SHAPE, not by which prop the caller passed",
+        "condition",
+        "estimated_value_usd",
+        "grade",
+        "house",
+        "notes",
+        "purchase_date",
+        "purchase_price_usd",
+        "tags"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/count",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/forensicRepository.ts:199",
+      "requiredResponseFields": [
+        "count"
+      ],
+      "requestFields": [
+        "collection_id (query)",
+        "house (query, repeated)",
+        "max_grade (query)",
+        "max_value (query)",
+        "min_grade (query)",
+        "min_value (query)",
+        "q (query)",
+        "set (query, repeated)",
+        "tags (query, repeated)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/filters",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/forensicRepository.ts:339",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/history",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/market/usePortfolioHistory.ts:53",
+      "requiredResponseFields": [
+        "deltaPct",
+        "deltaUsd",
+        "points[].date",
+        "points[].priceUsd",
+        "range"
+      ],
+      "requestFields": [
+        "collection_id (query, only when scoped to a collection)",
+        "collection_id (query, optional)",
+        "range (query)",
+        "range (query) — one of 1D|1W|1M|3M|YTD|1Y|ALL"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/sparklines",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardSparklines.ts:36",
+      "requiredResponseFields": [
+        "[].cardId",
+        "[].deltaPct",
+        "[].points"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/summary",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/forensicRepository.ts:247",
+      "requiredResponseFields": [
+        "avgAccuracy",
+        "avgGrade",
+        "cardCount",
+        "costBasisCardCount",
+        "totalCostUsd",
+        "totalValueUsd",
+        "unrealizedPnlPct",
+        "unrealizedPnlUsd"
+      ],
+      "requestFields": [
+        "collection_id (query, optional)"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/grades/{grade_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useGradeMutations.ts:154",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/{grade_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useGradedCard.ts:21",
+      "requiredResponseFields": [
+        "card_id",
+        "card_image_url",
+        "card_name",
+        "card_set_name",
+        "card_year",
+        "estimated_value_usd",
+        "grade",
+        "house",
+        "id",
+        "notes",
+        "subgrades"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/grades/{grade_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useGradeMutations.ts:142",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "condition",
+        "estimated_value_usd",
+        "grade",
+        "house",
+        "notes",
+        "purchase_date",
+        "purchase_price_usd",
+        "tags (full replacement set; [] clears)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/home/feed",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/infrastructure/repositories/homeRepository.ts:33",
+      "requiredResponseFields": [
+        "recentScans",
+        "recentScans[].cardId",
+        "recentScans[].cardImageUrl",
+        "recentScans[].cardName",
+        "recentScans[].cardSetName",
+        "recentScans[].estimatedValueUsd",
+        "recentScans[].grade",
+        "recentScans[].gradeId",
+        "recentScans[].house",
+        "recentScans[].scannedAt",
+        "topMovers",
+        "topMovers[].cardId",
+        "topMovers[].cardImageUrl",
+        "topMovers[].cardName",
+        "topMovers[].changePct1y",
+        "topMovers[].gradeId",
+        "topMovers[].priceUsd"
+      ],
+      "requestFields": [
+        "collection_id (query, only when scoped)",
+        "recentScans (query)",
+        "topMovers (query)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/img",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/shared/cardImage.ts:68",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "u (query, required — the upstream image URL, percent-encoded)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/market/fx/rates",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/market/useFxRates.ts:20",
+      "requiredResponseFields": [
+        "as_of",
+        "rates",
+        "source"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/market/indices/{index_id}/history",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/market/useMarketIndex.ts:30",
+      "requiredResponseFields": [
+        "cohortSize",
+        "deltaPct",
+        "points[].indexValue"
+      ],
+      "requestFields": [
+        "range (query)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useMe.ts:14",
+      "requiredResponseFields": [
+        "avatar_url",
+        "created_at",
+        "display_name",
+        "email",
+        "id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/me",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useUpdateProfile.ts:23",
+      "requiredResponseFields": [
+        "display_name",
+        "email",
+        "id"
+      ],
+      "requestFields": [
+        "display_name",
+        "phone"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/billing/cancel",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useEntitlements.ts:92",
+      "requiredResponseFields": [
+        "cancel_at_period_end"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/billing/checkout",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useEntitlements.ts:60",
+      "requiredResponseFields": [
+        "status",
+        "url"
+      ],
+      "requestFields": [
+        "interval"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/billing/config",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useEntitlements.ts:41",
+      "requiredResponseFields": [
+        "checkout_available",
+        "price_monthly_usd",
+        "price_yearly_usd",
+        "trial_days"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/billing/portal",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useEntitlements.ts:76",
+      "requiredResponseFields": [
+        "url"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/billing/reactivate",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useEntitlements.ts:107",
+      "requiredResponseFields": [
+        "cancel_at_period_end"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/entitlements",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useEntitlements.ts:30",
+      "requiredResponseFields": [
+        "card_count",
+        "features",
+        "is_pro",
+        "limits",
+        "limits.free_statements",
+        "limits.max_cards",
+        "subscriptions_enabled",
+        "trialing"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/notifications",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/notifications/useNotificationFeed.ts:162",
+      "requiredResponseFields": [
+        "items",
+        "items[].body",
+        "items[].category",
+        "items[].created_at",
+        "items[].href",
+        "items[].id",
+        "items[].read_at",
+        "items[].title",
+        "page",
+        "page_size",
+        "total",
+        "unread"
+      ],
+      "requestFields": [
+        "category",
+        "page",
+        "page_size"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/notifications/read",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/notifications/useNotificationFeed.ts:182",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "all"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/notifications/summary",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/notifications/useNotificationFeed.ts:127",
+      "requiredResponseFields": [
+        "categories",
+        "categories[].key",
+        "categories[].label",
+        "categories[].unread",
+        "unread"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/notifications/unread-count",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/notifications/useNotificationFeed.ts:101",
+      "requiredResponseFields": [
+        "unread"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/push-tokens",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/hooks/usePushNotifications.ts:83",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "platform",
+        "token"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/me/push-tokens/{token}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/hooks/usePushNotifications.ts:73",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/recents",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/hooks/useRecentsSync.ts:49",
+      "requiredResponseFields": [
+        "searches"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/me/recents",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/hooks/useRecentsSync.ts:55",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "searches",
+        "viewed"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/settings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useUserSettings.ts:23",
+      "requiredResponseFields": [
+        "active_collection_id",
+        "currency",
+        "email_announcements_enabled",
+        "push_notifications_enabled"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/me/settings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/auth/useUserSettings.ts:33",
+      "requiredResponseFields": [
+        "active_collection_id",
+        "currency",
+        "email_announcements_enabled",
+        "push_notifications_enabled"
+      ],
+      "requestFields": [
+        "active_collection_id",
+        "currency",
+        "email_announcements_enabled",
+        "push_notifications_enabled"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/providers/status",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/ops/useProvidersStatus.ts:16",
+      "requiredResponseFields": [
+        "providers[].configured",
+        "providers[].id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/carousels",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCarousels.ts:21",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "game (query: pokemon|magic|yugioh — hook disabled for 'all')"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/carousels/rail",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useRailCardsPaged.ts:36",
+      "requiredResponseFields": [
+        "cards",
+        "cards[].id",
+        "cards[].name",
+        "total"
+      ],
+      "requestFields": [
+        "game (query: tcg key or 'all', 'all' only valid for the trending rail)",
+        "id (query, required — the rail/shelf id)",
+        "page (query, 1-based)",
+        "page_size (query, default 24)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/carousels/resolved",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useResolvedCarousels.ts:22",
+      "requiredResponseFields": [
+        "rails[].cards",
+        "rails[].cards[].id",
+        "rails[].cards[].name",
+        "rails[].id",
+        "rails[].title"
+      ],
+      "requestFields": [
+        "game (query: pokemon|magic|yugioh — the hook is disabled for 'all')"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/places/search",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:152",
+      "requiredResponseFields": [
+        "places",
+        "places[].label"
+      ],
+      "requestFields": [
+        "q (query, required; client gates on length >= 2 to match the server's floor)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/search",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useCardSearchPaged.ts:38",
+      "requiredResponseFields": [
+        "results[].id",
+        "results[].name",
+        "results[].tcg",
+        "total"
+      ],
+      "requestFields": [
+        "page (query, 1-based, from infinite-query pageParam)",
+        "page_size (query, default 24)",
+        "q (query)",
+        "sort (query, always sent as 'best')",
+        "tcg (query: pokemon|magic|yugioh|all)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/sparklines",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/usePublicSparklines.ts:37",
+      "requiredResponseFields": [
+        "sparklines[].card_id",
+        "sparklines[].points"
+      ],
+      "requestFields": [
+        "ids (query, REQUIRED — comma-separated catalog card ids, deduped and sorted)",
+        "ids (query, required — comma-separated, sorted+deduped catalog/composite upstream ids like 'pokemontcg:base1-4')"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/stores/nearby",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:37",
+      "requiredResponseFields": [
+        "stores",
+        "stores[].category",
+        "stores[].id",
+        "stores[].is_saved",
+        "stores[].lat",
+        "stores[].lng",
+        "stores[].name",
+        "stores[].review_count"
+      ],
+      "requestFields": [
+        "lat (query, required — client rounds to 2dp so GPS jitter reuses one cache row)",
+        "lng (query, required, rounded to 2dp)",
+        "radius_km (query, defaults to 25 client-side)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/stores/saved",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:133",
+      "requiredResponseFields": [
+        "stores",
+        "stores[].category",
+        "stores[].id",
+        "stores[].is_saved",
+        "stores[].lat",
+        "stores[].lng",
+        "stores[].name"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/stores/{store_id}",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:55",
+      "requiredResponseFields": [
+        "reviews",
+        "reviews[].id",
+        "reviews[].is_mine",
+        "reviews[].rating",
+        "store",
+        "store.category",
+        "store.id",
+        "store.is_saved",
+        "store.lat",
+        "store.lng",
+        "store.name",
+        "store.review_count"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/public/stores/{store_id}/review",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:84",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/public/stores/{store_id}/review",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:70",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "body (JSON, nullable)",
+        "rating (JSON, required)"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/public/stores/{store_id}/save",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:100",
+      "requiredResponseFields": [
+        "is_saved",
+        "store_id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/public/stores/{store_id}/save",
+      "callSite": "src/application/queries/stores/useNearbyStores.ts:100",
+      "requiredResponseFields": [
+        "is_saved",
+        "store_id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/reports/useReports.ts:30",
+      "requiredResponseFields": [
+        "[].collection_name",
+        "[].error_message",
+        "[].file_size_bytes",
+        "[].generated_at",
+        "[].id",
+        "[].period",
+        "[].period_start",
+        "[].status",
+        "[].title"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/reports",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/reports/useReports.ts:55",
+      "requiredResponseFields": [
+        "id",
+        "status"
+      ],
+      "requestFields": [
+        "collection_id (body, optional — omit for whole-vault)",
+        "month (body, required when period===\"monthly\")",
+        "period (body)",
+        "year (body)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/upcoming",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/reports/useReports.ts:46",
+      "requiredResponseFields": [
+        "[].closes_at",
+        "[].label",
+        "[].period"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/{report_id}",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/{report_id}/download",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/reports/useReports.ts:74",
+      "requiredResponseFields": [
+        "download_url"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/{report_id}/file",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/presentation/features/reports/useReportActions.ts:40",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/scanners",
+      "callSite": "src/application/queries/scans/useScanners.ts:11",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/scanners",
+      "callSite": "src/infrastructure/repositories/forensicRepository.ts:127",
+      "requiredResponseFields": [
+        "device_id",
+        "transport"
+      ],
+      "requestFields": [
+        "device_id (JSON, required)",
+        "firmware_version (JSON, nullable)",
+        "name (JSON, nullable)",
+        "transport (JSON: \"ble\" | \"wifi\", defaults to \"ble\")"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/scanners/status",
+      "callSite": "src/infrastructure/repositories/forensicRepository.ts:109",
+      "requiredResponseFields": [
+        "device_id",
+        "transport"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/scanners/{scanner_id}",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/scanners/{scanner_id}",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/scanners/{scanner_id}",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/scanners/{scanner_id}/heartbeat",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/scans",
+      "callSite": "src/application/queries/scans/useMyScans.ts:11",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/scans",
+      "callSite": "src/infrastructure/repositories/scanRepository.ts:34",
+      "requiredResponseFields": [
+        "job",
+        "job.created_at",
+        "job.id",
+        "job.status",
+        "uploads",
+        "uploads[].angle",
+        "uploads[].upload_url"
+      ],
+      "requestFields": [
+        "angles (JSON array, subset of [\"front\",\"back\",\"top\",\"bottom\"] in that order, clamped to 4)",
+        "scanner_id (JSON, nullable)",
+        "source (JSON: \"phone\" | \"scanner\")"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/scans/{job_id}",
+      "callSite": "src/infrastructure/repositories/scanRepository.ts:100",
+      "requiredResponseFields": [
+        "created_at",
+        "id",
+        "status"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/scans/{job_id}/complete",
+      "callSite": "src/infrastructure/repositories/scanRepository.ts:92",
+      "requiredResponseFields": [
+        "created_at",
+        "id",
+        "status"
+      ],
+      "requestFields": [
+        "uploaded_angles (JSON array of angle strings)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed-holdings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useSealed.ts:83",
+      "requiredResponseFields": [
+        "[].estimated_value_usd",
+        "[].id",
+        "[].opened_at",
+        "[].product_image_url",
+        "[].product_name",
+        "[].product_type",
+        "[].purchase_price_usd",
+        "[].quantity"
+      ],
+      "requestFields": [
+        "include_opened (query, boolean)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sealed-holdings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useSealed.ts:94",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "estimated_value_usd",
+        "notes",
+        "product_id",
+        "purchase_date (YYYY-MM-DD)",
+        "purchase_price_usd (decimal string, e.g. \"49.99\")",
+        "quantity"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/sealed-holdings/{holding_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useSealed.ts:126",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/sealed-holdings/{holding_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useSealed.ts:112",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "estimated_value_usd",
+        "notes",
+        "opened_at (setting it marks the box 'ripped')",
+        "purchase_date",
+        "purchase_price_usd",
+        "quantity"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed/search",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useSealed.ts:38",
+      "requiredResponseFields": [
+        "[].id",
+        "[].image_url",
+        "[].msrp_usd",
+        "[].name",
+        "[].product_type",
+        "[].set_name",
+        "[].tcg"
+      ],
+      "requestFields": [
+        "limit (query, always 50)",
+        "product_type (query, optional)",
+        "q (query, omitted when empty)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed/{product_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useSealed.ts:58",
+      "requiredResponseFields": [
+        "id",
+        "image_url",
+        "msrp_usd",
+        "name",
+        "product_type",
+        "set_name"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed/{product_id}/market",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useSealed.ts:72",
+      "requiredResponseFields": [
+        "high",
+        "low",
+        "market",
+        "mid",
+        "points[].price",
+        "points[].ts"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sets",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useSets.ts:33",
+      "requiredResponseFields": [
+        "results[].id"
+      ],
+      "requestFields": [
+        "limit (query, 12 from the live call site)",
+        "sort (query: 'newest')",
+        "tcg (query: tcg key or 'all')"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sets/progress",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useSetProgress.ts:19",
+      "requiredResponseFields": [
+        "[].estimatedValueUsd",
+        "[].missingTop",
+        "[].owned",
+        "[].percent",
+        "[].setId",
+        "[].setName",
+        "[].tcg",
+        "[].total"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sets/{set_id}/checklist",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/catalog/useSetChecklist.ts:22",
+      "requiredResponseFields": [
+        "cards",
+        "cards[].id",
+        "cards[].imageUrl",
+        "cards[].name",
+        "cards[].number",
+        "cards[].owned",
+        "owned",
+        "setName",
+        "total"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/cards/{card_ref}/owners",
+      "callSite": "src/application/queries/social/useSocial.ts:391",
+      "requiredResponseFields": [
+        "[].avatar_url",
+        "[].copies",
+        "[].display_name",
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/comments/{comment_id}",
+      "callSite": "src/application/queries/social/useFeed.ts:398",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/comments/{comment_id}/like",
+      "callSite": "src/application/queries/social/useFeed.ts:418",
+      "requiredResponseFields": [
+        "like_count",
+        "liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/comments/{comment_id}/like",
+      "callSite": "src/application/queries/social/useFeed.ts:418",
+      "requiredResponseFields": [
+        "like_count",
+        "liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/comments/{comment_id}/replies",
+      "callSite": "src/application/queries/social/useFeed.ts:216",
+      "requiredResponseFields": [
+        "items",
+        "items[].author",
+        "items[].author.username",
+        "items[].body",
+        "items[].can_delete",
+        "items[].created_at",
+        "items[].id",
+        "items[].like_count",
+        "items[].viewer_has_liked"
+      ],
+      "requestFields": [
+        "limit (query, app sends 50)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/discover",
+      "callSite": "src/application/queries/social/useSocial.ts:60",
+      "requiredResponseFields": [
+        "featured",
+        "featured[].avatar_url",
+        "featured[].card_count",
+        "featured[].display_name",
+        "featured[].is_pro",
+        "featured[].preview_image_urls",
+        "featured[].relationship",
+        "featured[].user_id",
+        "featured[].username",
+        "followed_by_friends",
+        "followed_by_friends[].avatar_url",
+        "followed_by_friends[].card_count",
+        "followed_by_friends[].display_name",
+        "followed_by_friends[].is_admin",
+        "followed_by_friends[].is_private",
+        "followed_by_friends[].is_pro",
+        "followed_by_friends[].relationship",
+        "followed_by_friends[].user_id",
+        "followed_by_friends[].username",
+        "more",
+        "more[].avatar_url",
+        "more[].card_count",
+        "more[].display_name",
+        "more[].is_admin",
+        "more[].is_private",
+        "more[].is_pro",
+        "more[].relationship",
+        "more[].user_id",
+        "more[].username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/feed",
+      "callSite": "src/application/queries/social/useFeed.ts:72 (via ENDPOINTS.social.feed, useFeed.ts:104)",
+      "requiredResponseFields": [
+        "items",
+        "items[].author",
+        "items[].author.avatar_url",
+        "items[].author.display_name",
+        "items[].author.is_admin",
+        "items[].author.is_pro",
+        "items[].author.user_id",
+        "items[].author.username",
+        "items[].body",
+        "items[].can_delete",
+        "items[].can_edit",
+        "items[].comment_count",
+        "items[].created_at",
+        "items[].hashtags",
+        "items[].id",
+        "items[].like_count",
+        "items[].media",
+        "items[].media[].kind",
+        "items[].media[].url",
+        "items[].mentions",
+        "items[].viewer_has_liked",
+        "next_cursor"
+      ],
+      "requestFields": [
+        "cursor (query, opaque, echoed back verbatim)",
+        "limit (query, app sends 12)",
+        "tab (query: \"following\" | \"foryou\" | \"mine\")"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/hashtags/recent",
+      "callSite": "src/application/queries/social/useFeed.ts:480",
+      "requiredResponseFields": [
+        "[].post_count",
+        "[].tag"
+      ],
+      "requestFields": [
+        "limit (query, app sends 12)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/hashtags/suggest",
+      "callSite": "src/application/queries/social/useFeed.ts:460",
+      "requiredResponseFields": [
+        "[].post_count",
+        "[].tag"
+      ],
+      "requestFields": [
+        "limit (query, app sends 8)",
+        "q (query, optional — EMPTY q must return trending, not an empty list)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/hashtags/trending",
+      "callSite": "src/application/queries/social/useFeed.ts:150",
+      "requiredResponseFields": [
+        "[].post_count",
+        "[].tag"
+      ],
+      "requestFields": [
+        "limit (query, app sends 12)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/hashtags/{tag}/posts",
+      "callSite": "src/application/queries/social/useFeed.ts:72 (via ENDPOINTS.social.hashtagPosts, useFeed.ts:134)",
+      "requiredResponseFields": [
+        "items",
+        "items[].author",
+        "items[].author.username",
+        "items[].body",
+        "items[].comment_count",
+        "items[].id",
+        "items[].like_count",
+        "next_cursor"
+      ],
+      "requestFields": [
+        "cursor (query, opaque)",
+        "limit (query, app sends 12)",
+        "sort (query: \"top\" | \"recent\")"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/me",
+      "callSite": "src/application/queries/social/useSocial.ts:316",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/me",
+      "callSite": "src/application/queries/social/useSocial.ts:43",
+      "requiredResponseFields": [
+        "profile",
+        "profile.username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/social/me",
+      "callSite": "src/application/queries/social/useSocial.ts:177",
+      "requiredResponseFields": [
+        "is_private",
+        "username"
+      ],
+      "requestFields": [
+        "bio",
+        "is_private",
+        "links",
+        "location",
+        "username"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/me/avatar",
+      "callSite": "src/application/queries/social/useSocial.ts:295",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "image (multipart file part, required)"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/me/followers/{username}",
+      "callSite": "src/application/queries/social/useSocial.ts:361",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/posts",
+      "callSite": "src/application/queries/social/useFeed.ts:267",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "body (multipart text part, optional)",
+        "card_id (multipart text part, optional)",
+        "images (multipart file parts, repeated — name is plural even for one file)"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/posts/{post_id}",
+      "callSite": "src/application/queries/social/useFeed.ts:286",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/posts/{post_id}",
+      "callSite": "src/application/queries/social/useFeed.ts:180",
+      "requiredResponseFields": [
+        "author",
+        "author.avatar_url",
+        "author.display_name",
+        "author.is_admin",
+        "author.is_pro",
+        "author.username",
+        "body",
+        "can_delete",
+        "can_edit",
+        "comment_count",
+        "created_at",
+        "hashtags",
+        "id",
+        "like_count",
+        "media",
+        "mentions",
+        "viewer_has_liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/social/posts/{post_id}",
+      "callSite": "src/application/queries/social/useFeed.ts:309",
+      "requiredResponseFields": [
+        "id"
+      ],
+      "requestFields": [
+        "body (JSON)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/posts/{post_id}/comments",
+      "callSite": "src/application/queries/social/useFeed.ts:196",
+      "requiredResponseFields": [
+        "items",
+        "items[].author",
+        "items[].author.avatar_url",
+        "items[].author.display_name",
+        "items[].author.is_admin",
+        "items[].author.is_pro",
+        "items[].author.username",
+        "items[].body",
+        "items[].can_delete",
+        "items[].created_at",
+        "items[].id",
+        "items[].like_count",
+        "items[].reply_count",
+        "items[].viewer_has_liked",
+        "next_cursor"
+      ],
+      "requestFields": [
+        "limit (query, app sends 20)",
+        "offset (query, numeric — this thread pages by OFFSET, not opaque cursor)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/posts/{post_id}/comments",
+      "callSite": "src/application/queries/social/useFeed.ts:376",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "body (JSON)",
+        "parent_id (JSON, null for a top-level comment)"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/posts/{post_id}/like",
+      "callSite": "src/application/queries/social/useFeed.ts:337",
+      "requiredResponseFields": [
+        "like_count",
+        "liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/posts/{post_id}/like",
+      "callSite": "src/application/queries/social/useFeed.ts:337",
+      "requiredResponseFields": [
+        "like_count",
+        "liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/report-reasons",
+      "callSite": "src/application/queries/social/useFeed.ts:496",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/reports",
+      "callSite": "src/application/queries/social/useFeed.ts:516",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "note (JSON, nullable)",
+        "reason (JSON — must be one of the keys from /v1/social/report-reasons)",
+        "target_id (JSON)",
+        "target_type (JSON: \"post\" | \"comment\" | \"profile\")"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/requests",
+      "callSite": "src/application/queries/social/useSocial.ts:111",
+      "requiredResponseFields": [
+        "[].id",
+        "[].requester",
+        "[].requester.avatar_url",
+        "[].requester.display_name",
+        "[].requester.relationship",
+        "[].requester.user_id",
+        "[].requester.username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/requests/{request_id}/accept",
+      "callSite": "src/application/queries/social/useSocial.ts:269",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/requests/{request_id}/decline",
+      "callSite": "src/application/queries/social/useSocial.ts:270",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/search",
+      "callSite": "src/application/queries/social/useSocial.ts:97",
+      "requiredResponseFields": [
+        "[].avatar_url",
+        "[].card_count",
+        "[].display_name",
+        "[].is_admin",
+        "[].is_private",
+        "[].is_pro",
+        "[].relationship",
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": [
+        "limit (query, app sends 25)",
+        "q (query, required, client enforces length >= 2)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/search/all",
+      "callSite": "src/application/queries/social/useFeed.ts:165",
+      "requiredResponseFields": [
+        "hashtags",
+        "hashtags[].tag",
+        "users",
+        "users[].avatar_url",
+        "users[].display_name",
+        "users[].relationship",
+        "users[].user_id",
+        "users[].username"
+      ],
+      "requestFields": [
+        "limit (query, app sends 15)",
+        "q (query, required, client enforces length >= 2)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/stories",
+      "callSite": "src/application/queries/social/useStories.ts:126",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "caption (multipart text part, optional)",
+        "duration_ms (multipart text part, video only)",
+        "media (multipart file part, required)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/stories/archive",
+      "callSite": "src/application/queries/social/useStories.ts:66",
+      "requiredResponseFields": [
+        "[].created_at",
+        "[].expires_at",
+        "[].id",
+        "[].kind",
+        "[].url",
+        "[].view_count"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/stories/comments/{comment_id}",
+      "callSite": "src/application/queries/social/useStories.ts:215",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/stories/tray",
+      "callSite": "src/application/queries/social/useStories.ts:38",
+      "requiredResponseFields": [
+        "entries",
+        "entries[].author",
+        "entries[].author.avatar_url",
+        "entries[].author.user_id",
+        "entries[].author.username",
+        "entries[].has_unseen",
+        "entries[].latest_at",
+        "entries[].preview_url",
+        "entries[].story_count",
+        "mine"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/stories/{handle}",
+      "callSite": "src/application/queries/social/useStories.ts:52",
+      "requiredResponseFields": [
+        "[].author",
+        "[].author.avatar_url",
+        "[].author.display_name",
+        "[].author.is_pro",
+        "[].author.relationship",
+        "[].author.username",
+        "[].can_delete",
+        "[].comment_count",
+        "[].created_at",
+        "[].id",
+        "[].kind",
+        "[].seen",
+        "[].url",
+        "[].view_count"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/stories/{story_id}",
+      "callSite": "src/application/queries/social/useStories.ts:143",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/stories/{story_id}/comments",
+      "callSite": "src/application/queries/social/useStories.ts:79",
+      "requiredResponseFields": [
+        "[].author",
+        "[].author.avatar_url",
+        "[].author.display_name",
+        "[].author.username",
+        "[].body",
+        "[].can_delete",
+        "[].created_at",
+        "[].id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/stories/{story_id}/comments",
+      "callSite": "src/application/queries/social/useStories.ts:197",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "body (JSON)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/stories/{story_id}/view",
+      "callSite": "src/application/queries/social/useStories.ts:165",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/stories/{story_id}/viewers",
+      "callSite": "src/application/queries/social/useStories.ts:94",
+      "requiredResponseFields": [
+        "[].viewed_at",
+        "[].viewer",
+        "[].viewer.avatar_url",
+        "[].viewer.display_name",
+        "[].viewer.user_id",
+        "[].viewer.username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/suggested",
+      "callSite": "src/application/queries/social/useSocial.ts:77",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "limit (query, app sends 30)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}",
+      "callSite": "src/application/queries/social/useSocial.ts:124",
+      "requiredResponseFields": [
+        "avatar_url",
+        "can_view_collection",
+        "card_count",
+        "display_name",
+        "follower_count",
+        "following_count",
+        "is_private",
+        "is_pro",
+        "like_count",
+        "relationship",
+        "username",
+        "view_count",
+        "viewer_has_liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/collection",
+      "callSite": "src/application/queries/social/useSocial.ts:145",
+      "requiredResponseFields": [
+        "estimated_value_usd",
+        "items",
+        "items[].card_id",
+        "items[].card_image_url",
+        "items[].card_name",
+        "items[].card_set_name",
+        "items[].estimated_value_usd",
+        "items[].grade",
+        "items[].graded_at",
+        "items[].house",
+        "items[].id",
+        "total_cards"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/collections/{collection_id}",
+      "callSite": "src/application/queries/social/useSocial.ts:162",
+      "requiredResponseFields": [
+        "count",
+        "estimated_value_usd",
+        "items",
+        "items[].card_id",
+        "items[].card_image_url",
+        "items[].card_name",
+        "items[].card_set_name",
+        "items[].estimated_value_usd",
+        "items[].grade",
+        "items[].id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/users/{username}/follow",
+      "callSite": "src/application/queries/social/useSocial.ts:194",
+      "requiredResponseFields": [
+        "relationship"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/users/{username}/follow",
+      "callSite": "src/application/queries/social/useSocial.ts:194",
+      "requiredResponseFields": [
+        "relationship"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/followers",
+      "callSite": "src/application/queries/social/useSocial.ts:332",
+      "requiredResponseFields": [
+        "[].avatar_url",
+        "[].card_count",
+        "[].display_name",
+        "[].is_admin",
+        "[].is_private",
+        "[].is_pro",
+        "[].relationship",
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/following",
+      "callSite": "src/application/queries/social/useSocial.ts:347",
+      "requiredResponseFields": [
+        "[].avatar_url",
+        "[].card_count",
+        "[].display_name",
+        "[].is_admin",
+        "[].is_private",
+        "[].is_pro",
+        "[].relationship",
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/users/{username}/like",
+      "callSite": "src/application/queries/social/useSocial.ts:246",
+      "requiredResponseFields": [
+        "like_count",
+        "liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/users/{username}/like",
+      "callSite": "src/application/queries/social/useSocial.ts:246",
+      "requiredResponseFields": [
+        "like_count",
+        "liked"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/posts",
+      "callSite": "src/application/queries/social/useFeed.ts:72 (via ENDPOINTS.social.userPosts, useFeed.ts:118)",
+      "requiredResponseFields": [
+        "items",
+        "items[].author",
+        "items[].author.username",
+        "items[].body",
+        "items[].comment_count",
+        "items[].id",
+        "items[].like_count",
+        "items[].media",
+        "next_cursor"
+      ],
+      "requestFields": [
+        "cursor (query, opaque)",
+        "limit (query, app sends 12)"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/watchlist",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useWatchlist.ts:29",
+      "requiredResponseFields": [
+        "[].card_id",
+        "[].card_image_url",
+        "[].card_name",
+        "[].id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/watchlist",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useWatchlist.ts:53",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "card_id"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/watchlist/{card_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-frontend/src/application/queries/collection/useWatchlist.ts:94",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/version",
+      "callSite": "src/infrastructure/http/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    }
+  ],
+  "publishedFrom": {
+    "consumer": "loupe-frontend",
+    "commit": "fb6b12f"
+  }
+}

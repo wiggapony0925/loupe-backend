@@ -77,6 +77,23 @@ jobs:
       - name: Mypy
         run: mypy app
 
+      # can-i-deploy — the consumer-driven contract gate.
+      #
+      # Deliberately BEFORE the test suites: it is the cheapest check that can
+      # fail (it builds the schema in memory and reads a JSON file, no database,
+      # no network) and it is the one whose failure means a SHIPPED CLIENT
+      # breaks, not just that a test is unhappy. Finding that out in six seconds
+      # instead of after ten minutes of pytest is the whole reason it sits here.
+      #
+      # The deploy workflow runs only after CI passes, so a red gate here is
+      # what stops the release. See contracts/README.md for what to do about a
+      # breach — the answer is never "delete the contract entry".
+      - name: can-i-deploy (consumer contracts)
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./test.db
+          REDIS_URL: redis://localhost:6379/0
+        run: python scripts/verify_consumer_contracts.py --list-unverifiable
+
       # The main suite stays on SQLite: it is fast and hermetic and that is
       # deliberate. tests/database is excluded here only because it gets its
       # own step below against the real thing — pytest.ini's testpaths would

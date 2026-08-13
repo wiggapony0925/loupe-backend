@@ -1,0 +1,3287 @@
+{
+  "consumer": "loupe-web",
+  "version": "1.0.0",
+  "description": "What loupe-web needs from loupe-backend. Generated from real call sites and validated against the live OpenAPI schema. Verified by the provider in CI — see loupe-backend/contracts/README.md.",
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-web/src/features/site/Status/Status.tsx:19",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/ai/search/logs",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1602",
+      "requiredResponseFields": [
+        "items",
+        "page",
+        "pageSize",
+        "total"
+      ],
+      "requestFields": [
+        "feedback",
+        "game",
+        "page",
+        "pageSize",
+        "q",
+        "source",
+        "userId"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/ai/search/logs/{log_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1615",
+      "requiredResponseFields": [
+        "conversation",
+        "id",
+        "query",
+        "source"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/ai/search/overview",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1599",
+      "requiredResponseFields": [
+        "aiRate24h",
+        "asks24h",
+        "cacheHitRate24h",
+        "feedback7d",
+        "feedback7d.down",
+        "feedback7d.up",
+        "openConversations",
+        "users24h"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/applications",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2009",
+      "requiredResponseFields": [
+        "[].applicant_email",
+        "[].applicant_name",
+        "[].created_at",
+        "[].id",
+        "[].job_id",
+        "[].status",
+        "[].updated_at"
+      ],
+      "requestFields": [
+        "job_id",
+        "status"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/applications/{application_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2017",
+      "requiredResponseFields": [
+        "applicant_email",
+        "applicant_name",
+        "created_at",
+        "id",
+        "job_id",
+        "status",
+        "updated_at"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/applications/{application_id}/status",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2023",
+      "requiredResponseFields": [
+        "applicant_email",
+        "applicant_name",
+        "created_at",
+        "id",
+        "job_id",
+        "status",
+        "updated_at"
+      ],
+      "requestFields": [
+        "message",
+        "notify",
+        "status"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/audit",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1803",
+      "requiredResponseFields": [
+        "page",
+        "page_size",
+        "results",
+        "results[].action",
+        "results[].actor_email",
+        "results[].created_at",
+        "results[].id",
+        "results[].ip_address",
+        "results[].payload",
+        "results[].target_id",
+        "results[].target_table",
+        "results[].user_id",
+        "total"
+      ],
+      "requestFields": [
+        "action",
+        "actor",
+        "page",
+        "page_size",
+        "target_table"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/audit/facets",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1814",
+      "requiredResponseFields": [
+        "actions",
+        "tables"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/blog",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2032",
+      "requiredResponseFields": [
+        "[].author",
+        "[].body",
+        "[].created_at",
+        "[].excerpt",
+        "[].id",
+        "[].read_minutes",
+        "[].slug",
+        "[].status",
+        "[].tag",
+        "[].title",
+        "[].updated_at"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/blog",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2038",
+      "requiredResponseFields": [
+        "author",
+        "body",
+        "created_at",
+        "excerpt",
+        "id",
+        "read_minutes",
+        "slug",
+        "status",
+        "tag",
+        "title",
+        "updated_at"
+      ],
+      "requestFields": [
+        "author",
+        "body",
+        "cover_image_url",
+        "excerpt",
+        "read_minutes",
+        "slug",
+        "status",
+        "tag",
+        "title"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/blog/{post_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2051",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/blog/{post_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2045",
+      "requiredResponseFields": [
+        "author",
+        "body",
+        "created_at",
+        "excerpt",
+        "id",
+        "read_minutes",
+        "slug",
+        "status",
+        "tag",
+        "title",
+        "updated_at"
+      ],
+      "requestFields": [
+        "author",
+        "body",
+        "cover_image_url",
+        "excerpt",
+        "read_minutes",
+        "slug",
+        "status",
+        "tag",
+        "title"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/card-tree",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1582",
+      "requiredResponseFields": [
+        "card_model",
+        "card_model.fields",
+        "card_model.name",
+        "catalog_sources",
+        "games",
+        "price_chain",
+        "set_model",
+        "set_model.fields",
+        "set_model.name"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/cards",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1684",
+      "requiredResponseFields": [
+        "page",
+        "page_size",
+        "results[].id",
+        "results[].image_url",
+        "results[].name",
+        "results[].number",
+        "results[].rarity",
+        "results[].set_name",
+        "results[].tcg",
+        "results[].year",
+        "total"
+      ],
+      "requestFields": [
+        "page",
+        "page_size",
+        "q"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/cards/{card_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1693",
+      "requiredResponseFields": [
+        "card_metadata",
+        "id",
+        "image_phash",
+        "image_url",
+        "name",
+        "number",
+        "rarity",
+        "set_id",
+        "set_name",
+        "tcg",
+        "year"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/cards/{card_id}/price",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1700",
+      "requiredResponseFields": [
+        "created_at",
+        "grade",
+        "house",
+        "id",
+        "price_usd",
+        "sale_date",
+        "source"
+      ],
+      "requestFields": [
+        "grade",
+        "house",
+        "price_usd",
+        "sale_date"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/carousels",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1526",
+      "requiredResponseFields": [
+        "ai",
+        "aiConfigured",
+        "aiEnabled",
+        "games",
+        "recipes"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/carousels",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1538",
+      "requiredResponseFields": [
+        "enabled",
+        "id",
+        "origin",
+        "subtitle",
+        "title"
+      ],
+      "requestFields": [
+        "enabled",
+        "games",
+        "id",
+        "limit",
+        "minItems",
+        "priceMax",
+        "priceMin",
+        "rarityPattern",
+        "sort",
+        "source",
+        "subtitle",
+        "title"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/admin/carousels/ai",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1552",
+      "requiredResponseFields": [
+        "ai",
+        "aiConfigured",
+        "aiEnabled",
+        "games",
+        "recipes"
+      ],
+      "requestFields": [
+        "enabled"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/carousels/regenerate",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1558",
+      "requiredResponseFields": [
+        "carousels",
+        "game",
+        "source"
+      ],
+      "requestFields": [
+        "game"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/carousels/{recipe_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1544",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/admin/carousels/{recipe_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1532",
+      "requiredResponseFields": [
+        "enabled",
+        "id",
+        "origin",
+        "subtitle",
+        "title"
+      ],
+      "requestFields": [
+        "enabled",
+        "games",
+        "id",
+        "limit",
+        "minItems",
+        "priceMax",
+        "priceMin",
+        "rarityPattern",
+        "sort",
+        "source",
+        "subtitle",
+        "title"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/carousels/{recipe_id}/reset",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1547",
+      "requiredResponseFields": [
+        "enabled",
+        "id",
+        "origin",
+        "subtitle",
+        "title"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/catalog",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1448",
+      "requiredResponseFields": [
+        "phash_coverage_pct",
+        "price_snapshots",
+        "total_cards",
+        "total_sets"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/cloud",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1791",
+      "requiredResponseFields": [
+        "configured",
+        "detail",
+        "project_id",
+        "region",
+        "services",
+        "services[].commit_sha",
+        "services[].image",
+        "services[].name",
+        "services[].region",
+        "services[].revision",
+        "services[].status",
+        "services[].updated_at",
+        "services[].url",
+        "sql_instances",
+        "sql_instances[].name",
+        "sql_instances[].region",
+        "sql_instances[].state"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/cloud/logs",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1794",
+      "requiredResponseFields": [
+        "[].message",
+        "[].service",
+        "[].severity",
+        "[].timestamp"
+      ],
+      "requestFields": [
+        "limit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/config",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1840",
+      "requiredResponseFields": [
+        "announcement",
+        "announcement.enabled",
+        "announcement.message",
+        "announcement.tone",
+        "plan",
+        "plan.free_card_limit",
+        "plan.free_statement_limit",
+        "plan.gate_full_history",
+        "plan.gate_scanner_import",
+        "plan.gate_statements",
+        "plan.gate_unlimited_alerts",
+        "plan.gate_unlimited_cards"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/config/announcement",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1847",
+      "requiredResponseFields": [
+        "announcement",
+        "plan"
+      ],
+      "requestFields": [
+        "cta_href",
+        "cta_label",
+        "enabled",
+        "message",
+        "tone"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/config/plan",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1842",
+      "requiredResponseFields": [
+        "announcement",
+        "plan"
+      ],
+      "requestFields": [
+        "clear_card_limit",
+        "clear_statement_limit",
+        "free_card_limit",
+        "free_statement_limit",
+        "gate_full_history",
+        "gate_scanner_import",
+        "gate_statements",
+        "gate_unlimited_alerts",
+        "gate_unlimited_cards"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/database/graph",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1721",
+      "requiredResponseFields": [
+        "edges",
+        "edges[].label",
+        "edges[].source",
+        "edges[].target",
+        "nodes",
+        "nodes[].columns",
+        "nodes[].table"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/database/tables",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1717",
+      "requiredResponseFields": [
+        "dialect",
+        "table_count",
+        "tables",
+        "tables[].columns",
+        "tables[].foreign_keys",
+        "tables[].name",
+        "tables[].row_estimate"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/database/tables/{name}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1719",
+      "requiredResponseFields": [
+        "columns",
+        "columns[].foreign_key",
+        "columns[].name",
+        "columns[].nullable",
+        "columns[].primary_key",
+        "columns[].type",
+        "foreign_keys",
+        "foreign_keys[].columns",
+        "foreign_keys[].references_columns",
+        "foreign_keys[].references_table",
+        "indexes",
+        "indexes[].columns",
+        "indexes[].name",
+        "indexes[].unique",
+        "name",
+        "referenced_by",
+        "row_estimate"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/email/announce",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1753",
+      "requiredResponseFields": [
+        "detail",
+        "mode",
+        "recipients"
+      ],
+      "requestFields": [
+        "body",
+        "cta_label",
+        "cta_url",
+        "heading",
+        "mode",
+        "subject"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/email/announce/preview",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1745",
+      "requiredResponseFields": [
+        "html",
+        "key",
+        "subject",
+        "text"
+      ],
+      "requestFields": [
+        "body",
+        "cta_label",
+        "cta_url",
+        "heading",
+        "kind",
+        "subject"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/email/log",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1774",
+      "requiredResponseFields": [
+        "rows[].attempts",
+        "rows[].category",
+        "rows[].created_at",
+        "rows[].error",
+        "rows[].id",
+        "rows[].provider_id",
+        "rows[].status",
+        "rows[].subject",
+        "rows[].to_email",
+        "rows[].user_id",
+        "stats"
+      ],
+      "requestFields": [
+        "category",
+        "limit",
+        "offset",
+        "q",
+        "status"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/email/log/{log_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1785",
+      "requiredResponseFields": [
+        "attempts",
+        "category",
+        "created_at",
+        "error",
+        "from_email",
+        "html",
+        "id",
+        "provider_id",
+        "status",
+        "subject",
+        "text",
+        "to_email",
+        "user_id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/email/log/{log_id}/retry",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1787",
+      "requiredResponseFields": [
+        "detail",
+        "sent",
+        "to"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/email/support",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1761",
+      "requiredResponseFields": [
+        "detail",
+        "sent",
+        "to"
+      ],
+      "requestFields": [
+        "body",
+        "cta_label",
+        "cta_url",
+        "email",
+        "mode",
+        "subject"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/email/templates",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1732",
+      "requiredResponseFields": [
+        "status",
+        "status.enabled",
+        "status.from_email",
+        "status.provider",
+        "status.reply_to"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/email/templates/{key}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1735",
+      "requiredResponseFields": [
+        "html",
+        "key",
+        "subject",
+        "text"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/email/test",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1737",
+      "requiredResponseFields": [
+        "detail",
+        "sent",
+        "to"
+      ],
+      "requestFields": [
+        "template"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/engagement",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1618",
+      "requiredResponseFields": [
+        "activated_users",
+        "activation_rate",
+        "active_30d",
+        "active_7d",
+        "active_90d",
+        "pro_rate",
+        "pro_users",
+        "total_users"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/env",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1724",
+      "requiredResponseFields": [
+        "app_env",
+        "generated_at",
+        "variables",
+        "variables[].description",
+        "variables[].docs_url",
+        "variables[].group",
+        "variables[].is_set",
+        "variables[].key",
+        "variables[].label",
+        "variables[].length",
+        "variables[].secret",
+        "variables[].value"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/flags",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1944",
+      "requiredResponseFields": [
+        "[].enabled",
+        "[].id",
+        "[].key",
+        "[].label"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/flags",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1950",
+      "requiredResponseFields": [
+        "enabled",
+        "id",
+        "key",
+        "label"
+      ],
+      "requestFields": [
+        "description",
+        "enabled",
+        "key",
+        "label"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/admin/flags/key/{key}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1971",
+      "requiredResponseFields": [
+        "enabled",
+        "id",
+        "key",
+        "label"
+      ],
+      "requestFields": [
+        "description",
+        "enabled",
+        "label"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/flags/{flag_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1977",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/flags/{flag_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1960",
+      "requiredResponseFields": [
+        "enabled",
+        "id",
+        "key",
+        "label"
+      ],
+      "requestFields": [
+        "description",
+        "enabled",
+        "label"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/grades",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1586",
+      "requiredResponseFields": [
+        "page",
+        "page_size",
+        "results[].grade",
+        "results[].graded_at",
+        "results[].house",
+        "results[].id",
+        "total"
+      ],
+      "requestFields": [
+        "house",
+        "page",
+        "page_size"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/health",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1714",
+      "requiredResponseFields": [
+        "checks",
+        "checks[].category",
+        "checks[].detail",
+        "checks[].key",
+        "checks[].label",
+        "checks[].status",
+        "generated_at",
+        "status"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/insights/ask",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1636",
+      "requiredResponseFields": [
+        "configured",
+        "error",
+        "question",
+        "row_count",
+        "sql",
+        "truncated"
+      ],
+      "requestFields": [
+        "question"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/insights/status",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1625",
+      "requiredResponseFields": [
+        "configured"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/integrations",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1727",
+      "requiredResponseFields": [
+        "generated_at",
+        "integrations",
+        "integrations[].category",
+        "integrations[].configured",
+        "integrations[].detail",
+        "integrations[].docs_url",
+        "integrations[].http_status",
+        "integrations[].id",
+        "integrations[].latency_ms",
+        "integrations[].name",
+        "integrations[].purpose",
+        "integrations[].status",
+        "probed"
+      ],
+      "requestFields": [
+        "probe"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/jobs",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1982",
+      "requiredResponseFields": [
+        "[].created_at",
+        "[].description",
+        "[].employment_type",
+        "[].id",
+        "[].location",
+        "[].slug",
+        "[].status",
+        "[].summary",
+        "[].team",
+        "[].title",
+        "[].updated_at"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/jobs",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1988",
+      "requiredResponseFields": [
+        "created_at",
+        "description",
+        "employment_type",
+        "id",
+        "location",
+        "slug",
+        "status",
+        "summary",
+        "team",
+        "title",
+        "updated_at"
+      ],
+      "requestFields": [
+        "description",
+        "employment_type",
+        "location",
+        "slug",
+        "status",
+        "summary",
+        "team",
+        "title"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/jobs/{job_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2001",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/jobs/{job_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1995",
+      "requiredResponseFields": [
+        "created_at",
+        "description",
+        "employment_type",
+        "id",
+        "location",
+        "slug",
+        "status",
+        "summary",
+        "team",
+        "title",
+        "updated_at"
+      ],
+      "requestFields": [
+        "description",
+        "employment_type",
+        "location",
+        "slug",
+        "status",
+        "summary",
+        "team",
+        "title"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/legal",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2081",
+      "requiredResponseFields": [
+        "dirty",
+        "documents",
+        "entity",
+        "fileEntity",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/admin/legal/entity",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2090",
+      "requiredResponseFields": [
+        "dirty",
+        "documents",
+        "entity",
+        "fileEntity",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "requestFields": [
+        "entity"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/legal/preview/{slug}",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/legal/reset",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2112",
+      "requiredResponseFields": [
+        "dirty",
+        "documents",
+        "entity",
+        "fileEntity",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/legal/unresolved",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2084",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/legal/{slug}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2107",
+      "requiredResponseFields": [
+        "dirty",
+        "documents",
+        "entity",
+        "fileEntity",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/admin/legal/{slug}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2096",
+      "requiredResponseFields": [
+        "dirty",
+        "documents",
+        "entity",
+        "fileEntity",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "requestFields": [
+        "effective",
+        "lead",
+        "sections",
+        "sections[].body",
+        "sections[].heading",
+        "sections[].id",
+        "slug",
+        "summary",
+        "title",
+        "updated"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/legal/{slug}/reset",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2102",
+      "requiredResponseFields": [
+        "dirty",
+        "documents",
+        "entity",
+        "fileEntity",
+        "updatedAt",
+        "updatedBy"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/metrics",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1442",
+      "requiredResponseFields": [
+        "admins",
+        "applications_new_7d",
+        "applications_total",
+        "banned",
+        "jobs_open",
+        "jobs_total",
+        "posts_published",
+        "posts_total",
+        "users_new_30d",
+        "users_new_7d",
+        "users_total",
+        "waitlist_total",
+        "waitlist_waiting"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/notifications",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1821",
+      "requiredResponseFields": [
+        "audience",
+        "created",
+        "dry_run"
+      ],
+      "requestFields": [
+        "body",
+        "category",
+        "dry_run",
+        "href",
+        "image_url",
+        "push",
+        "title",
+        "user_id"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/notifications/audience",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1832",
+      "requiredResponseFields": [
+        "devices",
+        "push_enabled",
+        "users"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/notifications/log",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1834",
+      "requiredResponseFields": [
+        "items",
+        "page",
+        "page_size",
+        "total",
+        "unread"
+      ],
+      "requestFields": [
+        "page",
+        "page_size"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/notifications/test",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1827",
+      "requiredResponseFields": [
+        "audience",
+        "created",
+        "dry_run"
+      ],
+      "requestFields": [
+        "body",
+        "category",
+        "dry_run",
+        "href",
+        "image_url",
+        "push",
+        "title",
+        "user_id"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/pricecharting",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1566",
+      "requiredResponseFields": [
+        "capabilities",
+        "capabilities.api_ok",
+        "capabilities.configured",
+        "capabilities.csv_ok",
+        "capabilities.graded_fields",
+        "capabilities.note",
+        "capabilities.probed_at",
+        "capabilities.tier",
+        "configured",
+        "fallback_chain",
+        "grade_map",
+        "mirror",
+        "mirror.ready",
+        "mirror.rows",
+        "mirror.synced_at",
+        "strategy",
+        "tier",
+        "tier.key",
+        "tier.label"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/pricecharting/probe",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1570",
+      "requiredResponseFields": [
+        "capabilities",
+        "configured",
+        "fallback_chain",
+        "grade_map",
+        "mirror",
+        "strategy",
+        "tier"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/pricecharting/sync",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1576",
+      "requiredResponseFields": [
+        "ok",
+        "rows"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/pulse",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1596",
+      "requiredResponseFields": [
+        "events[].at",
+        "events[].id",
+        "events[].title",
+        "events[].type"
+      ],
+      "requestFields": [
+        "limit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/retention",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1621",
+      "requiredResponseFields": [
+        "cohorts",
+        "weeks"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/revenue",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1445",
+      "requiredResponseFields": [
+        "billing_configured",
+        "churn_rate_30d",
+        "churned_30d",
+        "comped",
+        "currency",
+        "est_arr_usd",
+        "est_mrr_usd",
+        "free",
+        "new_pro_30d",
+        "paying",
+        "price_monthly_usd",
+        "price_yearly_usd",
+        "total_users",
+        "trialing"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/scanner",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1652",
+      "requiredResponseFields": [
+        "correct_feedback",
+        "fast_path_rate",
+        "latency_p50_ms",
+        "latency_p95_ms",
+        "mean_confidence",
+        "scans_total",
+        "top1_accuracy",
+        "total_cost_usd",
+        "total_feedback",
+        "total_identifications",
+        "window_days"
+      ],
+      "requestFields": [
+        "days"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/scanner/history",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1662",
+      "requiredResponseFields": [
+        "items[].candidate_count",
+        "items[].cost_usd",
+        "items[].created_at",
+        "items[].feedback_correct",
+        "items[].id",
+        "items[].latency_ms",
+        "items[].ocr_provider",
+        "items[].primary_source",
+        "items[].tcg_inferred",
+        "items[].top_confidence",
+        "next_cursor",
+        "total"
+      ],
+      "requestFields": [
+        "limit",
+        "matched",
+        "min_confidence",
+        "offset",
+        "provider",
+        "source",
+        "tcg",
+        "user_id"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/scanner/history/{scan_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1678",
+      "requiredResponseFields": [
+        "candidate_count",
+        "cost_usd",
+        "created_at",
+        "feedback_correct",
+        "id",
+        "image_sha256",
+        "latency_ms",
+        "ocr_confidence",
+        "ocr_full_text",
+        "ocr_provider",
+        "parsed_set_code",
+        "phash",
+        "primary_source",
+        "tcg_inferred",
+        "top_confidence"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/scanner/trend",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1657",
+      "requiredResponseFields": [
+        "window_days"
+      ],
+      "requestFields": [
+        "days"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/social/featured",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1453",
+      "requiredResponseFields": [
+        "collectors",
+        "max_featured",
+        "unresolved",
+        "usernames"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/social/featured",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1461",
+      "requiredResponseFields": [
+        "collectors",
+        "max_featured",
+        "unresolved",
+        "usernames"
+      ],
+      "requestFields": [
+        "username"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/social/featured/{username}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1468",
+      "requiredResponseFields": [
+        "collectors",
+        "max_featured",
+        "unresolved",
+        "usernames"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/social/moderation",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1505",
+      "requiredResponseFields": [
+        "items[].created_at",
+        "items[].id",
+        "items[].source",
+        "items[].status",
+        "items[].target_id",
+        "items[].target_type"
+      ],
+      "requestFields": [
+        "limit",
+        "status"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/social/moderation/{case_id}/resolve",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1519",
+      "requiredResponseFields": [
+        "created_at",
+        "id",
+        "source",
+        "status",
+        "target_id",
+        "target_type"
+      ],
+      "requestFields": [
+        "action"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/social/stories",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1476",
+      "requiredResponseFields": [
+        "[].created_at",
+        "[].expires_at",
+        "[].id",
+        "[].username"
+      ],
+      "requestFields": [
+        "limit"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/social/stories/seed",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1485",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/social/stories/{story_id}/expire",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1494",
+      "requiredResponseFields": [
+        "created_at",
+        "expires_at",
+        "id",
+        "username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/users",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1855",
+      "requiredResponseFields": [
+        "page",
+        "page_size",
+        "results[].banned",
+        "results[].created_at",
+        "results[].deleted",
+        "results[].email",
+        "results[].id",
+        "results[].is_admin",
+        "results[].is_super_admin",
+        "total"
+      ],
+      "requestFields": [
+        "page",
+        "page_size",
+        "q"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/users/test",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1866",
+      "requiredResponseFields": [
+        "email",
+        "id",
+        "password"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/users/{user_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1894",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/users/{user_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1864",
+      "requiredResponseFields": [
+        "banned",
+        "created_at",
+        "deleted",
+        "email",
+        "id",
+        "is_admin",
+        "is_super_admin"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/users/{user_id}/ban",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1884",
+      "requiredResponseFields": [
+        "banned",
+        "created_at",
+        "deleted",
+        "email",
+        "id",
+        "is_admin",
+        "is_super_admin"
+      ],
+      "requestFields": [
+        "reason"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/users/{user_id}/impersonate",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1920",
+      "requiredResponseFields": [
+        "email",
+        "expires_in",
+        "token"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/users/{user_id}/plan",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1877",
+      "requiredResponseFields": [
+        "banned",
+        "created_at",
+        "deleted",
+        "email",
+        "id",
+        "is_admin",
+        "is_super_admin"
+      ],
+      "requestFields": [
+        "plan"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/users/{user_id}/refund",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1931",
+      "requiredResponseFields": [
+        "amount_usd",
+        "charge_id",
+        "currency",
+        "refund_id",
+        "status"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/users/{user_id}/revoke-sessions",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1898",
+      "requiredResponseFields": [
+        "banned",
+        "created_at",
+        "deleted",
+        "email",
+        "id",
+        "is_admin",
+        "is_super_admin"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/users/{user_id}/role",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1869",
+      "requiredResponseFields": [
+        "banned",
+        "created_at",
+        "deleted",
+        "email",
+        "id",
+        "is_admin",
+        "is_super_admin"
+      ],
+      "requestFields": [
+        "is_admin"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/users/{user_id}/subscription/cancel",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1909",
+      "requiredResponseFields": [
+        "banned",
+        "created_at",
+        "deleted",
+        "email",
+        "id",
+        "is_admin",
+        "is_super_admin"
+      ],
+      "requestFields": [
+        "immediately"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/admin/users/{user_id}/unban",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1891",
+      "requiredResponseFields": [
+        "banned",
+        "created_at",
+        "deleted",
+        "email",
+        "id",
+        "is_admin",
+        "is_super_admin"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/admin/waitlist",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2058",
+      "requiredResponseFields": [
+        "[].created_at",
+        "[].email",
+        "[].id",
+        "[].quantity",
+        "[].status",
+        "[].updated_at"
+      ],
+      "requestFields": [
+        "status"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/admin/waitlist/{entry_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2076",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/admin/waitlist/{entry_id}/status",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2070",
+      "requiredResponseFields": [
+        "created_at",
+        "email",
+        "id",
+        "quantity",
+        "status",
+        "updated_at"
+      ],
+      "requestFields": [
+        "status"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/alerts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1329",
+      "requiredResponseFields": [
+        "[].card_id",
+        "[].condition",
+        "[].created_at",
+        "[].id",
+        "[].threshold_usd"
+      ],
+      "requestFields": [
+        "pending"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/alerts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1344",
+      "requiredResponseFields": [
+        "card_id",
+        "condition",
+        "created_at",
+        "id",
+        "threshold_usd"
+      ],
+      "requestFields": [
+        "card_id",
+        "condition",
+        "note",
+        "threshold_usd",
+        "upstream_id"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/alerts/{alert_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1352",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/analytics/overview",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1070",
+      "requiredResponseFields": [
+        "gradeDistribution",
+        "kpis",
+        "movers",
+        "setIndexes",
+        "stats",
+        "yearDistribution"
+      ],
+      "requestFields": [
+        "collection_id"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/announcement",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1437",
+      "requiredResponseFields": [
+        "enabled",
+        "message",
+        "tone"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/app/config",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1431",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/apple",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:970",
+      "requiredResponseFields": [
+        "access_token",
+        "user"
+      ],
+      "requestFields": [
+        "display_name",
+        "identity_token",
+        "nonce"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/change-password",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:985",
+      "requiredResponseFields": [
+        "access_token",
+        "user"
+      ],
+      "requestFields": [
+        "current_password",
+        "new_password"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/dev-login",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/forgot-password",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:992",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "email"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/google",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:963",
+      "requiredResponseFields": [
+        "access_token",
+        "user"
+      ],
+      "requestFields": [
+        "display_name",
+        "id_token"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/login",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:942",
+      "requiredResponseFields": [
+        "mfa_required"
+      ],
+      "requestFields": [
+        "email",
+        "password"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/logout",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:976",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/logout-all",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:981",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/mfa/disable",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1022",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "code"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/mfa/enable",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1016",
+      "requiredResponseFields": [
+        "backup_codes"
+      ],
+      "requestFields": [
+        "code"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/mfa/setup",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1013",
+      "requiredResponseFields": [
+        "otpauth_uri",
+        "qr_svg",
+        "secret"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/auth/mfa/status",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1027",
+      "requiredResponseFields": [
+        "enabled"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/mfa/verify",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1006",
+      "requiredResponseFields": [
+        "access_token",
+        "user"
+      ],
+      "requestFields": [
+        "code",
+        "mfa_token"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/refresh",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/register",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:949",
+      "requiredResponseFields": [
+        "access_token",
+        "user"
+      ],
+      "requestFields": [
+        "display_name",
+        "email",
+        "password"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/auth/reset-password",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:999",
+      "requiredResponseFields": [
+        "access_token",
+        "user"
+      ],
+      "requestFields": [
+        "new_password",
+        "token"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/blog/posts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1393",
+      "requiredResponseFields": [
+        "[].author",
+        "[].body",
+        "[].created_at",
+        "[].excerpt",
+        "[].id",
+        "[].read_minutes",
+        "[].slug",
+        "[].status",
+        "[].tag",
+        "[].title",
+        "[].updated_at"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/blog/posts/{slug}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1399",
+      "requiredResponseFields": [
+        "author",
+        "body",
+        "created_at",
+        "excerpt",
+        "id",
+        "read_minutes",
+        "slug",
+        "status",
+        "tag",
+        "title",
+        "updated_at"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/identify",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:760",
+      "requiredResponseFields": [
+        "candidates[].name"
+      ],
+      "requestFields": [
+        "image (multipart file, sent as scan.jpg)",
+        "tcg (multipart field)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/identify/text",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:769",
+      "requiredResponseFields": [
+        "candidates[].name"
+      ],
+      "requestFields": [
+        "client_provider",
+        "tcg",
+        "text"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/resolve",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:785",
+      "requiredResponseFields": [
+        "card_id"
+      ],
+      "requestFields": [
+        "materialize",
+        "upstream_id"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/search",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/search/ai",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:574",
+      "requiredResponseFields": [
+        "results"
+      ],
+      "requestFields": [
+        "limit",
+        "q",
+        "tcg"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/cards/search/ai/feedback",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:584",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "askId",
+        "verdict"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/trending",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:400",
+      "requiredResponseFields": [
+        "cards[].id",
+        "cards[].name"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:671",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/analytics",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:736",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/canonical",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:701",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/comps",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:645",
+      "requiredResponseFields": [
+        "comps[].price.amount"
+      ],
+      "requestFields": [
+        "days",
+        "grade",
+        "house"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/grade-summary",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/listings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:652",
+      "requiredResponseFields": [
+        "listings[].price.amount",
+        "listings[].url"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/market",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:629",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/marketplace-prices",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:744",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/nearby-listings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:662",
+      "requiredResponseFields": [
+        "listings[].price.amount",
+        "listings[].url"
+      ],
+      "requestFields": [
+        "lat",
+        "lng",
+        "radius_km"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/ownership",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:729",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/prices",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:622",
+      "requiredResponseFields": [
+        "points[].price"
+      ],
+      "requestFields": [
+        "grade",
+        "house",
+        "range"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/cards/{card_id}/valuation",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:751",
+      "requiredResponseFields": [
+        "card_id",
+        "grades[].grade"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/careers/applications/{application_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1383",
+      "requiredResponseFields": [
+        "applicant_name",
+        "created_at",
+        "id",
+        "job_title",
+        "status"
+      ],
+      "requestFields": [
+        "email"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/careers/jobs",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1358",
+      "requiredResponseFields": [
+        "[].created_at",
+        "[].description",
+        "[].employment_type",
+        "[].id",
+        "[].location",
+        "[].slug",
+        "[].status",
+        "[].summary",
+        "[].team",
+        "[].title",
+        "[].updated_at"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/careers/jobs/{job_id}/apply",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1372",
+      "requiredResponseFields": [
+        "created_at",
+        "id",
+        "job_title",
+        "status"
+      ],
+      "requestFields": [
+        "applicant_email",
+        "applicant_name",
+        "cover_letter",
+        "linkedin_url",
+        "resume_url"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/careers/jobs/{slug}",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1100",
+      "requiredResponseFields": [
+        "id"
+      ],
+      "requestFields": [
+        "color",
+        "name"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/collections/overview",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1087",
+      "requiredResponseFields": [
+        "[].card_count",
+        "[].color",
+        "[].deletable",
+        "[].id",
+        "[].is_all",
+        "[].name",
+        "[].total_value_usd"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/collections/{collection_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1115",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/collections/{collection_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1109",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "color",
+        "name"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/collections/{collection_id}/items",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items/bulk",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items/bulk-remove",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/items/transfer",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/collections/{collection_id}/merge",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/flags",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1434",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1234",
+      "requiredResponseFields": [
+        "[].card_id",
+        "[].grade",
+        "[].house",
+        "[].id"
+      ],
+      "requestFields": [
+        "collection_id",
+        "cursor",
+        "graded_only",
+        "house",
+        "limit",
+        "raw_only",
+        "sort",
+        "watchlist"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/grades",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1295",
+      "requiredResponseFields": [
+        "card_id",
+        "grade",
+        "house",
+        "id"
+      ],
+      "requestFields": [
+        "card_id",
+        "condition",
+        "estimated_value_usd",
+        "grade",
+        "house",
+        "notes",
+        "purchase_date",
+        "purchase_price_usd",
+        "upstream_id"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/history",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1266",
+      "requiredResponseFields": [
+        "points[].date"
+      ],
+      "requestFields": [
+        "collection_id",
+        "range"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/grades/summary",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1251",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "collection_id"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/grades/{grade_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1323",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/grades/{grade_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1315",
+      "requiredResponseFields": [
+        "card_id",
+        "grade",
+        "house",
+        "id"
+      ],
+      "requestFields": [
+        "condition",
+        "estimated_value_usd",
+        "grade",
+        "house",
+        "notes",
+        "purchase_date",
+        "purchase_price_usd"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/home/feed",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1167",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "recentScans",
+        "topMovers"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/img",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-web/src/lib/cardImage.ts:43",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "u"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/market/fx/rates",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-web/src/providers/DisplayCurrencyProvider.tsx:61",
+      "requiredResponseFields": [
+        "rates"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1031",
+      "requiredResponseFields": [
+        "email",
+        "id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/billing/checkout",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/billing/config",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1043",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/billing/portal",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1059",
+      "requiredResponseFields": [
+        "url"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/me/billing/subscribe",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1053",
+      "requiredResponseFields": [
+        "status"
+      ],
+      "requestFields": [
+        "interval"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/entitlements",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1041",
+      "requiredResponseFields": [
+        "limits"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/recents",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1061",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/me/recents",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1064",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "searches",
+        "viewed",
+        "viewed[].id",
+        "viewed[].imageUrl",
+        "viewed[].kind",
+        "viewed[].name",
+        "viewed[].setName"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me/settings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1033",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/me/settings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1036",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "active_collection_id",
+        "currency",
+        "email_announcements_enabled",
+        "live_sync_enabled",
+        "push_notifications_enabled",
+        "theme"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/browse",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:450",
+      "requiredResponseFields": [
+        "cards[].id",
+        "cards[].name"
+      ],
+      "requestFields": [
+        "game",
+        "page",
+        "page_size",
+        "set",
+        "sort"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/carousels",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/carousels/rail",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:537",
+      "requiredResponseFields": [
+        "game",
+        "id",
+        "kind",
+        "page",
+        "page_size",
+        "subtitle",
+        "title",
+        "total"
+      ],
+      "requestFields": [
+        "game",
+        "id",
+        "page",
+        "page_size"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/carousels/resolved",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:507",
+      "requiredResponseFields": [
+        "game",
+        "rails[].id",
+        "rails[].kind",
+        "rails[].subtitle",
+        "rails[].title",
+        "source"
+      ],
+      "requestFields": [
+        "game"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/legal",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1406",
+      "requiredResponseFields": [
+        "documents[].lead",
+        "documents[].slug",
+        "documents[].title",
+        "documents[].updated"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/legal/{slug}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1409",
+      "requiredResponseFields": [
+        "lead",
+        "sections",
+        "slug",
+        "summary",
+        "title",
+        "updated"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/search",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:421",
+      "requiredResponseFields": [
+        "results[].id",
+        "results[].name"
+      ],
+      "requestFields": [
+        "page",
+        "page_size",
+        "q",
+        "rarity",
+        "set",
+        "sort",
+        "tcg"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/sparklines",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:601",
+      "requiredResponseFields": [
+        "sparklines[].card_id"
+      ],
+      "requestFields": [
+        "ids",
+        "range"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/public/trending",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:472",
+      "requiredResponseFields": [
+        "cards[].id",
+        "cards[].name"
+      ],
+      "requestFields": [
+        "limit",
+        "max_price",
+        "sort",
+        "tcg"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1178",
+      "requiredResponseFields": [
+        "[].created_at",
+        "[].error_message",
+        "[].file_size_bytes",
+        "[].generated_at",
+        "[].id",
+        "[].period",
+        "[].period_end",
+        "[].period_start",
+        "[].status",
+        "[].title",
+        "[].updated_at"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/reports",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1186",
+      "requiredResponseFields": [
+        "created_at",
+        "error_message",
+        "file_size_bytes",
+        "generated_at",
+        "id",
+        "period",
+        "period_end",
+        "period_start",
+        "status",
+        "title",
+        "updated_at"
+      ],
+      "requestFields": [
+        "month",
+        "period",
+        "year"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/upcoming",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1182",
+      "requiredResponseFields": [
+        "[].closes_at",
+        "[].label",
+        "[].period",
+        "[].period_end",
+        "[].period_start"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/{report_id}",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/{report_id}/download",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1197",
+      "requiredResponseFields": [
+        "download_url",
+        "expires_in_seconds"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/reports/{report_id}/file",
+      "callSite": "/Users/jeffreyfernandez/Loupe/loupe-web/src/features/statements/Statements/Statements.tsx:95",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed-holdings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:886",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "cursor",
+        "include_opened",
+        "limit",
+        "sort"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/sealed-holdings",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:897",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "estimated_value_usd",
+        "notes",
+        "product_id",
+        "purchase_date",
+        "purchase_price_usd",
+        "quantity"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/sealed-holdings/{holding_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:933",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed/search",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:832",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "cursor",
+        "limit",
+        "product_type",
+        "q",
+        "tcg"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed/{product_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:845",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sealed/{product_id}/market",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:862",
+      "requiredResponseFields": [
+        "product_id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sets",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:801",
+      "requiredResponseFields": [],
+      "requestFields": [
+        "sort",
+        "tcg"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/sets/progress",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:821",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/comments/{comment_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2388",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/comments/{comment_id}/like",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2392",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/comments/{comment_id}/like",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2392",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/comments/{comment_id}/replies",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2370",
+      "requiredResponseFields": [
+        "items[].author",
+        "items[].body",
+        "items[].created_at",
+        "items[].id",
+        "items[].post_id"
+      ],
+      "requestFields": [
+        "limit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/feed",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2272",
+      "requiredResponseFields": [
+        "items[].author",
+        "items[].author.user_id",
+        "items[].author.username",
+        "items[].created_at",
+        "items[].id"
+      ],
+      "requestFields": [
+        "cursor",
+        "limit",
+        "tab"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/hashtags/trending",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2400",
+      "requiredResponseFields": [
+        "[].tag"
+      ],
+      "requestFields": [
+        "limit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/hashtags/{tag}/posts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2301",
+      "requiredResponseFields": [
+        "items[].author",
+        "items[].created_at",
+        "items[].id"
+      ],
+      "requestFields": [
+        "cursor",
+        "limit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/me",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2119",
+      "requiredResponseFields": [
+        "profile.created_at",
+        "profile.user_id",
+        "profile.username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/social/me",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2128",
+      "requiredResponseFields": [
+        "created_at",
+        "user_id",
+        "username"
+      ],
+      "requestFields": [
+        "bio",
+        "is_private",
+        "links",
+        "location",
+        "username"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/me/avatar",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2146",
+      "requiredResponseFields": [
+        "created_at",
+        "user_id",
+        "username"
+      ],
+      "requestFields": [
+        "image (multipart file)"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/posts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2324",
+      "requiredResponseFields": [
+        "author",
+        "created_at",
+        "id"
+      ],
+      "requestFields": [
+        "body (multipart)",
+        "card_id (multipart)",
+        "images (multipart, repeated)"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/posts/{post_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2332",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/posts/{post_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2311",
+      "requiredResponseFields": [
+        "author",
+        "author.user_id",
+        "author.username",
+        "created_at",
+        "id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/social/posts/{post_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2341",
+      "requiredResponseFields": [
+        "author",
+        "created_at",
+        "id"
+      ],
+      "requestFields": [
+        "body"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/posts/{post_id}/comments",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2361",
+      "requiredResponseFields": [
+        "items[].author",
+        "items[].body",
+        "items[].created_at",
+        "items[].id",
+        "items[].post_id"
+      ],
+      "requestFields": [
+        "limit",
+        "offset"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/posts/{post_id}/comments",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2381",
+      "requiredResponseFields": [
+        "author",
+        "body",
+        "created_at",
+        "id",
+        "post_id"
+      ],
+      "requestFields": [
+        "body",
+        "parent_id"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/posts/{post_id}/like",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2350",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/posts/{post_id}/like",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2350",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/report-reasons",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2411",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/reports",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2416",
+      "requiredResponseFields": [
+        "created_at",
+        "id",
+        "source",
+        "status",
+        "target_id",
+        "target_type"
+      ],
+      "requestFields": [
+        "note",
+        "reason",
+        "target_id",
+        "target_type"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/requests",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2170",
+      "requiredResponseFields": [
+        "[].created_at",
+        "[].id",
+        "[].requester",
+        "[].requester.user_id",
+        "[].requester.username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/requests/{request_id}/accept",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2179",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/requests/{request_id}/decline",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2181",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/search",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2154",
+      "requiredResponseFields": [
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": [
+        "q"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/search/all",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2429",
+      "requiredResponseFields": [
+        "hashtags[].tag",
+        "users[].user_id",
+        "users[].username"
+      ],
+      "requestFields": [
+        "limit",
+        "q"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/suggested",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2162",
+      "requiredResponseFields": [
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": [
+        "limit"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2185",
+      "requiredResponseFields": [
+        "joined_at",
+        "user_id",
+        "username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/collection",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2239",
+      "requiredResponseFields": [
+        "items[].card_id",
+        "items[].grade",
+        "items[].graded_at",
+        "items[].house",
+        "items[].id"
+      ],
+      "requestFields": [
+        "limit",
+        "offset"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/social/users/{username}/follow",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2217",
+      "requiredResponseFields": [
+        "relationship"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/social/users/{username}/follow",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2209",
+      "requiredResponseFields": [
+        "relationship"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/followers",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2223",
+      "requiredResponseFields": [
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/following",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2229",
+      "requiredResponseFields": [
+        "[].user_id",
+        "[].username"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/social/users/{username}/posts",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:2287",
+      "requiredResponseFields": [
+        "items[].author",
+        "items[].author.user_id",
+        "items[].author.username",
+        "items[].created_at",
+        "items[].id"
+      ],
+      "requestFields": [
+        "cursor",
+        "limit"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/v1/waitlist",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1419",
+      "requiredResponseFields": [
+        "created_at",
+        "email",
+        "id",
+        "position",
+        "status"
+      ],
+      "requestFields": [
+        "email",
+        "interest",
+        "name",
+        "quantity",
+        "referral_source"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/v1/waitlist/stats",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1426",
+      "requiredResponseFields": [
+        "total",
+        "waiting"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/v1/watchlist",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1207",
+      "requiredResponseFields": [
+        "[].card_id",
+        "[].id"
+      ],
+      "requestFields": []
+    },
+    {
+      "method": "POST",
+      "path": "/v1/watchlist",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1212",
+      "requiredResponseFields": [
+        "card_id",
+        "id"
+      ],
+      "requestFields": [
+        "card_id"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/watchlist/{card_id}",
+      "callSite": "/Users/jeffreyfernandez/Loupe/packages/core/src/api.ts:1220",
+      "requiredResponseFields": [],
+      "requestFields": []
+    },
+    {
+      "method": "GET",
+      "path": "/version",
+      "callSite": "packages/core/src/endpoints.ts",
+      "requiredResponseFields": [],
+      "requestFields": []
+    }
+  ],
+  "publishedFrom": {
+    "consumer": "loupe-web",
+    "commit": "afb90b7"
+  }
+}
