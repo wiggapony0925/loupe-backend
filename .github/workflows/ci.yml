@@ -14,7 +14,17 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector/pgvector:pg16, not the stock postgres:16 — same server and
+        # same major, plus the `vector` extension files. tests/database's
+        # conftest runs CREATE EXTENSION vector while building its scratch
+        # schema, and on the stock image that statement fails outright
+        # ("extension \"vector\" is not available"), which takes the whole
+        # database suite down at fixture setup. The alternative — making the
+        # extension optional — would silently drop test_pgvector_is_available
+        # and the migration tests' pgvector seeding, i.e. buy a green build by
+        # testing less. This is the image docker-compose.override.yml already
+        # pins locally for migration 0037, so CI and dev run the same server.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: loupe
           POSTGRES_PASSWORD: loupe
@@ -67,8 +77,74 @@ jobs:
       - name: Mypy
         run: mypy app
 
-      - name: Pytest
+      # The main suite stays on SQLite: it is fast and hermetic and that is
+      # deliberate. tests/database is excluded here only because it gets its
+      # own step below against the real thing — pytest.ini's testpaths would
+      # otherwise collect it twice, and in THIS step it would skip (no
+      # LOUPE_TEST_PG_URL), which is the exact false-coverage signal the next
+      # steps exist to kill.
+      - name: Pytest (sqlite)
         env:
           DATABASE_URL: sqlite+aiosqlite:///./test.db
           REDIS_URL: redis://localhost:6379/0
-        run: pytest -q
+        run: pytest -q --ignore=tests/database
+
+      # The postgres service above has started on every run since this file was
+      # written and has never been connected to. This is the connection. The
+      # harness reads LOUPE_TEST_PG_URL (defaulting to localhost:5433, where
+      # local docker compose publishes it) and creates its own scratch database
+      # on whatever server that names.
+      #
+      # DATABASE_URL stays on SQLite on purpose: the application under test is
+      # not being repointed here, only the database harness. The migration
+      # tests inject their own DATABASE_URL into the alembic subprocesses they
+      # spawn.
+      - name: Pytest (postgres — tests/database)
+        id: db_suite
+        env:
+          LOUPE_TEST_PG_URL: postgresql+asyncpg://loupe:loupe@localhost:5432/loupe
+          DATABASE_URL: sqlite+aiosqlite:///./test.db
+          REDIS_URL: redis://localhost:6379/0
+        run: pytest tests/database -q -rs --junitxml=db-suite.xml
+
+      # A suite that skips is worse than no suite: pytest exits 0, the job goes
+      # green, and the postgres constraints look covered when nothing ever
+      # connected. The pg_url fixture skips EVERY test it feeds when the server
+      # is unreachable, so the skip count is the signal — assert it is zero.
+      #
+      # xfail is the one exception: junit writes it as <skipped> too, but an
+      # xfail is a documented, deliberate state (the broken alembic chain), not
+      # an absent database. Filter on the type attribute, not on the tag.
+      - name: Assert the database suite actually ran
+        if: ${{ !cancelled() && steps.db_suite.conclusion != 'skipped' }}
+        run: |
+          python - <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          report = Path("db-suite.xml")
+          if not report.exists():
+              sys.exit("db-suite.xml was never written: the database suite did not run at all")
+
+          cases = list(ET.parse(report).getroot().iter("testcase"))
+          if not cases:
+              sys.exit("the database suite collected 0 tests")
+
+          skipped = [
+              (case.get("classname"), case.get("name"), skip.get("message"))
+              for case in cases
+              for skip in case.findall("skipped")
+              if skip.get("type") != "pytest.xfail"
+          ]
+          for classname, name, message in skipped:
+              print(f"SKIPPED {classname}::{name} -- {message}")
+          if skipped:
+              sys.exit(
+                  f"{len(skipped)} of {len(cases)} database tests skipped instead of "
+                  "running. They must execute against the postgres service: check that "
+                  "the service is healthy and that LOUPE_TEST_PG_URL points at it."
+              )
+
+          print(f"{len(cases)} database tests ran against postgres, none skipped")
+          PY
