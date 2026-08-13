@@ -231,6 +231,10 @@ class SocialPost(Base):
         Index("ix_social_posts_author_created", "author_id", "created_at"),
         # The global window every discovery feed scans before ranking.
         Index("ix_social_posts_created", "created_at"),
+        # "Posts showcasing this card" — the community section of a card page.
+        # Without it that query reads every post in the table, and so does the
+        # SET NULL a catalog re-key fires when it deletes a card.
+        Index("ix_social_posts_card_id", "card_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -496,12 +500,53 @@ class SocialModerationCase(Base):
             "reporter_id",
             name="uq_social_moderation_reporter",
         ),
+        # Three foreign keys into `users`, none of which postgres indexes for
+        # us. All three are ON DELETE SET NULL, so deleting a single account
+        # made postgres read this whole table three times over to find the rows
+        # to blank. The admin UI also filters by them directly ("cases about
+        # this author", "cases I resolved").
+        Index("ix_social_moderation_cases_reporter_id", "reporter_id"),
+        Index("ix_social_moderation_cases_author_id", "author_id"),
+        Index("ix_social_moderation_cases_resolved_by_id", "resolved_by_id"),
+        # The three closed sets, now closed by postgres rather than by every
+        # writer spelling the word right. A typo here does not fail loudly: it
+        # files a case that the queue's status filter will never list again, so
+        # the work is silently lost — and for a `removed` case that means a
+        # takedown with no auditable record.
+        #
+        # Deliberately a CHECK and not a postgres enum, unlike `cards.tcg`.
+        # These vocabularies grow (target_type has gained four members since it
+        # was written), and widening a CHECK is one DDL statement in a
+        # transaction while adding an enum label is a type change that older
+        # postgres cannot do inside one.
+        CheckConstraint(
+            "status IN ('open', 'dismissed', 'removed')",
+            name="ck_moderation_case_status",
+        ),
+        # Every surface that calls safety.enforce(), which files the case under
+        # the surface name — see the TARGET_* constants in
+        # app/social/services/safety.py, the source of truth this mirrors.
+        # Users may only REPORT the first three (safety.TARGET_TYPES); the rest
+        # arrive as classifier auto-cases, and a story case filed as a "post"
+        # would point at an id no post table holds.
+        CheckConstraint(
+            "target_type IN ('post', 'comment', 'profile', 'review', "
+            "'collection', 'story', 'story_comment')",
+            name="ck_moderation_case_target_type",
+        ),
+        CheckConstraint(
+            "source IN ('auto', 'report')",
+            name="ck_moderation_case_source",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UuidCol(), primary_key=True, default=uuid.uuid4
     )
-    #: "post" | "comment" | "profile".
+    #: Which surface the target lives on: "post" | "comment" | "profile" |
+    #: "review" | "collection" | "story" | "story_comment". Constrained in
+    #: __table_args__; the canonical list is the TARGET_* constants in
+    #: app/social/services/safety.py.
     target_type: Mapped[str] = mapped_column(String(16), nullable=False)
     target_id: Mapped[uuid.UUID] = mapped_column(UuidCol(), nullable=False)
     #: Who wrote the thing. SET NULL so deleting an account doesn't erase the
@@ -524,7 +569,9 @@ class SocialModerationCase(Base):
     reporter_id: Mapped[uuid.UUID | None] = mapped_column(
         UuidCol(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    #: "open" | "dismissed" | "removed".
+    #: "open" | "dismissed" | "removed". Note that the queue's "blocked" tab is
+    #: a *filter* over (removed, source=auto, unresolved) — never a value that
+    #: is stored here, which is why the CHECK does not list it.
     status: Mapped[str] = mapped_column(String(16), default="open", nullable=False)
     resolved_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UuidCol(), ForeignKey("users.id", ondelete="SET NULL"), nullable=True

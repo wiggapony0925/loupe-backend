@@ -6,7 +6,17 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Enum, ForeignKey, Index, Numeric, String, func
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -98,7 +108,38 @@ class GradedCard(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    __table_args__ = (Index("ix_graded_cards_user_graded_at", "user_id", "graded_at"),)
+    __table_args__ = (
+        Index("ix_graded_cards_user_graded_at", "user_id", "graded_at"),
+        # The three vault filter/sort indexes. Migration 0040 created them
+        # directly in postgres and no model ever declared them, so they existed
+        # only in databases that had been migrated — a create_all-built one
+        # (the tests, a fresh local bootstrap) sorted and filtered the vault by
+        # sequential scan. Declared here so the models are the whole truth.
+        Index("ix_graded_cards_user_active", "user_id", "deleted_at"),
+        Index("ix_graded_cards_user_value", "user_id", "estimated_value_usd"),
+        Index("ix_graded_cards_user_grade", "user_id", "grade"),
+        # 0 through 10, matching the API contract (`GradedCardCreate.grade` is
+        # ge=0/le=10) rather than any one house's scale. The bounds are chosen
+        # from what the code supports, not from PSA's rulebook:
+        #
+        #   * The top is 10. Every house we recognise (PSA/BGS/CGC/SGC/TAG)
+        #     stops at 10, and `_GRADE_MULT_HISTORY` in card_search_service —
+        #     the ladder that turns a grade into a price — is only defined
+        #     from 1 to 10 in half steps.
+        #   * The bottom is 0, not 1, because 0 is a real value here: it is
+        #     the sentinel graded_card_service writes for RAW holdings
+        #     (`house == loupe`), where `condition` carries the meaning
+        #     instead. Refusing it would refuse every ungraded card.
+        #
+        # Worth enforcing in the database rather than only in pydantic because
+        # grade drives the price lookup and therefore a user's reported
+        # portfolio total: one 99.9 from a broken import or a hand-run backfill
+        # silently inflates a number the user trusts, and no read path
+        # re-validates it. Half steps are deliberately NOT enforced — the
+        # column is Numeric(4, 1) and a house that starts issuing 9.2 should
+        # not need a migration.
+        CheckConstraint("grade >= 0 AND grade <= 10", name="ck_graded_card_grade"),
+    )
 
     @property
     def is_graded(self) -> bool:

@@ -864,10 +864,15 @@ async def test_non_image_uploads_are_refused(client, created_user):
     [
         (
             # The CHAIN, in order — not just the creating migration. A later
-            # additive migration (0053 added social_posts.edited_at) has to
-            # be part of the comparison, or this test fails for the one
-            # reason that is not drift and gets weakened to make it pass.
-            ["0050_social_feed.py", "0053_post_edited_at.py"],
+            # additive migration (0053 added social_posts.edited_at, 0056
+            # added the index on social_posts.card_id) has to be part of the
+            # comparison, or this test fails for the one reason that is not
+            # drift and gets weakened to make it pass.
+            [
+                "0050_social_feed.py",
+                "0053_post_edited_at.py",
+                "0056_fk_indexes_and_guards.py",
+            ],
             [
                 "social_posts",
                 "social_post_media",
@@ -878,7 +883,10 @@ async def test_non_image_uploads_are_refused(client, created_user):
                 "social_post_mentions",
             ],
         ),
-        (["0051_social_moderation.py"], ["social_moderation_cases"]),
+        (
+            ["0051_social_moderation.py", "0056_fk_indexes_and_guards.py"],
+            ["social_moderation_cases"],
+        ),
     ],
 )
 def test_social_migrations_create_exactly_what_the_models_declare(filenames, tables):
@@ -911,14 +919,17 @@ def test_social_migrations_create_exactly_what_the_models_declare(filenames, tab
 
     engine = sa.create_engine("sqlite://")
     with engine.begin() as conn:
-        # The FK targets the migration expects to already exist.
+        # Scaffolding: every table the chain is NOT being judged on. This used
+        # to be the three FK targets (users, card_sets, cards), which stopped
+        # being enough at 0056 — a cross-cutting revision that also indexes
+        # application_events, graded_cards and collection_items, and fails on
+        # a database where those do not exist.
+        #
+        # The tables under test are excluded, so they can still only come from
+        # the migrations. That is the assertion; everything else is furniture.
         Base.metadata.create_all(
             conn,
-            tables=[
-                Base.metadata.tables["users"],
-                Base.metadata.tables["card_sets"],
-                Base.metadata.tables["cards"],
-            ],
+            tables=[t for name, t in Base.metadata.tables.items() if name not in tables],
         )
         ctx = MigrationContext.configure(conn)
         with Operations.context(ctx):

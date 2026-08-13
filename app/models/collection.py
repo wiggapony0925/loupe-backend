@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -58,6 +58,21 @@ class CollectionItem(Base):
     )
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        # The composite PK is (collection_id, graded_card_id), so it answers
+        # "what is in this binder" and nothing else — a btree cannot seek on
+        # its second column alone. Without this index, "which binders hold
+        # this card" and the ON DELETE CASCADE fired by removing a card from
+        # the vault both read every collection_items row in the database.
+        #
+        # Migration 0040 created it directly in postgres and no model ever
+        # declared it, so any create_all-built database (tests, a fresh local
+        # bootstrap) silently lacked it. Declared here so the models are the
+        # whole truth; 0056 re-creates it IF NOT EXISTS for databases that
+        # already went through 0040.
+        Index("ix_collection_items_graded_card_id", "graded_card_id"),
     )
 
 

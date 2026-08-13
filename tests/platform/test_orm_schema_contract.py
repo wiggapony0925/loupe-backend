@@ -39,6 +39,7 @@ EXPECTED_TABLES: frozenset[str] = frozenset(
         "card_identifications",
         "card_sets",
         "cards",
+        "catalog_card_embeddings",
         "catalog_image_hashes",
         "catalog_mirror_cards",
         "catalog_mirror_sets",

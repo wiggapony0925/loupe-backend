@@ -153,5 +153,13 @@ class ApplicationEvent(Base):
         "JobApplication", back_populates="events"
     )
 
+    __table_args__ = (
+        # Postgres indexes primary keys and unique constraints, never foreign
+        # keys. Without this one, deleting an admin account makes postgres read
+        # every application_events row to resolve the SET NULL — and the "who
+        # touched this application" lookup in the portal does the same.
+        Index("ix_application_events_created_by_user_id", "created_by_user_id"),
+    )
+
 
 __all__ = ["ApplicationEvent", "JobApplication", "JobPosting"]

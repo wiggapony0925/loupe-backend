@@ -44,9 +44,16 @@ class CatalogImageHash(Base):
     set_name: Mapped[str | None] = mapped_column(String(300), nullable=True)
     number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     image_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    #: 16x16 imagehash → 64 hex chars / 256 bits. The first 4 hex are indexed
-    #: for a cheap prefix pre-filter should the in-memory cache ever be bypassed.
-    phash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    #: 16x16 imagehash → 64 hex chars / 256 bits. Deliberately NOT indexed:
+    #: matching is Hamming distance over every hash, done in memory by
+    #: ``catalog_hash_index.py``, and no btree can answer "within N bits".
+    #: A plain btree here served nothing — it cannot even do the prefix
+    #: pre-filter it once claimed to, because the cluster collation is
+    #: en_US.UTF8 and a LIKE prefix needs ``varchar_pattern_ops`` to become a
+    #: range scan. It went unscanned for 88 days before 0058 dropped it. If a
+    #: pre-filter is ever wanted, add ``(phash varchar_pattern_ops)`` together
+    #: with the query that uses it.
+    phash: Mapped[str] = mapped_column(String(64), nullable=False)
     dhash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     #: Hashes of the card's ALTERNATE art scan (pokemontcg ``_hires``): the two
     #: upstream scans of one card can differ by 40+ bits, so we match against

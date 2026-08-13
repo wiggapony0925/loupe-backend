@@ -64,6 +64,14 @@ class PortfolioSnapshot(Base):
             "collection_id",
             "captured_at",
         ),
+        # The scope FK needs an index LEADING with it, which neither of the
+        # above provides (collection_id is the second column of one and absent
+        # from the other). It is ON DELETE CASCADE, so deleting one binder
+        # otherwise scans the whole snapshots table to find the rows to cascade
+        # into — and this table grows ~48 rows/user/day regardless of how many
+        # collections exist, so "delete a binder" gets slower the longer the
+        # product has been running.
+        Index("ix_portfolio_snapshots_collection_id", "collection_id"),
     )
 
 
