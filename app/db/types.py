@@ -57,10 +57,13 @@ def _strip_nul(value: Any) -> Any:
         return [_strip_nul(v) for v in value]
     if isinstance(value, dict):
         return {
-            (k.replace(_NUL, "") if isinstance(k, str) and _NUL in k else k): _strip_nul(v)
+            (
+                k.replace(_NUL, "") if isinstance(k, str) and _NUL in k else k
+            ): _strip_nul(v)
             for k, v in value.items()
         }
     return value
+
 
 #: JSONB on postgres, JSON (TEXT) on SQLite.
 #:

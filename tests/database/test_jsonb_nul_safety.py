@@ -87,7 +87,9 @@ async def test_postgres_jsonb_really_does_reject_nul(pg_engine):
 
         # ...while plain json still takes the escape. That asymmetry is the
         # whole reason 0057 introduced the risk, rather than it always existing.
-        got = (await conn.execute(sa.text("SELECT (:p)::json"), {"p": as_escape})).scalar()
+        got = (
+            await conn.execute(sa.text("SELECT (:p)::json"), {"p": as_escape})
+        ).scalar()
         assert got is not None
 
 
@@ -97,10 +99,10 @@ async def test_a_nul_bearing_payload_survives_a_real_jsonb_write(pg_engine):
 
     This is the regression: the same insert raises without ``_strip_nul``.
     """
-    from app.models.user import User  # noqa: PLC0415
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    from tests.factories import make_user  # noqa: PLC0415
+    from app.models import UserRecents
+    from tests.factories import make_user
 
     async with pg_engine.connect() as conn:
         trans = await conn.begin()
@@ -108,8 +110,6 @@ async def test_a_nul_bearing_payload_survives_a_real_jsonb_write(pg_engine):
         try:
             user = await make_user(session)
             await session.flush()
-
-            from app.models import UserRecents  # noqa: PLC0415
 
             session.add(
                 UserRecents(
@@ -123,7 +123,9 @@ async def test_a_nul_bearing_payload_survives_a_real_jsonb_write(pg_engine):
 
             row = (
                 await session.execute(
-                    sa.text("SELECT searches, viewed FROM user_recents WHERE user_id = :u"),
+                    sa.text(
+                        "SELECT searches, viewed FROM user_recents WHERE user_id = :u"
+                    ),
                     {"u": user.id},
                 )
             ).one()

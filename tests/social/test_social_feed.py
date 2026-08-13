@@ -929,7 +929,9 @@ def test_social_migrations_create_exactly_what_the_models_declare(filenames, tab
         # the migrations. That is the assertion; everything else is furniture.
         Base.metadata.create_all(
             conn,
-            tables=[t for name, t in Base.metadata.tables.items() if name not in tables],
+            tables=[
+                t for name, t in Base.metadata.tables.items() if name not in tables
+            ],
         )
         ctx = MigrationContext.configure(conn)
         with Operations.context(ctx):

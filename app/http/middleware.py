@@ -124,13 +124,64 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class StripNulFromQueryStringMiddleware:
+    """Remove NUL bytes from the query string before anything parses it.
+
+    A single ``%00`` in a string query parameter used to reach postgres as a
+    bind value, where asyncpg refuses it — ``CharacterNotInRepertoireError:
+    invalid byte sequence for encoding "UTF8": 0x00`` — with nothing catching
+    it, so the request became a 500. Three UNAUTHENTICATED endpoints were
+    reachable this way, found by fuzzing all 325 operations:
+
+        GET /v1/cards?q=%00
+        GET /v1/cards?set_code=%00
+        GET /v1/sealed/search?q=%00
+
+    Fixed here rather than in the three services on purpose. Those three are
+    the endpoints that happen to pass a string parameter into a text
+    comparison today; the trigger is not specific to them, and any new
+    endpoint that does the same thing would arrive with the same crash. There
+    are around ninety (GET, string query param) pairs in this API.
+
+    Stripping rather than rejecting, for the same reason as the jsonb guard in
+    ``app/db/types.py``: NUL is never meaningful in a query parameter, so
+    there is no caller to break and no reason to spend a 400 on it.
+
+    Pure ASGI rather than BaseHTTPMiddleware because it has to run before the
+    request is parsed, and because it does not need the request/response cycle
+    — it edits one value in the scope and gets out of the way.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            raw = scope.get("query_string") or b""
+            # ``query_string`` is the RAW, still-percent-encoded bytes — the
+            # ASGI server does not decode it, Starlette does when it builds
+            # request.query_params. So the NUL arrives as the literal three
+            # characters "%00" and stripping b"\\x00" alone silently does
+            # nothing, which is exactly the bug this was first written with.
+            # The bare byte is handled too, for a client that sends it raw.
+            if b"%00" in raw or b"\x00" in raw:
+                scope = dict(scope)
+                scope["query_string"] = raw.replace(b"%00", b"").replace(b"\x00", b"")
+        await self.app(scope, receive, send)
+
+
 def register_http_middleware(app: FastAPI) -> None:
     """Attach the request-log middleware to *app*."""
     app.add_middleware(RequestLogMiddleware)
+    # Registered after RequestLogMiddleware so it ends up OUTSIDE it (Starlette
+    # runs the last-registered middleware first), which means the sanitising
+    # happens before anything — logging included — reads the query string.
+    app.add_middleware(StripNulFromQueryStringMiddleware)
 
 
 __all__ = [
     "RequestLogMiddleware",
+    "StripNulFromQueryStringMiddleware",
     "register_http_middleware",
     "resolve_cache_control",
 ]
