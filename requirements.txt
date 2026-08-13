@@ -39,10 +39,14 @@ tenacity>=9.0.0,<10.0.0
 
 # --- HTML parsing (130point scraper) ---
 beautifulsoup4>=4.12,<5
-lxml>=5.3,<6
+# 6.1.0 closes PYSEC-2026-87. The <6 cap excluded its own fix.
+lxml>=6.1,<7
 
 # --- Image processing (perceptual hashing for scan identity) ---
-Pillow>=10.4,<12
+# 12.3.0 closes 11 advisories, several of them native heap out-of-bounds
+# writes reachable from user image uploads (Image.open on request bytes).
+# The old <12 cap excluded every one of those fixes.
+Pillow>=12.3,<13
 ImageHash>=4.3,<5
 
 # --- OCR (card identification via Google Cloud Vision; optional at runtime) ---
@@ -58,14 +62,19 @@ rapidfuzz>=3.10,<4
 # Pango/HarfBuzz/fontconfig system libs — installed in the Dockerfile runtime
 # stage and in CI (see .github/workflows/ci.yml). ReportLab stays as a
 # pure-Python, no-system-libs fallback so statements never hard-fail.
-weasyprint>=63,<66
+# 68.0 closes PYSEC-2026-2034. NOTE: PYSEC-2026-3412 has no fixed release
+# upstream yet, so this bump reduces the exposure but does not clear it.
+weasyprint>=68,<70
 Jinja2>=3.1,<4
 libsass>=0.23,<1
 reportlab>=4.2,<5
 
 # --- Auth / crypto ---
 PyJWT>=2.10.0,<3.0.0
-cryptography>=43.0.0,<46.0.0
+# 50.0.0 clears 9 advisories including two certificate-verification bypasses
+# and a statically linked OpenSSL vulnerability. The <46 cap sat below all of
+# them, so no in-range upgrade existed.
+cryptography>=50.0.0,<51.0.0
 argon2-cffi>=23.1.0,<25.0.0
 # TOTP two-factor auth (admin sign-in) + pure-python QR for enrollment.
 pyotp>=2.9.0,<3.0.0

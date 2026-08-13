@@ -408,6 +408,10 @@ class Settings(BaseSettings):
     # generous and the API is a single HTTPS POST — no SMTP required.
     resend_api_key: str = ""
     notifications_from_email: str = ""  # e.g. "Loupe <hello@loupe.app>"
+    # Safety catch, not a feature flag. Production ignores this and sends
+    # normally; everywhere else must opt in before a single message goes out.
+    # See `email_enabled` for why a configured key is not sufficient consent.
+    email_send_outside_production: bool = False
     # Optional Reply-To on outgoing mail, so "just reply" support flows land
     # in a monitored inbox instead of the (possibly no-reply) From address.
     notifications_reply_to: str = ""  # e.g. "support@loupe.app"
@@ -440,8 +444,28 @@ class Settings(BaseSettings):
 
     @property
     def email_enabled(self) -> bool:
-        """True when a transactional-email provider is fully configured."""
-        return bool(self.resend_api_key and self.notifications_from_email)
+        """True when transactional email is configured AND allowed to send.
+
+        CONFIGURED IS NOT THE SAME AS ALLOWED, which is what this used to
+        assume. ``.env`` carries a real Resend key so that local work can
+        exercise the send path deliberately, and the old check was
+        ``key and from_address`` — so every developer machine, every test run
+        against a real .env, and every CI job with the secret present was one
+        code path away from mailing strangers. It very nearly did: a fuzzing
+        pass over the public endpoints created 23 users and a waitlist entry,
+        each of which sends mail, and it only stayed quiet because the key was
+        blanked by hand first.
+
+        So sending is now opt-in outside production. Deployed environments are
+        unaffected; anywhere else has to say so explicitly with
+        ``EMAIL_SEND_OUTSIDE_PRODUCTION=true``, which is a thing you type when
+        you mean it and cannot do by forgetting.
+        """
+        if not (self.resend_api_key and self.notifications_from_email):
+            return False
+        if self.is_production:
+            return True
+        return self.email_send_outside_production
 
     # --- OpenTelemetry (off by default; flip on once SDK + exporter
     # extras are installed in the runtime image and the IAM role for
