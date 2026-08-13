@@ -242,13 +242,73 @@ async def process_scan(
     """
     job_id = uuid.UUID(str(payload["job_id"]))
     user_id = uuid.UUID(str(payload["user_id"]))
-    if db is not None:
-        await _process(db, job_id, user_id)
-    else:  # pragma: no cover - exercised under arq only
-        sm = get_sessionmaker()
-        async with sm() as session:
-            await _process(session, job_id, user_id)
+    try:
+        if db is not None:
+            await _process(db, job_id, user_id)
+        else:  # pragma: no cover - exercised under arq only
+            sm = get_sessionmaker()
+            async with sm() as session:
+                await _process(session, job_id, user_id)
+    except Exception as exc:
+        # Without this the job stays in `processing` forever. `_process` had no
+        # guard, the router's caller swallows what escapes
+        # (routers/collection/scans.py:62, "will rely on worker"), and there is
+        # no reaper cron — worker.py schedules catalog_sync, price_backfill,
+        # price_snapshot, image_index, pro_expiry and portfolio_digest, and
+        # nothing that times out a stuck scan. The client polls for
+        # complete-or-failed, so a crash left it waiting indefinitely with no
+        # error to show. It also made the pipeline undiagnosable: a
+        # systematically failing scan is indistinguishable from nobody
+        # scanning, which is exactly the ambiguity the empty `error_message`
+        # column left us with.
+        logger.exception("scan %s crashed during processing", job_id)
+        await _fail(job_id, user_id, exc)
+        return {"job_id": str(job_id), "status": "failed"}
     return {"job_id": str(job_id), "status": "ok"}
+
+
+async def _fail(job_id: uuid.UUID, user_id: uuid.UUID, exc: BaseException) -> None:
+    """Mark a crashed job failed, in its own session.
+
+    A fresh session on purpose: the exception may well have come from the
+    caller's, leaving it mid-rollback, and the one write that must survive a
+    database problem is the one that stops the client waiting.
+
+    Guarded on status so a job that already reached a terminal state — or one
+    the worker retries after a partial success — is never dragged backwards.
+    """
+    from sqlalchemy import update
+
+    message = f"{type(exc).__name__}: {exc}"[:1024]
+    try:
+        async with get_sessionmaker()() as session:
+            await session.execute(
+                update(ScanJob)
+                .where(
+                    ScanJob.id == job_id,
+                    ScanJob.status.in_(
+                        [ScanStatusEnum.processing, ScanStatusEnum.uploading]
+                    ),
+                )
+                .values(
+                    status=ScanStatusEnum.failed,
+                    error_message=message,
+                    completed_at=utcnow(),
+                )
+            )
+            await session.commit()
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("could not mark scan %s failed", job_id)
+
+    await _publish(
+        user_id,
+        ScanProgressEvent(
+            job_id=job_id,
+            status=ScanStatusEnum.failed,
+            progress=1.0,
+            message="Scan failed. Please try again.",
+        ),
+    )
 
 
 async def arq_process_scan(

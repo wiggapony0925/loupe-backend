@@ -326,3 +326,71 @@ async def test_summary_is_scoped_to_one_user(db_session):
     out = await notification_service.summary(db_session, mine.id)
     assert out["unread"] == 0
     assert all(c["unread"] == 0 for c in out["categories"])
+
+
+@pytest.mark.asyncio
+async def test_broadcast_records_delivery_when_the_push_is_accepted(
+    db_session, monkeypatch
+):
+    """The regression: broadcast sent the push and threw the answer away.
+
+    `pushed_at` is the only thing that separates "reached a device" from
+    "sitting unread in the app", and the broadcast path never wrote it — so
+    all 553 broadcast notifications in production read as undelivered even
+    when Expo had accepted them. Delivery was unobservable for the one code
+    path that fans out to every user at once.
+    """
+    from app.services import push_service
+
+    a = await make_user(db_session)
+    b = await make_user(db_session)
+    seen: list = []
+
+    async def _accept(user_id, *, title, body, data=None):
+        seen.append(user_id)
+        return True
+
+    monkeypatch.setattr(push_service, "send_to_user", _accept)
+
+    created = await notification_service.broadcast(
+        db_session,
+        category="news",
+        kind="blog_post",
+        title="Delivered",
+        push=True,
+    )
+    assert created >= 2
+    assert set(seen) >= {a.id, b.id}
+
+    rows, _ = await notification_service.list_for_user(db_session, a.id)
+    assert rows, "the broadcast created no row for this user"
+    assert rows[0].pushed_at is not None, (
+        "push was accepted but pushed_at is still NULL — delivery is unobservable again"
+    )
+
+
+@pytest.mark.asyncio
+async def test_broadcast_leaves_delivery_unset_when_the_push_is_refused(
+    db_session, monkeypatch
+):
+    """The other half. A user with notifications off, or no device token,
+    must not be recorded as delivered — otherwise `pushed_at` stops meaning
+    anything and an operator cannot tell push is broken."""
+    from app.services import push_service
+
+    user = await make_user(db_session)
+
+    async def _refuse(user_id, *, title, body, data=None):
+        return False
+
+    monkeypatch.setattr(push_service, "send_to_user", _refuse)
+
+    await notification_service.broadcast(
+        db_session,
+        category="news",
+        kind="blog_post",
+        title="Not delivered",
+        push=True,
+    )
+    rows, _ = await notification_service.list_for_user(db_session, user.id)
+    assert rows and rows[0].pushed_at is None

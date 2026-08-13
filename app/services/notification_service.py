@@ -175,46 +175,91 @@ async def broadcast(
         }
 
     created = 0
+    # user_id -> notification id, so a successful push can be recorded against
+    # the row it delivered. Safe to hold across the commit because the
+    # sessionmaker sets expire_on_commit=False (app/db/session.py:110).
+    row_ids: dict[uuid.UUID, uuid.UUID] = {}
     for start in range(0, len(user_ids), _BROADCAST_CHUNK):
         chunk = [_fields(uid) for uid in user_ids[start : start + _BROADCAST_CHUNK]]
-        db.add_all([Notification(**f) for f in chunk])
+        rows = [Notification(**f) for f in chunk]
+        db.add_all(rows)
         try:
             await db.commit()
             created += len(chunk)
+            row_ids.update({r.user_id: r.id for r in rows})
         except IntegrityError:
             # At least one user in this chunk already has it. Fall back to
             # per-row inserts so the others still land — an all-or-nothing
             # chunk would let one duplicate silence hundreds of users.
             await db.rollback()
-            created += await _insert_individually(db, chunk)
+            inserted = await _insert_individually(db, chunk)
+            created += len(inserted)
+            row_ids.update(inserted)
 
     if push and created:
+        # Record delivery, exactly as the single-notification path does in
+        # `_push`. This loop used to call send_to_user and throw the answer
+        # away, so every one of the 553 broadcast rows in production reads as
+        # undelivered even when Expo accepted it and the phone buzzed —
+        # `pushed_at` is the only thing that distinguishes "reached a device"
+        # from "sitting unread", and it was permanently NULL.
+        pushed: list[uuid.UUID] = []
         for uid in user_ids:
             try:
-                await push_service.send_to_user(uid, title=title, body=body or "")
+                sent = await push_service.send_to_user(
+                    uid, title=title, body=body or ""
+                )
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning("broadcast push failed user=%s (%s)", uid, exc)
+                continue
+            if sent and uid in row_ids:
+                pushed.append(row_ids[uid])
+
+        if pushed:
+            # One statement for the whole broadcast rather than per user, and
+            # in its own session for the same reason `_push` uses one: a
+            # bookkeeping write must never roll back the notifications.
+            from app.db import get_sessionmaker
+
+            try:
+                async with get_sessionmaker()() as session:
+                    await session.execute(
+                        update(Notification)
+                        .where(Notification.id.in_(pushed))
+                        .values(pushed_at=datetime.now(UTC))
+                    )
+                    await session.commit()
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("broadcast pushed_at update failed (%s)", exc)
 
     logger.info("broadcast '%s' → %d/%d users", title, created, len(user_ids))
     return created
 
 
-async def _insert_individually(db: AsyncSession, fields: list[dict[str, Any]]) -> int:
+async def _insert_individually(
+    db: AsyncSession, fields: list[dict[str, Any]]
+) -> dict[uuid.UUID, uuid.UUID]:
     """Retry a failed chunk one row at a time, skipping duplicates.
 
     Takes plain dicts rather than ORM instances — the caller has just rolled
     back, so any instance from that chunk is expired and would hit the
     database again the moment an attribute is read.
+
+    Returns ``{user_id: notification_id}`` for the rows that landed, so the
+    caller can record delivery against them. It used to return a bare count,
+    which meant any user who fell down this path could never have `pushed_at`
+    set even after a successful push.
     """
-    created = 0
+    inserted: dict[uuid.UUID, uuid.UUID] = {}
     for f in fields:
-        db.add(Notification(**f))
+        row = Notification(**f)
+        db.add(row)
         try:
             await db.commit()
-            created += 1
+            inserted[row.user_id] = row.id
         except IntegrityError:
             await db.rollback()
-    return created
+    return inserted
 
 
 async def list_for_user(
