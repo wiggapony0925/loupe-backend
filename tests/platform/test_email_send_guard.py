@@ -26,17 +26,28 @@ def _settings(**overrides) -> Settings:
     return Settings(**{**base, **overrides})
 
 
-@pytest.mark.parametrize("env", ["development", "staging", "test"])
-def test_a_configured_key_does_not_send_outside_production(env):
+@pytest.mark.parametrize("env", ["development", "staging"])
+def test_a_configured_key_does_not_send_in_dev_or_staging(env):
     """The regression. Fully configured, and still refuses."""
     assert _settings(app_env=env).email_enabled is False
 
 
-@pytest.mark.parametrize("env", ["development", "staging", "test"])
-def test_sending_outside_production_requires_saying_so(env):
+@pytest.mark.parametrize("env", ["development", "staging"])
+def test_sending_in_dev_or_staging_requires_saying_so(env):
     assert (
         _settings(app_env=env, email_send_outside_production=True).email_enabled is True
     )
+
+
+def test_the_test_environment_is_not_gated():
+    """Deliberate, and worth pinning so nobody "tightens" it back.
+
+    The risk is a real credential plus a real transport. pytest has neither —
+    the root conftest blanks RESEND_API_KEY, and the delivery suites stub
+    httpx.AsyncClient. Gating it would make every one of those tests opt in to
+    reach a fake, which teaches setting the flag by reflex.
+    """
+    assert _settings(app_env="test").email_enabled is True
 
 
 def test_production_still_sends_without_any_extra_flag():

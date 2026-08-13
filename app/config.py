@@ -456,14 +456,23 @@ class Settings(BaseSettings):
         each of which sends mail, and it only stayed quiet because the key was
         blanked by hand first.
 
-        So sending is now opt-in outside production. Deployed environments are
-        unaffected; anywhere else has to say so explicitly with
+        So sending is opt-in for ``development`` and ``staging`` — the two
+        environments where a long-lived server runs against a real .env and can
+        be pointed at by a fuzzer, a load test or a stray curl. They have to say
         ``EMAIL_SEND_OUTSIDE_PRODUCTION=true``, which is a thing you type when
         you mean it and cannot do by forgetting.
+
+        ``test`` is deliberately NOT gated. The risk being managed is a real
+        credential plus a real transport, and pytest has neither: the root
+        conftest blanks ``RESEND_API_KEY`` for every run, and the suites that
+        exercise delivery monkeypatch both the key and ``httpx.AsyncClient``
+        with a fake. Gating it would only mean every one of those tests opting
+        back in to reach a stub — noise that teaches people to set the flag
+        reflexively, which is precisely the habit this is trying to prevent.
         """
         if not (self.resend_api_key and self.notifications_from_email):
             return False
-        if self.is_production:
+        if self.is_production or self.is_test:
             return True
         return self.email_send_outside_production
 
