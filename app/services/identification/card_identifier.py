@@ -846,7 +846,28 @@ class CardIdentifier:
             or cand.get("image_url")
         )
         return CandidateOut(
-            card_id=cand.get("card_id"),
+            # Fall back to the catalog id. `cand["card_id"]` is a key that NO
+            # producer emits — catalog_hash_index returns "id"
+            # (catalog_hash_index.py:360), and so does every search path — so
+            # this was structurally None on every candidate ever built, and
+            # card_identifications.top_card_id is NULL on all 2,467 production
+            # rows as a result.
+            #
+            # It broke more than a denormalised column. Both clients send
+            # `candidate.card_id` as the feedback answer, so all 16 corrections
+            # users took the trouble to make were stored as NULL, and
+            # `_feedback_priors` — which filters `chosen_card_id IS NOT NULL` —
+            # has returned an empty map on every scan since launch. The
+            # learning loop has never contributed a single point of ranking
+            # signal.
+            #
+            # The catalog id is the right value, not a workaround: the prior
+            # lookup keys on `cand.get("id")` (see :268 and :385), and the
+            # feedback column documents itself as holding
+            # "card_id_or_upstream_id". Storing the catalog id is what closes
+            # the loop. `or` rather than a replacement so that a producer which
+            # ever does resolve a local card still wins.
+            card_id=cand.get("card_id") or cand.get("id"),
             upstream_id=cand.get("id"),
             name=cand.get("name") or "",
             set_name=set_obj.get("name") or cand.get("set_name"),

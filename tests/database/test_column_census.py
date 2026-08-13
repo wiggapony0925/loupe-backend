@@ -86,17 +86,17 @@ EXPECTED_EMPTY: dict[str, str] = {
     "user_settings.active_collection_id": "nobody has pinned an active collection",
     "waitlist_entries.user_id": "waitlist signups have not been claimed by an account",
     "identification_feedback.chosen_card_id": (
-        "DEFECT, tracked — the clients send candidate.card_id, which is "
-        "structurally null (see card_identifications.top_card_id). All 16 "
-        "corrections were stored as NULL and _feedback_priors returns an "
-        "empty map on every scan."
+        "FIXED 2026-08-13 — followed top_card_id. The clients already send "
+        "candidate.card_id, which now carries the catalog id, so no client "
+        "change was needed; the next correction populates this. The 16 "
+        "existing rows stay NULL. Covered by test_feedback_loop_closes.py."
     ),
     "card_identifications.top_card_id": (
-        "DEFECT, tracked — assigned from cand.get('card_id') at "
-        "card_identifier.py:849, but no producer emits that key "
-        "(catalog_hash_index.py:360 returns 'id'). Structurally NULL. The "
-        "match IS recorded: top_upstream_id (533/2467) and candidates_json "
-        "(2467/2467)."
+        "FIXED 2026-08-13 — _to_candidate now falls back to the catalog id, "
+        "which is the key _feedback_priors looks up (card_identifier.py:268, "
+        ":385). Was structurally NULL on all 2,467 rows because no producer "
+        "emits a 'card_id' key. Existing rows stay NULL; new scans fill it. "
+        "Covered by test_feedback_loop_closes.py."
     ),
     "graded_cards.scan_job_id": "cards were added manually or seeded, not via a scan",
     "graded_cards.fingerprint_hash": "follows scan_job_id",
@@ -266,8 +266,6 @@ def test_the_tracked_defects_are_still_listed():
     tracked = [k for k, v in EXPECTED_EMPTY.items() if "DEFECT" in v]
     tracked += [k for k, v in EXPECTED_EMPTY_TABLES.items() if "DEFECT" in v]
     assert set(tracked) == {
-        "identification_feedback.chosen_card_id",
-        "card_identifications.top_card_id",
         "catalog_card_embeddings",
     }, (
         "The tracked-defect set changed. If one was fixed, remove its "
