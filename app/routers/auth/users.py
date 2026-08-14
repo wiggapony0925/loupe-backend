@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import is_admin_user, require_user
@@ -28,22 +29,61 @@ from app.utils import phone as phone_utils
 router = APIRouter(prefix="/me", tags=["users"])
 
 
-def _to_user_read(user: User) -> UserRead:
+async def _effective_avatar_url(db: AsyncSession, user: User) -> str | None:
+    """The picture this user actually has, wherever it lives.
+
+    There are two avatar stores and they are not the same thing.
+    ``users.avatar_url`` holds a URL handed over by an OAuth provider at
+    sign-in; ``social_profiles.avatar_key`` holds the image the user uploaded
+    themselves, and `app/social/avatars.py` turns it into a versioned
+    ``/v1/social/avatar/{id}`` URL.
+
+    Only the first was ever served here, and in production it is empty on all
+    82 rows — nobody's OAuth provider supplied one. So a user who had uploaded
+    a profile picture still got ``avatar_url: null`` from ``/v1/me``, and every
+    screen that reads it (the Face ID lock screen among them) showed a blank
+    avatar for the one account in the database that has a picture.
+
+    The uploaded image wins: it is the one the user chose deliberately, where
+    the OAuth URL is whatever the provider happened to have.
+    """
+    from app.social import avatars
+    from app.social.models import SocialProfile
+
+    profile = (
+        await db.execute(select(SocialProfile).where(SocialProfile.user_id == user.id))
+    ).scalar_one_or_none()
+    if profile is not None:
+        uploaded = avatars.avatar_url(profile)
+        if uploaded:
+            return uploaded
+    return user.avatar_url
+
+
+def _to_user_read(user: User, *, avatar_url: str | None = None) -> UserRead:
     """Serialize a user, stamping effective `is_admin` (DB grant or allowlist).
 
     The phone is MASKED here rather than in the schema so there is exactly
     one place the raw number could ever escape, and it doesn't.
+
+    ``avatar_url`` is passed in rather than read off the ORM object for the
+    same reason `is_admin` is overwritten here: the column is not the whole
+    answer. See ``_effective_avatar_url``.
     """
     out = UserRead.model_validate(user)
     out.is_admin = is_admin_user(user)
     out.phone = phone_utils.mask(user.phone)
     out.phone_verified = user.phone_verified_at is not None
+    out.avatar_url = avatar_url if avatar_url is not None else user.avatar_url
     return out
 
 
 @router.get("", response_model=UserRead, summary="Get current user profile")
-async def get_me(user: User = Depends(require_user)) -> UserRead:
-    return _to_user_read(user)
+async def get_me(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserRead:
+    return _to_user_read(user, avatar_url=await _effective_avatar_url(db, user))
 
 
 @router.patch("", response_model=UserRead, summary="Update current user profile")
@@ -53,7 +93,7 @@ async def patch_me(
     db: AsyncSession = Depends(get_db),
 ) -> UserRead:
     updated = await user_service.update_profile(db, user, payload)
-    return _to_user_read(updated)
+    return _to_user_read(updated, avatar_url=await _effective_avatar_url(db, updated))
 
 
 class PushTokenRegister(BaseModel):

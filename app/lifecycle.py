@@ -100,11 +100,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         from app.config import get_settings
         from app.db.session import get_sessionmaker
-        from app.services.admin.flag_seed import seed_admin_flags
+        from app.services.admin.flag_seed import (
+            grant_admin_to_allowlisted,
+            seed_admin_flags,
+        )
 
         if not get_settings().is_test:
             async with get_sessionmaker()() as db:
                 await seed_admin_flags(db)
+                # Write the ADMIN_EMAILS bootstrap down as a real grant, so the
+                # database agrees with who can actually reach /v1/admin and a
+                # cleared env var cannot leave the app with no admins at all.
+                await grant_admin_to_allowlisted(db)
     except Exception as exc:
         _log.warning("admin flag seed skipped: %s", exc)
 

@@ -57,9 +57,12 @@ EXPECTED_EMPTY: dict[str, str] = {
     "users.phone": "phone capture is not in either client's signup flow",
     "users.phone_verified_at": "follows users.phone",
     "users.avatar_url": (
-        "SUPERSEDED — avatars live in social_profiles.avatar_key/"
-        "avatar_content_type/avatar_version. This column has 0/82 and no "
-        "current writer; it is a leftover from before profiles existed."
+        "SUPERSEDED, and now correctly bypassed — this holds an OAuth "
+        "provider's URL and is 0/82 because no provider supplied one. The "
+        "picture a user uploads lives in social_profiles.avatar_key. As of "
+        "2026-08-13 /v1/me falls back to the uploaded avatar, so a user with "
+        "a photo is no longer told they have none. Covered by "
+        "tests/auth/test_me_effective_avatar.py."
     ),
     "users.pro_expires_at": "the two pro accounts are admin comps, which are lifetime",
     # ── Empty because the row state means it ──────────────────────────────

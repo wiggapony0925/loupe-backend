@@ -13,10 +13,12 @@ Feature flags) are intentionally NOT gated, so they're absent here.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.feature_flag import FeatureFlag
+from app.models.user import User
 from app.utils.logger import get_logger
 
 logger = get_logger("admin.flag_seed")
@@ -121,4 +123,42 @@ async def seed_admin_flags(db: AsyncSession) -> int:
     return added
 
 
-__all__ = ["ADMIN_PAGE_FLAGS", "seed_admin_flags"]
+async def grant_admin_to_allowlisted(db: AsyncSession) -> int:
+    """Persist the ADMIN_EMAILS bootstrap as a real DB grant.
+
+    ``is_super_admin`` treats the env allowlist as an escape hatch — "there's
+    always a way back in even if the DB role flags get muddled" — but nothing
+    ever wrote the grant down. So the effective admin and the stored one
+    disagreed: ``require_admin`` let the owner through while
+    ``users.is_admin`` said false on all 82 rows, which is confusing to read in
+    the database and, more seriously, means clearing or mistyping ADMIN_EMAILS
+    on a deploy leaves the app with ZERO admins and no DB-backed way back.
+
+    Promotes only, never demotes: an account removed from the allowlist keeps
+    whatever grant it has, because taking admin away is a decision for the
+    portal, not a side effect of an env var edit.
+    """
+    allow = get_settings().admin_email_set
+    if not allow:
+        return 0
+
+    rows = (
+        (
+            await db.execute(
+                select(User).where(
+                    func.lower(User.email).in_(allow), User.is_admin.is_(False)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for user in rows:
+        user.is_admin = True
+    if rows:
+        await db.commit()
+        logger.info("Granted admin to %d allowlisted account(s).", len(rows))
+    return len(rows)
+
+
+__all__ = ["ADMIN_PAGE_FLAGS", "grant_admin_to_allowlisted", "seed_admin_flags"]
