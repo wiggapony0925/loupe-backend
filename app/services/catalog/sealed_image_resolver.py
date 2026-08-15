@@ -212,24 +212,73 @@ async def _resolve(targets: list[SealedProduct]) -> bool:
     return changed
 
 
+#: Products we have already tried and failed to find an image for, and when to
+#: stop holding that against them.
+#:
+#: WITHOUT THIS THE RETRY IS UNBOUNDED, and it was the slowest thing in the
+#: product. `/v1/sealed/search` calls this on the READ path, and 10 of the 31
+#: sealed products in production have no image and no resolvable match upstream.
+#: So every single request spent up to the full 9s timeout re-asking TCGplayer
+#: the same question and getting the same no. Measured on the home screen's
+#: launch fan-out: 21.5 SECONDS on a cold round, which then queued app config
+#: and announcement behind it (8.5s each) because the service runs
+#: containerConcurrency=4.
+#:
+#: A failure is a fact worth remembering for a while. Successes are not cached
+#: here at all — those write `image_url` to the row, which is its own permanent
+#: record.
+_MISS_TTL_S = 6 * 60 * 60
+_misses: dict[str, float] = {}
+
+
+def _miss_key(p: SealedProduct) -> str:
+    return f"{p.tcg}:{p.set_name}:{p.product_type}"
+
+
+def reset_miss_cache() -> None:
+    """For tests, and for a worker that wants a clean retry after a sync."""
+    _misses.clear()
+
+
 async def enrich_images(products: list[SealedProduct]) -> bool:
     """Fill ``image_url`` on products that lack one, from TCGplayer (best-effort).
 
     Returns True if any product was given an image. No-op (returns False) when
-    ``TCGCSV_ENABLED`` is off or the upstream is unreachable.
+    ``TCGCSV_ENABLED`` is off, the upstream is unreachable, or every candidate
+    has already failed to resolve recently — see ``_misses``.
     """
     if not get_settings().tcgcsv_enabled:
         return False
+
+    now = time.monotonic()
     targets = [
-        p for p in products if not p.image_url and p.set_name and p.tcg in _CATEGORY
+        p
+        for p in products
+        if not p.image_url
+        and p.set_name
+        and p.tcg in _CATEGORY
+        and now - _misses.get(_miss_key(p), 0.0) > _MISS_TTL_S
     ]
     if not targets:
         return False
+
     try:
-        return await asyncio.wait_for(_resolve(targets), timeout=9.0)
+        changed = await asyncio.wait_for(_resolve(targets), timeout=9.0)
     except Exception as exc:  # never let image enrichment break a catalog read
         _log.debug("sealed image enrichment skipped: %s", exc)
+        # A timeout is exactly the case worth remembering: it is the expensive
+        # one, and retrying it on the next read costs another nine seconds.
+        for p in targets:
+            _misses[_miss_key(p)] = now
         return False
+
+    # Anything still without an image after a SUCCESSFUL resolve genuinely has
+    # no match upstream. Asking again on the next request cannot produce a
+    # different answer until the catalog changes.
+    for p in targets:
+        if not p.image_url:
+            _misses[_miss_key(p)] = now
+    return changed
 
 
 async def resolve_market(product: SealedProduct) -> dict[str, Any] | None:
