@@ -72,6 +72,13 @@ async def price_snapshot(ctx: dict[str, Any]) -> dict[str, Any]:
     return await snapshot_prices(ctx)
 
 
+async def cache_warm(ctx: dict[str, Any]) -> dict[str, Any]:
+    """Keep the home screen's 15-minute caches from ever being cold."""
+    from app.tasks.cache_warm import warm_home_caches
+
+    return await warm_home_caches(ctx)
+
+
 async def portfolio_digest(ctx: dict[str, Any]) -> dict[str, Any]:
     """Weekly collection recap to every subscribed user."""
     from app.tasks.lifecycle_email import send_portfolio_digests
@@ -107,6 +114,7 @@ class WorkerSettings:
         price_backfill,
         price_snapshot,
         image_index,
+        cache_warm,
         portfolio_digest,
         pro_expiry_notices,
     ]
@@ -118,6 +126,14 @@ class WorkerSettings:
             # whatever upstream refresh landed at 04:00.
             cron(price_snapshot, hour={4}, minute={30}),
             cron(image_index, hour={5}, minute={0}),
+            # Every 10 minutes, against a 15-minute TRENDING_TTL. This is the
+            # only sub-daily job here, and it is not really a background task:
+            # it is the difference between the home screen's rails costing
+            # 250ms and costing 1.2 seconds (7.6s at the tail), measured from
+            # production logs. With one real user the cache has always expired
+            # before anyone arrives, so without this the warm path is the one
+            # nobody ever takes.
+            cron(cache_warm, minute={0, 10, 20, 30, 40, 50}),
             # Expiry notices run after the nightly price work so a Pro user's
             # last emails aren't built on yesterday's numbers.
             cron(pro_expiry_notices, hour={13}, minute={0}),
