@@ -159,6 +159,32 @@ async def test_post_with_image_roundtrips_through_the_media_endpoint(
 
 
 @pytest.mark.asyncio
+async def test_the_media_endpoint_actually_serves_ranges(client, created_user):
+    """THE ROUTE, not just the helper it calls.
+
+    `byte_range` has its own unit tests, but a helper that is correct and
+    unwired is exactly as broken as no helper: every posted video was dead
+    because this endpoint answered iOS's opening `Range: bytes=0-1` probe with
+    a 200 and the whole file. That is invisible to a typecheck and to every
+    other test here, all of which fetch without a Range header.
+    """
+    await _claim(client, created_user, "ranger")
+    post = await _post(client, created_user, "clip", image=True)
+    url = post["media"][0]["url"]
+
+    full = await client.get(url)
+    resp = await client.get(url, headers={"Range": "bytes=0-1"})
+
+    assert resp.status_code == 206, (
+        "the media route ignored a Range request — iOS will not play any video "
+        "served from an origin that answers its probe with a 200"
+    )
+    assert resp.content == full.content[:2]
+    assert resp.headers["content-range"] == f"bytes 0-1/{len(full.content)}"
+    assert resp.headers["accept-ranges"] == "bytes"
+
+
+@pytest.mark.asyncio
 async def test_post_indexes_hashtags_and_resolves_mentions(
     client, db_session, created_user
 ):

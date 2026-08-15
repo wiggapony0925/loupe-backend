@@ -15,13 +15,22 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import require_user
 from app.db import get_db
 from app.models.user import User
-from app.social import story_media
+from app.social import byte_range, story_media
 from app.social.models import SocialStory
 from app.social.schemas import (
     StoryCommentCreate,
@@ -44,7 +53,9 @@ router = APIRouter(prefix="/social", tags=["social:stories"])
     response_class=Response,
 )
 async def get_story_media(
-    story_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    story_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Public like the avatar and post-image endpoints: an ``<img>`` or a
     native player carries no auth on any of our clients. The URL is
@@ -61,14 +72,11 @@ async def get_story_media(
     body = await story_media.load(story_id)
     if body is None:
         raise HTTPException(status_code=404, detail="Story not found")
-    return Response(
-        content=body,
-        media_type=row.content_type,
-        headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
-            # Lets a native player seek without re-downloading the clip.
-            "Accept-Ranges": "bytes",
-        },
+    # This route ADVERTISED Accept-Ranges while ignoring every Range request
+    # and returning the whole body with a 200 — a promise the server did not
+    # keep, and the reason story clips behaved the same way feed videos did.
+    return byte_range.ranged_response(
+        body, row.content_type, request.headers.get("range")
     )
 
 

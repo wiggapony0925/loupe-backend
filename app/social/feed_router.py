@@ -16,6 +16,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
 )
@@ -25,7 +26,7 @@ from app.auth.dependencies import require_user
 from app.db import get_db
 from app.models.user import User
 from app.platform.rate_limit import rate_limit
-from app.social import post_media, service
+from app.social import byte_range, post_media, service
 from app.social.models import SocialPostMedia
 from app.social.schemas import (
     MAX_POST_BODY,
@@ -114,23 +115,27 @@ async def get_user_posts(
     response_class=Response,
 )
 async def get_post_media(
-    media_id: uuid.UUID, db: AsyncSession = Depends(get_db)
+    media_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Public like the avatar endpoint: an ``<img>`` tag carries no auth on
     any of our clients. The URL is unguessable, and the *post* around it
-    stays behind the privacy gate."""
+    stays behind the privacy gate.
+
+    Serves byte ranges. That is not an optimisation here — iOS refuses to play
+    a video at all from an origin that answers its opening ``Range: bytes=0-1``
+    probe with a 200, which is why every posted clip was dead. See
+    :mod:`app.social.byte_range`.
+    """
     row = await db.get(SocialPostMedia, media_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
     body = await post_media.load(media_id)
     if body is None:
         raise HTTPException(status_code=404, detail="Image not found")
-    # A media row's bytes are written once and never replaced (see
-    # post_media), so this can be cached forever.
-    return Response(
-        content=body,
-        media_type=row.content_type,
-        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    return byte_range.ranged_response(
+        body, row.content_type, request.headers.get("range")
     )
 
 
