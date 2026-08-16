@@ -235,6 +235,32 @@ def _miss_key(p: SealedProduct) -> str:
     return f"{p.tcg}:{p.set_name}:{p.product_type}"
 
 
+def _recently_missed(p: SealedProduct, now: float) -> bool:
+    """Have we asked about this product lately and been told no?
+
+    ABSENT MUST MEAN "NEVER ASKED", NOT "ASKED AT TIME ZERO", and conflating
+    the two is a live bug rather than a nicety. The first version of this
+    filtered with
+
+        now - _misses.get(key, 0.0) > _MISS_TTL_S
+
+    where a missing entry defaults to 0.0. ``time.monotonic()`` counts from an
+    arbitrary origin — in practice process or machine start — so on a freshly
+    booted container ``now`` is a handful of seconds and ``now - 0.0`` is far
+    BELOW the six-hour TTL. Every product therefore looked freshly missed, no
+    product was ever a target, and image enrichment did nothing at all for the
+    first six hours of a container's life.
+
+    It passed on a laptop that had been up for days, where ``now`` is six
+    figures and the comparison is true by accident. CI on a fresh runner
+    caught it. Cloud Run starts a new container far more often than every six
+    hours, so the read path this was written to speed up would simply have
+    stopped resolving images.
+    """
+    last = _misses.get(_miss_key(p))
+    return last is not None and now - last <= _MISS_TTL_S
+
+
 def reset_miss_cache() -> None:
     """For tests, and for a worker that wants a clean retry after a sync."""
     _misses.clear()
@@ -257,7 +283,7 @@ async def enrich_images(products: list[SealedProduct]) -> bool:
         if not p.image_url
         and p.set_name
         and p.tcg in _CATEGORY
-        and now - _misses.get(_miss_key(p), 0.0) > _MISS_TTL_S
+        and not _recently_missed(p, now)
     ]
     if not targets:
         return False
