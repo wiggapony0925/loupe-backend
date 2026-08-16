@@ -17,6 +17,8 @@ One endpoint, on the screen that opens first, on every launch.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.models.enums import SealedProductTypeEnum, TcgEnum
@@ -43,10 +45,27 @@ def _product(name: str = "Surging Sparks") -> SealedProduct:
 
 @pytest.fixture
 def _enabled(monkeypatch):
-    """It is a plain field, not a property — set it on the cached instance."""
-    from app.config import get_settings
+    """Patch the resolver's LOOKUP, not the settings instance.
 
-    monkeypatch.setattr(get_settings(), "tcgcsv_enabled", True)
+    The obvious version of this — `monkeypatch.setattr(get_settings(),
+    "tcgcsv_enabled", True)` — passes locally and fails in CI, which is how it
+    got written twice. `get_settings` is `lru_cache`d, and several tests call
+    `reload_settings()` to clear that cache. Patching the instance binds the
+    flag to whichever Settings object happened to be cached when the fixture
+    ran; the moment anything clears the cache, `enrich_images` builds a fresh
+    one with `tcgcsv_enabled` back at its `False` default, returns early, and
+    the assertions fail with a bare `calls == 0` that says nothing about why.
+
+    Whether that happens depends on collection ORDER, so a full local run and
+    CI's `--ignore=tests/database` run disagree — the worst kind of red.
+
+    The resolver does `from app.config import get_settings`, so the name in
+    its module namespace is the one it actually calls. Patch that and the
+    result no longer depends on cache state or on what ran first.
+    """
+    monkeypatch.setattr(
+        resolver, "get_settings", lambda: SimpleNamespace(tcgcsv_enabled=True)
+    )
 
 
 @pytest.mark.asyncio
