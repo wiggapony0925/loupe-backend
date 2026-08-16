@@ -114,6 +114,12 @@ async def upsert_me(
             if part
         ),
         excerpt=f"@{username} · {payload.bio or ''} · {payload.location or ''}",
+        # Identity text, not a caption: the handle is on every byline,
+        # comment and follower row the moment it is saved, so "publish it
+        # and review later" would mean the queue is looked at *after* it
+        # has been seen by everyone. Anything that trips is refused and the
+        # author picks something else.
+        policy=moderation.IDENTITY,
     )
 
     if profile is None:

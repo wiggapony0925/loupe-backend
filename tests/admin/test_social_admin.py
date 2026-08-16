@@ -62,7 +62,7 @@ def allow_all(monkeypatch):
     """Screening that passes everything — these tests are about the queue, not
     about the classifier's opinion of the text."""
 
-    async def _screen(text=None, images=None):
+    async def _screen(text=None, images=None, **_policy):
         return moderation.Verdict()
 
     monkeypatch.setattr(moderation, "screen", _screen)

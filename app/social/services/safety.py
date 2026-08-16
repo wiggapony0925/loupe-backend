@@ -114,6 +114,7 @@ async def enforce(
     images: Sequence[tuple[bytes, str]] | None = None,
     excerpt: str | None = None,
     refusal: str | None = None,
+    policy: moderation.Policy | None = None,
 ) -> moderation.Verdict:
     """**The chokepoint.** Screen one piece of user content, act on the verdict.
 
@@ -133,8 +134,16 @@ async def enforce(
 
     Callers must invoke this BEFORE they write, and commit afterwards; the
     case row joins whatever transaction they're already in.
+
+    ``policy`` defaults to :data:`moderation.BALANCED`. Pass
+    :data:`moderation.IDENTITY` for text that becomes part of someone's
+    public identity — a handle or a collection name has no "publish it and
+    review later", because it is already on every row the account touches
+    by the time a moderator opens the queue.
     """
-    verdict = await moderation.screen(text, list(images or []))
+    verdict = await moderation.screen(
+        text, list(images or []), policy=policy or moderation.BALANCED
+    )
     if not verdict.needs_review:
         return verdict
 

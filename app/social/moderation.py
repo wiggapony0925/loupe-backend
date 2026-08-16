@@ -17,11 +17,29 @@
 
 * a hit in :data:`ZERO_TOLERANCE` **blocks the write** — the user gets a
   422 and nothing is stored;
+* a category scoring at or above :data:`BLOCK_SCORE` **blocks the write**
+  too, whatever the category. A classifier returning 0.97 on hate is not
+  making a judgement call, and sending that to a human queue means the
+  slur is live until somebody gets to it — hours on a weekday, days over a
+  weekend. This is the line between "a machine noticed" and "a machine is
+  certain";
 * anything else the classifier flags **publishes and opens a case** for a
   human. A collector app's vocabulary is full of "sick", "insane", "killer"
   and "steal"; auto-deleting on a classifier's say-so would delete real
-  posts every day;
+  posts every day, and that uncertain band is exactly where the false
+  positives live;
 * everything else passes silently.
+
+**Not every surface gets the same policy.** A caption can be published and
+reviewed later. A username cannot — by the time anyone opens the queue it is
+already on every byline, comment and follower row the account appears in. So
+identity text (handles, bios, collection names) is screened with
+:data:`IDENTITY`, which refuses anything that trips at all. Nobody is owed
+their first choice of username.
+
+The numbers here mirror ``moderato``'s ``POLICY_PRESETS`` on the client.
+That is deliberate: the app's preflight and this refusal have to agree, or
+users get told something is fine and then refused anyway.
 
 **Failure is open, but never silent.** If the provider errors, times out, or
 no key is configured, the post goes through AND a case is opened for review.
@@ -34,6 +52,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -64,6 +83,71 @@ ZERO_TOLERANCE = frozenset(
 #: it. The endpoint is tuned for general chat; a marketplace where strangers
 #: transact wants a slightly lower bar for a *human* to glance at something.
 REVIEW_SCORE = 0.55
+
+#: Score at or above which ANY category is refused outright, zero-tolerance
+#: or not. Above this the classifier is not making a judgement call, and
+#: routing it to a human means the content is live in the meantime.
+BLOCK_SCORE = 0.92
+
+#: The documented category names, in the spelling the policy is written in.
+#:
+#: The SDK hands us *field* names ("self_harm_instructions"), and the old
+#: canonicaliser just swapped "_" for "/" — which turns that into
+#: "self/harm/instructions" and matches nothing, so a zero-tolerance entry
+#: spelled "self-harm/instructions" never fired. Comparison now ignores
+#: punctuation entirely and the documented spelling is looked up, so both
+#: sides can be written however reads best.
+CATEGORY_NAMES: tuple[str, ...] = (
+    "harassment",
+    "harassment/threatening",
+    "hate",
+    "hate/threatening",
+    "illicit",
+    "illicit/violent",
+    "self-harm",
+    "self-harm/intent",
+    "self-harm/instructions",
+    "sexual",
+    "sexual/minors",
+    "violence",
+    "violence/graphic",
+)
+
+
+def _key(name: str) -> str:
+    """A spelling-insensitive comparison key: letters and digits only."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+_BY_KEY: dict[str, str] = {_key(name): name for name in CATEGORY_NAMES}
+
+
+def canonical(name: str) -> str:
+    """The documented spelling of a category, however it arrived."""
+    return _BY_KEY.get(_key(name), name.replace("_", "/"))
+
+
+@dataclass(frozen=True)
+class Policy:
+    """How a verdict is read off a classifier result, for one kind of surface."""
+
+    zero_tolerance: frozenset[str] = ZERO_TOLERANCE
+    review_score: float = REVIEW_SCORE
+    block_score: float = BLOCK_SCORE
+
+
+#: Feeds, comments, captions, reviews. Refuse the indefensible and the
+#: near-certain; queue the doubtful; let the community talk like a community.
+BALANCED = Policy()
+
+#: Handles, bios, collection names — permanent, public, and attached to
+#: every row the account touches. There is no "review it later" here, so
+#: anything that trips at all is refused and the author picks another name.
+IDENTITY = Policy(
+    zero_tolerance=ZERO_TOLERANCE | {"hate", "harassment"},
+    review_score=0.4,
+    block_score=0.4,
+)
 
 #: Wall-clock budget. Posting must stay fast; a slow classifier degrades to
 #: "publish and review", which is the same path as an outage.
@@ -141,6 +225,8 @@ def enabled() -> bool:
 async def screen(
     text: str | None = None,
     images: list[tuple[bytes, str]] | None = None,
+    *,
+    policy: Policy = BALANCED,
 ) -> Verdict:
     """Screen a caption and/or its images in ONE call.
 
@@ -176,7 +262,9 @@ async def screen(
         return Verdict()
 
     try:
-        return await asyncio.wait_for(_classify(parts), timeout=TIMEOUT_SECONDS)
+        return await asyncio.wait_for(
+            _classify(parts, policy), timeout=TIMEOUT_SECONDS
+        )
     except TimeoutError:
         logger.warning("moderation timed out after %ss", TIMEOUT_SECONDS)
         return Verdict(action=REVIEW, detail="Screening timed out.")
@@ -185,7 +273,7 @@ async def screen(
         return Verdict(action=REVIEW, detail="Screening failed.")
 
 
-async def _classify(parts: list[Any]) -> Verdict:
+async def _classify(parts: list[Any], policy: Policy = BALANCED) -> Verdict:
     from openai import AsyncOpenAI
 
     client = AsyncOpenAI(api_key=get_settings().openai_api_key)
@@ -195,32 +283,42 @@ async def _classify(parts: list[Any]) -> Verdict:
     resp = await client.moderations.create(model=MODEL, input=parts)
     result = resp.results[0]
 
-    scores: dict[str, float] = dict(result.category_scores or {})
-    flags: dict[str, bool] = dict(result.categories or {})
+    raw_scores: dict[str, float] = dict(result.category_scores or {})
+    raw_flags: dict[str, bool] = dict(result.categories or {})
 
-    # Normalise the SDK's attribute spelling ("sexual_minors") to the
-    # documented category names ("sexual/minors") so ZERO_TOLERANCE reads
-    # the way the policy is written.
-    def canonical(name: str) -> str:
-        return name.replace("_", "/")
+    # One canonicalised score map, built once — the SDK spells attributes
+    # "sexual_minors" and the policy is written "sexual/minors".
+    scores: dict[str, float] = {}
+    for name, score in raw_scores.items():
+        key = canonical(name)
+        scores[key] = max(scores.get(key, 0.0), float(score or 0.0))
 
-    tripped = sorted(
-        (
-            canonical(name)
-            for name, hit in flags.items()
-            if hit or scores.get(name, 0.0) >= REVIEW_SCORE
-        ),
-        key=lambda name: -scores.get(name.replace("/", "_"), 0.0),
-    )
+    names = {canonical(name) for name, hit in raw_flags.items() if hit}
+    names |= {name for name, score in scores.items() if score >= policy.review_score}
+    tripped = sorted(names, key=lambda name: -scores.get(name, 0.0))
     worst = max(scores.values(), default=0.0)
 
-    if any(name in ZERO_TOLERANCE for name in tripped):
+    zero_hit = next((name for name in tripped if name in policy.zero_tolerance), None)
+    if zero_hit is not None:
         return Verdict(
             action=BLOCK,
             categories=tripped,
             score=worst,
-            detail=f"Auto-blocked: {', '.join(tripped)}",
+            detail=f"Auto-blocked ({zero_hit}): {', '.join(tripped)}",
         )
+
+    certain = next(
+        (name for name in tripped if scores.get(name, 0.0) >= policy.block_score),
+        None,
+    )
+    if certain is not None:
+        return Verdict(
+            action=BLOCK,
+            categories=tripped,
+            score=worst,
+            detail=f"Auto-blocked ({certain} at {scores[certain]:.2f})",
+        )
+
     if tripped:
         return Verdict(
             action=REVIEW,
@@ -233,12 +331,18 @@ async def _classify(parts: list[Any]) -> Verdict:
 
 __all__ = [
     "ALLOW",
+    "BALANCED",
     "BLOCK",
+    "BLOCK_SCORE",
+    "CATEGORY_NAMES",
+    "IDENTITY",
     "MODEL",
     "REVIEW",
     "REVIEW_SCORE",
     "ZERO_TOLERANCE",
+    "Policy",
     "Verdict",
+    "canonical",
     "enabled",
     "screen",
 ]

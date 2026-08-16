@@ -24,6 +24,7 @@ from app.schemas.collection import (
     CollectionSummary,
     CollectionUpdate,
 )
+from app.social import moderation
 from app.social.services import safety
 
 
@@ -140,6 +141,9 @@ async def _screen(
         text=text,
         excerpt=f"collection: {text}",
         refusal="That collection name looks like it breaks the community rules.",
+        # A binder name is identity text — it shows up wherever the binder
+        # does, so there is no reviewing it after the fact.
+        policy=moderation.IDENTITY,
     )
 
 

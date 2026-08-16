@@ -603,7 +603,7 @@ async def test_a_flagged_story_comment_is_filed_under_its_own_target_type(
     from app.social import moderation
     from app.social.models import SocialModerationCase, SocialPost, SocialStoryComment
 
-    async def _review(text=None, images=None):
+    async def _review(text=None, images=None, **_policy):
         return moderation.Verdict(
             action=moderation.REVIEW, categories=["harassment"], score=0.8
         )
@@ -652,7 +652,7 @@ async def test_removing_a_story_comment_case_takes_the_comment_down(
     from app.social import moderation
     from app.social.models import SocialModerationCase
 
-    async def _review(text=None, images=None):
+    async def _review(text=None, images=None, **_policy):
         return moderation.Verdict(
             action=moderation.REVIEW, categories=["harassment"], score=0.8
         )
@@ -709,7 +709,7 @@ async def test_removing_a_story_case_takes_the_story_down(
     from app.social import moderation
     from app.social.models import SocialModerationCase
 
-    async def _review(text=None, images=None):
+    async def _review(text=None, images=None, **_policy):
         return moderation.Verdict(
             action=moderation.REVIEW, categories=["violence"], score=0.7
         )

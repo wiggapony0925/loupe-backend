@@ -65,14 +65,14 @@ async def _post(client, user, body: str) -> dict:
 def allow_all(monkeypatch):
     """Screening that passes everything — the default for feed tests."""
 
-    async def _screen(text=None, images=None):
+    async def _screen(text=None, images=None, **_policy):
         return moderation.Verdict()
 
     monkeypatch.setattr(moderation, "screen", _screen)
 
 
 def _verdict(action: str, categories: list[str]):
-    async def _screen(text=None, images=None):
+    async def _screen(text=None, images=None, **_policy):
         return moderation.Verdict(
             action=action,
             categories=categories,
@@ -93,6 +93,101 @@ def test_zero_tolerance_categories_are_the_ones_we_will_not_publish():
     assert "violence/graphic" in moderation.ZERO_TOLERANCE
     # "harassment" alone is NOT zero-tolerance — it publishes and queues.
     assert "harassment" not in moderation.ZERO_TOLERANCE
+
+
+class _FakeResult:
+    def __init__(self, scores: dict[str, float], flags: dict[str, bool] | None = None):
+        self.category_scores = scores
+        self.categories = flags or {}
+
+
+async def _decide(
+    scores: dict[str, float],
+    flags: dict[str, bool] | None = None,
+    policy: moderation.Policy = moderation.BALANCED,
+    *,
+    monkeypatch,
+) -> moderation.Verdict:
+    """Run the real policy over a canned classifier result, no network."""
+
+    class _Client:
+        class moderations:  # mirrors the SDK's shape
+            @staticmethod
+            async def create(**_kwargs):
+                class _Resp:
+                    results = [_FakeResult(scores, flags)]
+
+                return _Resp()
+
+    import sys
+    import types
+
+    module = types.ModuleType("openai")
+    module.AsyncOpenAI = lambda **_kwargs: _Client()  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openai", module)
+    return await moderation._classify([{"type": "text", "text": "x"}], policy)
+
+
+def test_category_names_survive_the_sdks_attribute_spelling():
+    """The SDK hands us field names; the policy is written in the documented
+    ones. Before this, "self_harm_instructions" canonicalised to
+    "self/harm/instructions" and matched no zero-tolerance entry at all — so
+    the one category we most wanted refused never was."""
+    assert moderation.canonical("self_harm_instructions") == "self-harm/instructions"
+    assert moderation.canonical("sexual_minors") == "sexual/minors"
+    assert moderation.canonical("hate") == "hate"
+    assert moderation.canonical("self-harm/instructions") in moderation.ZERO_TOLERANCE
+
+
+@pytest.mark.asyncio
+async def test_self_harm_instructions_are_actually_refused(monkeypatch):
+    verdict = await _decide(
+        {"self_harm_instructions": 0.6},
+        {"self_harm_instructions": True},
+        monkeypatch=monkeypatch,
+    )
+    assert verdict.blocked
+    assert "self-harm/instructions" in verdict.categories
+
+
+@pytest.mark.asyncio
+async def test_a_near_certain_hit_is_refused_without_a_human(monkeypatch):
+    """The automation line. 0.97 on hate is not a judgement call, and sending
+    it to the queue means the slur is live until somebody gets to it."""
+    verdict = await _decide({"hate": 0.97}, {"hate": True}, monkeypatch=monkeypatch)
+    assert verdict.blocked
+    assert "0.97" in (verdict.detail or "")
+
+
+@pytest.mark.asyncio
+async def test_the_uncertain_middle_still_publishes_and_queues(monkeypatch):
+    """Where the false positives live. "this pull is sick" scores here."""
+    verdict = await _decide({"harassment": 0.7}, {"harassment": True}, monkeypatch=monkeypatch)
+    assert not verdict.blocked
+    assert verdict.needs_review
+
+
+@pytest.mark.asyncio
+async def test_clean_content_passes_silently(monkeypatch):
+    verdict = await _decide({"hate": 0.01, "violence": 0.02}, monkeypatch=monkeypatch)
+    assert verdict.action == moderation.ALLOW
+    assert not verdict.needs_review
+
+
+@pytest.mark.asyncio
+async def test_identity_text_is_refused_where_a_caption_would_be_queued(monkeypatch):
+    """A handle has no "review it later" — by then it is on every byline."""
+    scores, flags = {"hate": 0.62}, {"hate": True}
+    caption = await _decide(scores, flags, moderation.BALANCED, monkeypatch=monkeypatch)
+    handle = await _decide(scores, flags, moderation.IDENTITY, monkeypatch=monkeypatch)
+    assert caption.action == moderation.REVIEW
+    assert handle.action == moderation.BLOCK
+
+
+@pytest.mark.asyncio
+async def test_identity_policy_still_lets_an_ordinary_name_through(monkeypatch):
+    verdict = await _decide({"hate": 0.02}, policy=moderation.IDENTITY, monkeypatch=monkeypatch)
+    assert verdict.action == moderation.ALLOW
 
 
 @pytest.mark.asyncio
@@ -119,7 +214,7 @@ async def test_no_key_means_screening_is_off_not_that_everything_is_suspect(
 
 @pytest.mark.asyncio
 async def test_a_provider_error_fails_open_but_still_queues(monkeypatch):
-    async def _boom(_parts):
+    async def _boom(_parts, _policy=None):
         raise RuntimeError("openai is down")
 
     monkeypatch.setattr(moderation, "enabled", lambda: True)
@@ -198,7 +293,7 @@ async def test_a_blocked_comment_is_refused(
 ):
     await _claim(client, created_user, "poster4")
 
-    async def _clean(text=None, images=None):
+    async def _clean(text=None, images=None, **_policy):
         return moderation.Verdict()
 
     monkeypatch.setattr(moderation, "screen", _clean)

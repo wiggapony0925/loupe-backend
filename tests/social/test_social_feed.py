@@ -1296,7 +1296,7 @@ async def test_an_edit_is_re_screened(client, created_user, monkeypatch):
     """
     from app.social import moderation
 
-    async def block_the_second_thing(text=None, images=None):
+    async def block_the_second_thing(text=None, images=None, **_policy):
         if text and "banned" in text:
             return moderation.Verdict(
                 action=moderation.BLOCK, categories=["harassment"], score=0.99
